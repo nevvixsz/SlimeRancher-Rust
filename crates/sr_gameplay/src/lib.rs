@@ -27,8 +27,9 @@ pub use economy::{
     SLIME_TOYS_UNLOCK_RANK, STAT_PLORTS_SOLD, VIKTOR_RECUR_AMOUNT,
 };
 pub use science::{
-    builtin_blueprint_unlock_rules, builtin_gadget_definitions, BlueprintUnlockRule,
-    GadgetDirector, GadgetDirectorStepEvents, GadgetError, REFINERY_MAX,
+    builtin_blueprint_unlock_rules, builtin_gadget_definitions, spec_for_extractor,
+    BlueprintUnlockRule, ExtractorProduceEntry, ExtractorSpec, ExtractorStepEvents,
+    ExtractorSystem, GadgetDirector, GadgetDirectorStepEvents, GadgetError, REFINERY_MAX,
 };
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{

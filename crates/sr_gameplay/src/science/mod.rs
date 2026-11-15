@@ -2,8 +2,12 @@
 //! Teleporters/WarpDepots/GordoSnares/Utilities, and Drones).
 
 pub mod director;
+pub mod extractors;
 
 pub use director::{
     builtin_blueprint_unlock_rules, builtin_gadget_definitions, BlueprintUnlockRule,
     GadgetDirector, GadgetDirectorStepEvents, GadgetError, REFINERY_MAX,
+};
+pub use extractors::{
+    spec_for_extractor, ExtractorProduceEntry, ExtractorSpec, ExtractorStepEvents, ExtractorSystem,
 };
