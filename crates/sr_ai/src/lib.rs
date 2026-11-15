@@ -1,8 +1,16 @@
 //! Slime AI, emotions, subbehaviour plexer, diet/largo/tarr lifecycle, unique abilities, and Gordos.
 
+pub mod abilities_classic;
 pub mod eat;
 pub mod emotions;
 pub mod plexer;
+
+pub use abilities_classic::{
+    slime_has_trait, ClassicAbilityEvents, ClassicAbilityState, CrystalCluster, RadPhase,
+    RockRollPhase, BOOM_EXPLODE_POWER, BOOM_EXPLODE_RADIUS, CRYSTAL_DAMAGE,
+    PHOSPHOR_DAYLIGHT_BURN_SECS, PHOSPHOR_HOVER_HEIGHT, RAD_BASE_RADIUS, RAD_EXPAND_FACTOR,
+    ROCK_ROLL_DAMAGE,
+};
 
 pub use eat::{
     step_slime_eat_and_tarr, EatStepEvents, SlimeEatState, DEFAULT_FERAL_LIFETIME_HOURS,
