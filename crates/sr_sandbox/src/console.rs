@@ -96,7 +96,11 @@ impl DevConsole {
         let Some(ident) = IdentifiableId::from_name(args[0]) else {
             return format!("Unknown IdentifiableId: '{}'", args[0]);
         };
-        let count: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1).clamp(1, 200);
+        let count: usize = args
+            .get(1)
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(1)
+            .clamp(1, 200);
         let fwd = sim.motor.look_dir();
         let right = sim.motor.right_xz();
         let base = sim.model.player.position + fwd * 3.0 + Vec3::Y * 1.0;
@@ -115,7 +119,11 @@ impl DevConsole {
         let Some(ident) = IdentifiableId::from_name(args[0]) else {
             return format!("Unknown IdentifiableId: '{}'", args[0]);
         };
-        let count: i32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1).clamp(1, 100);
+        let count: i32 = args
+            .get(1)
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(1)
+            .clamp(1, 100);
         let world_time = sim.model.world.world_time;
         let mut added = 0;
         for _ in 0..count {
@@ -170,7 +178,11 @@ impl DevConsole {
             );
         }
         if args[0].eq_ignore_ascii_case("day") {
-            let day: i32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
+            let day: i32 = args
+                .get(1)
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(1)
+                .max(1);
             sim.model.world.world_time = (day - 1) as f64 * 86400.0 + 9.0 * 3600.0;
             sim.model.world.last_world_time = Some(sim.model.world.world_time);
         } else if let Some(rest) = args[0].strip_prefix('+') {
@@ -224,7 +236,11 @@ impl DevConsole {
     }
 
     fn cmd_vac(&self, sim: &mut Simulation, args: &[&str]) -> String {
-        let ticks: usize = args.first().and_then(|s| s.parse().ok()).unwrap_or(15).clamp(1, 300);
+        let ticks: usize = args
+            .first()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(15)
+            .clamp(1, 300);
         let mut total = 0;
         let mut held = None;
         for _ in 0..ticks {
@@ -319,9 +335,13 @@ impl DevConsole {
     }
 
     fn cmd_move(&self, sim: &mut Simulation, args: &[&str]) -> String {
-        let x: f32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(0.0);
-        let z: f32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1.0);
-        let secs: f32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1.0).clamp(0.05, 30.0);
+        let x: f32 = args.first().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
+        let z: f32 = args.get(1).and_then(|s| s.parse::<f32>().ok()).unwrap_or(1.0);
+        let secs: f32 = args
+            .get(2)
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1.0)
+            .clamp(0.05, 30.0);
         let steps = (secs * 60.0).round() as usize;
         for _ in 0..steps {
             sim.step_with_input(
@@ -339,7 +359,11 @@ impl DevConsole {
     }
 
     fn cmd_step(&self, sim: &mut Simulation, args: &[&str]) -> String {
-        let secs: f32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1.0).clamp(0.01, 120.0);
+        let secs: f32 = args
+            .first()
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1.0)
+            .clamp(0.01, 120.0);
         let steps = (secs * 60.0).round().max(1.0) as usize;
         for _ in 0..steps {
             sim.step(1.0 / 60.0);
