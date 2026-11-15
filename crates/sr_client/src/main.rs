@@ -8,10 +8,9 @@ mod world_sync;
 
 use std::path::PathBuf;
 
-use bevy::asset::UnapprovedPathMode;
 use bevy::prelude::*;
 
-use assets::{load_client_assets, start_bgm_system, Language};
+use assets::{find_workspace_root, load_client_assets, start_bgm_system, Language};
 use hud::{setup_hud, update_hud};
 use player_input::{handle_cursor_grab, step_simulation_system, CameraLookState};
 use sky_lighting::{setup_sky_and_light, update_sky_and_light};
@@ -65,6 +64,7 @@ struct CliArgsResource(CliArgs);
 
 fn main() {
     let cli = parse_cli();
+    let asset_root = find_workspace_root();
 
     App::new()
         .add_plugins(
@@ -78,7 +78,7 @@ fn main() {
                     ..default()
                 })
                 .set(AssetPlugin {
-                    unapproved_path_mode: UnapprovedPathMode::Allow,
+                    file_path: asset_root.to_string_lossy().into_owned(),
                     ..default()
                 }),
         )

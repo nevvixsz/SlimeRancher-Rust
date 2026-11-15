@@ -76,44 +76,67 @@ impl ClientAssets {
     }
 }
 
-pub fn find_local_assets_dir() -> Option<PathBuf> {
-    let candidates = [
-        PathBuf::from("local_assets"),
-        PathBuf::from("../local_assets"),
-        PathBuf::from("../../local_assets"),
-    ];
-    candidates.into_iter().find(|p| p.is_dir())
-}
-
-fn resolve_manifest_path(root: &Path, rel: &str) -> PathBuf {
-    let p = root.join(rel);
-    std::fs::canonicalize(&p).unwrap_or(p)
-}
-
-fn load_font(asset_server: &AssetServer, local_root: Option<&Path>) -> Handle<Font> {
-    let mut font_candidates: Vec<PathBuf> = Vec::new();
-    if let Some(root) = local_root {
-        font_candidates.push(root.join("fonts/ui.ttf"));
-        font_candidates.push(root.join("fonts/SegoeUI.ttf"));
+pub fn find_workspace_root() -> PathBuf {
+    for cand in [PathBuf::from("."), PathBuf::from(".."), PathBuf::from("../..")] {
+        if cand.join("Cargo.toml").is_file() || cand.join("local_assets").is_dir() {
+            let abs = std::fs::canonicalize(&cand).unwrap_or(cand);
+            #[cfg(target_os = "windows")]
+            {
+                let s = abs.to_string_lossy();
+                if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                    return PathBuf::from(stripped);
+                }
+            }
+            return abs;
+        }
     }
-    font_candidates.push(PathBuf::from("assets/fonts/ui.ttf"));
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+pub fn find_local_assets_dir() -> Option<PathBuf> {
+    let root = find_workspace_root().join("local_assets");
+    if root.is_dir() {
+        Some(root)
+    } else {
+        None
+    }
+}
+
+fn asset_rel_path(rel_inside_local: &str) -> String {
+    format!("local_assets/{}", rel_inside_local.trim_start_matches('/'))
+}
+
+fn load_font(asset_server: &AssetServer, workspace_root: &Path) -> Handle<Font> {
+    let cached_local = workspace_root.join("local_assets").join("fonts").join("ui.ttf");
+    if cached_local.is_file() {
+        return asset_server.load("local_assets/fonts/ui.ttf");
+    }
+    if workspace_root.join("assets").join("fonts").join("ui.ttf").is_file() {
+        return asset_server.load("assets/fonts/ui.ttf");
+    }
+
+    let mut sys_fonts: Vec<PathBuf> = Vec::new();
     #[cfg(target_os = "windows")]
     {
-        font_candidates.push(PathBuf::from(r"C:\Windows\Fonts\segoeui.ttf"));
-        font_candidates.push(PathBuf::from(r"C:\Windows\Fonts\arial.ttf"));
-        font_candidates.push(PathBuf::from(r"C:\Windows\Fonts\tahoma.ttf"));
+        sys_fonts.push(PathBuf::from(r"C:\Windows\Fonts\segoeui.ttf"));
+        sys_fonts.push(PathBuf::from(r"C:\Windows\Fonts\arial.ttf"));
+        sys_fonts.push(PathBuf::from(r"C:\Windows\Fonts\tahoma.ttf"));
     }
     #[cfg(not(target_os = "windows"))]
     {
-        font_candidates.push(PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"));
-        font_candidates.push(PathBuf::from("/usr/share/fonts/TTF/DejaVuSans.ttf"));
+        sys_fonts.push(PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"));
+        sys_fonts.push(PathBuf::from("/usr/share/fonts/TTF/DejaVuSans.ttf"));
     }
 
-    for path in font_candidates {
-        if path.is_file() {
-            let abs = std::fs::canonicalize(&path).unwrap_or(path);
-            info!("Loaded UI font: {}", abs.display());
-            return asset_server.load(abs);
+    for src in sys_fonts {
+        if src.is_file() {
+            if let Some(parent) = cached_local.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::copy(&src, &cached_local).is_ok() {
+                info!("Cached UI font from {} -> {}", src.display(), cached_local.display());
+                return asset_server.load("local_assets/fonts/ui.ttf");
+            }
         }
     }
     Handle::default()
@@ -123,6 +146,7 @@ pub fn load_client_assets(
     asset_server: &AssetServer,
     initial_lang: Language,
 ) -> ClientAssets {
+    let workspace_root = find_workspace_root();
     let local_root = find_local_assets_dir();
     let manifest = if let Some(ref root) = local_root {
         let m_path = root.join("manifest.json");
@@ -148,7 +172,7 @@ pub fn load_client_assets(
     let loc_en =
         LocalizationSet::load_with_override("en", local_root.as_deref()).unwrap_or_default();
 
-    let ui_font = load_font(asset_server, local_root.as_deref());
+    let ui_font = load_font(asset_server, &workspace_root);
 
     let mut ground_texture = None;
     let mut water_texture = None;
@@ -162,16 +186,16 @@ pub fn load_client_assets(
     let mut sfx_airburst = None;
     let mut bgm_ranch = None;
 
-    if let Some(ref root) = local_root {
+    if local_root.is_some() {
         let load_tex = |candidates: &[&str]| -> Option<Handle<Image>> {
             manifest
                 .find_texture(candidates)
-                .map(|rel| asset_server.load(resolve_manifest_path(root, rel)))
+                .map(|rel| asset_server.load(asset_rel_path(rel)))
         };
         let load_aud = |candidates: &[&str]| -> Option<Handle<AudioSource>> {
             manifest
                 .find_audio(candidates)
-                .map(|rel| asset_server.load(resolve_manifest_path(root, rel)))
+                .map(|rel| asset_server.load(asset_rel_path(rel)))
         };
 
         ground_texture = load_tex(&["grass", "terrain_grass", "ranch_ground", "dirt"]);
