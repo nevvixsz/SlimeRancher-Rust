@@ -15,7 +15,7 @@ pub struct SlimeAppearanceDirector {
 impl SlimeAppearanceDirector {
     /// Ensures every slime in `defs` has `AppearanceSaveSet::Classic` unlocked and selected by default.
     pub fn init_defaults(model: &mut GameModel, defs: &SlimeDefinitions) {
-        for def in &defs.slimes {
+        for def in defs.slimes.values() {
             model
                 .appearances
                 .unlocks
@@ -81,7 +81,7 @@ impl SlimeAppearanceDirector {
         model.appearances.selections.insert(slime_id, set);
 
         let mut updated = vec![slime_id];
-        for def in &defs.slimes {
+        for def in defs.slimes.values() {
             if def.is_largo && def.base_slimes.contains(&slime_id) {
                 let all_secret = !def.base_slimes.is_empty()
                     && def.base_slimes.iter().all(|&base_id| {

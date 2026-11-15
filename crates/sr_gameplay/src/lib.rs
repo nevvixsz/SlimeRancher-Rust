@@ -1165,10 +1165,8 @@ mod tests {
             .set_unique_progress(ProgressType::UnlockOvergrowth);
         assert!(WildsSystem::can_enter_wilds(&gm, &mode));
 
-        let entry_ev = wilds.enter_wilds(&mut gm, &mode, &mut prog).unwrap();
-        assert!(entry_ev
-            .newly_set
-            .contains(&ProgressType::EnterZoneOgdenRanch));
+        let _entry_ev = wilds.enter_wilds(&mut gm, &mode, &mut prog).unwrap();
+        assert!(gm.progress.has_progress(ProgressType::EnterZoneOgdenRanch));
         assert!(gm.progress.has_progress(ProgressType::UnlockWilds));
 
         wilds.register_node("node_a", Vec3::new(10.0, 0.0, 10.0));
@@ -1217,10 +1215,10 @@ mod tests {
 
         gm.progress.set_unique_progress(ProgressType::UnlockQuarry);
         gm.progress.set_unique_progress(ProgressType::UnlockGrotto);
-        let entry = valley
+        let _entry = valley
             .enter_valley(&mut gm, &mode, &mut prog, &mut ammo)
             .unwrap();
-        assert!(entry.newly_set.contains(&ProgressType::UnlockValley));
+        assert!(gm.progress.has_progress(ProgressType::UnlockValley));
         assert_eq!(gm.player.ammo_mode, AmmoMode::NimbleValley);
 
         valley.register_generator(
@@ -1256,7 +1254,7 @@ mod tests {
 
         // Advance past countdown -> Active & spawn 3 QuicksilverSlimes
         gm.world.world_time += 10.0;
-        let ev1 = valley.step(&mut gm, &mut pw, &mut ammo, &mut pedia, &mut rng);
+        let ev1 = valley.step(&mut gm, &mode, &mut pw, &mut ammo, &mut pedia, &mut rng);
         assert_eq!(ev1.activated_generators, vec!["gen_1".to_string()]);
         assert_eq!(ev1.spawned_slimes.len(), 3);
 
@@ -1269,7 +1267,7 @@ mod tests {
         let plorts = valley.shock_slimes_in_radius(&mut gm, &mut pw, Vec3::ZERO, 10.0);
         assert_eq!(plorts.len(), 3);
         gm.world.world_time += f64::from(DEFAULT_PLORT_COLLECT_MINS) * 60.0 + 1.0;
-        let ev2 = valley.step(&mut gm, &mut pw, &mut ammo, &mut pedia, &mut rng);
+        let ev2 = valley.step(&mut gm, &mode, &mut pw, &mut ammo, &mut pedia, &mut rng);
         assert_eq!(ev2.collected_plorts, 3);
         assert_eq!(ev2.pedia_unlocked, Some(PediaId::QuicksilverSlime));
         assert_eq!(
@@ -1305,7 +1303,7 @@ mod tests {
 
         gm.progress.set_unique_progress(ProgressType::UnlockLab);
         gm.progress.set_unique_progress(ProgressType::UnlockRuins);
-        gm.player.upgrades.insert(PlayerUpgrade::TreasureCracker2);
+        gm.player.upgrades.push(PlayerUpgrade::TreasureCracker2);
         assert!(SlimulationsSystem::can_enter_viktor_lab(&gm, &mode));
 
         slim.register_imposto(
@@ -1328,10 +1326,10 @@ mod tests {
         );
         slim.register_debug_spray_source(&mut gm, "spray_1", Vec3::new(2.0, 0.0, 2.0));
 
-        let entry = slim
+        let _entry = slim
             .enter_slimulation(&mut gm, &mode, &mut prog, &mut tut)
             .unwrap();
-        assert!(entry.newly_set.contains(&ProgressType::EnterZoneSlimulation));
+        assert!(gm.progress.has_progress(ProgressType::EnterZoneSlimulation));
         assert!(slim.consume_debug_spray_source(&mut gm, &mode, &mut ammo, &mut tut, "spray_1"));
         assert_eq!(
             gm.player.ammo_dict[&AmmoMode::Default].get_slot_id(4),
@@ -1339,7 +1337,7 @@ mod tests {
         );
         assert_eq!(
             gm.player.ammo_dict[&AmmoMode::Default].get_slot_count(4),
-            GLITCH_DEBUG_SPRAY_MAX_AMMO
+            crate::ammo::GLITCH_DEBUG_SPRAY_MAX_AMMO
         );
 
         let glitched = slim.expose_imposto(&mut gm, &mut pw, "imp_1", &mut rng);
