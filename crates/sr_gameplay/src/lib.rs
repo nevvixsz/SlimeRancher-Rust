@@ -41,10 +41,11 @@ pub use science::{
     SNARED_GORDO_TARGET_COUNT, TAMING_BELL_RANGE, WARP_DEPOT_MAX_STACK,
 };
 pub use story::{
-    DelayedTrackerRule, MailDirector, MailReadOutcome, MailStepEvents, ProgressDirector,
-    ProgressStepEvents, CASEY_MAIL_FINAL, CASEY_MAIL_PREFIX, HOBSON_MAIL_KEY, MOCHI_MAIL_KEY,
-    OGDEN_MAIL_KEY, PARTNER_MAIL_KEY, PARTNER_UNLOCK_TIME, SECRET_STYLE_MAIL_DELAY,
-    SECRET_STYLE_MAIL_KEY, VIKTOR_MAIL_KEY,
+    DelayedTrackerRule, JournalEntryDef, MailDirector, MailReadOutcome, MailStepEvents,
+    PediaDirector, ProgressDirector, ProgressStepEvents, TutorialDirector, CASEY_MAIL_FINAL,
+    CASEY_MAIL_PREFIX, HOBSON_MAIL_KEY, MOCHI_MAIL_KEY, OGDEN_MAIL_KEY, PARTNER_MAIL_KEY,
+    PARTNER_UNLOCK_TIME, PEDIA_CATEGORY_HEADERS, PEDIA_HIDDEN_ENTRIES, PEDIA_INIT_UNLOCKED,
+    SECRET_STYLE_MAIL_DELAY, SECRET_STYLE_MAIL_KEY, VIKTOR_MAIL_KEY,
 };
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
