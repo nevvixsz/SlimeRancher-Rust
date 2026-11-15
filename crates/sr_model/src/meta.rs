@@ -6,13 +6,15 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use sr_ids::{IdentifiableId, PediaId, ProgressType};
 
-use crate::enums::{AppearanceSaveSet, Instrument, MailType, TutorialId};
+use crate::enums::{AppearanceSaveSet, Instrument, MailType, ProgressTrackerId, TutorialId};
 
 /// Port of `ProgressModel`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProgressModel {
     pub progress_dict: HashMap<ProgressType, i32>,
     pub delayed_progress_time_dict: HashMap<ProgressType, f64>,
+    #[serde(default)]
+    pub delayed_trackers: HashMap<ProgressTrackerId, f64>,
 }
 
 impl ProgressModel {
@@ -22,6 +24,36 @@ impl ProgressModel {
 
     pub fn get_progress(&self, ptype: ProgressType) -> i32 {
         self.progress_dict.get(&ptype).copied().unwrap_or(0)
+    }
+
+    pub fn has_progress(&self, ptype: ProgressType) -> bool {
+        self.get_progress(ptype) > 0
+    }
+
+    pub fn set_unique_progress(&mut self, ptype: ProgressType) -> bool {
+        if !self.progress_dict.contains_key(&ptype) {
+            self.progress_dict.insert(ptype, 1);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn add_progress(&mut self, ptype: ProgressType) -> i32 {
+        let entry = self.progress_dict.entry(ptype).or_insert(0);
+        *entry += 1;
+        *entry
+    }
+
+    pub fn get_delayed_tracker_time(&self, id: ProgressTrackerId) -> f64 {
+        self.delayed_trackers
+            .get(&id)
+            .copied()
+            .unwrap_or(f64::INFINITY)
+    }
+
+    pub fn set_delayed_tracker_time(&mut self, id: ProgressTrackerId, time: f64) {
+        self.delayed_trackers.insert(id, time);
     }
 }
 
@@ -38,10 +70,14 @@ pub struct MailEntry {
 pub struct MailModel {
     pub all_mail: Vec<MailEntry>,
     pub has_new_mail: bool,
+    #[serde(default)]
+    pub has_partner_mail: bool,
+    #[serde(default)]
+    pub has_secret_style_mail: bool,
 }
 
 impl MailModel {
-    pub fn send_mail(&mut self, mail_type: MailType, key: impl Into<String>) {
+    pub fn send_mail(&mut self, mail_type: MailType, key: impl Into<String>) -> bool {
         let key = key.into();
         if !self
             .all_mail
@@ -54,6 +90,9 @@ impl MailModel {
                 read: false,
             });
             self.has_new_mail = true;
+            true
+        } else {
+            false
         }
     }
 
@@ -64,6 +103,12 @@ impl MailModel {
             }
         }
         self.has_new_mail = self.all_mail.iter().any(|m| !m.read);
+    }
+
+    pub fn has_read_mail(&self, mail_type: MailType, key: &str) -> bool {
+        self.all_mail
+            .iter()
+            .any(|m| m.mail_type == mail_type && m.key == key && m.read)
     }
 }
 
@@ -115,4 +160,10 @@ pub struct AchievesModel {
     pub earned_achievements: HashSet<String>,
     pub counts: HashMap<String, i32>,
     pub enums: HashMap<String, HashSet<i32>>,
+    #[serde(default)]
+    pub doubles: HashMap<String, f64>,
+    #[serde(default)]
+    pub game_int_stats: HashMap<String, i32>,
+    #[serde(default)]
+    pub game_id_dicts: HashMap<String, HashMap<IdentifiableId, i32>>,
 }

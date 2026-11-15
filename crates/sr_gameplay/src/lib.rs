@@ -6,6 +6,7 @@ pub mod economy;
 pub mod player;
 pub mod ranch;
 pub mod science;
+pub mod story;
 pub mod vacuum;
 
 pub use actors::{
@@ -38,6 +39,14 @@ pub use science::{
     DRONE_BATTERY_DURATION_HOURS, DRONE_BATTERY_DURATION_SECS, DRONE_FASTFORWARD_CYCLE_SECS,
     DRONE_FLY_SPEED, HYDRO_TURRET_RANGE, MED_STATION_HEAL_PER_SEC, REFINERY_MAX,
     SNARED_GORDO_TARGET_COUNT, TAMING_BELL_RANGE, WARP_DEPOT_MAX_STACK,
+};
+pub use story::{
+    AchievementId, AchievementTier, AchievementsDirector, DelayedTrackerRule, EndGamePlortEntry,
+    EndGameSummary, JournalEntryDef, MailDirector, MailReadOutcome, MailStepEvents, PediaDirector,
+    ProgressDirector, ProgressStepEvents, StoryRuntime, StoryStepEvents, TutorialDirector,
+    CASEY_MAIL_FINAL, CASEY_MAIL_PREFIX, HOBSON_MAIL_KEY, MOCHI_MAIL_KEY, OGDEN_MAIL_KEY,
+    PARTNER_MAIL_KEY, PARTNER_UNLOCK_TIME, PEDIA_CATEGORY_HEADERS, PEDIA_HIDDEN_ENTRIES,
+    PEDIA_INIT_UNLOCKED, SECRET_STYLE_MAIL_DELAY, SECRET_STYLE_MAIL_KEY, VIKTOR_MAIL_KEY,
 };
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
@@ -858,5 +867,278 @@ mod tests {
         );
         assert_eq!(ff_ev.delivered.len(), 1);
         assert_eq!(GadgetDirector::get_refinery_count(&gm, IdentifiableId::RockPlort), 1);
+    }
+
+    #[test]
+    fn story_progress_casey_chain_and_hobson_end() {
+        use sr_ids::{GadgetId, PlayerUpgrade, ProgressType};
+        use sr_model::{GameModel, MailType, ProgressTrackerId};
+
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut rt = StoryRuntime::default();
+        rt.init_model(&mut gm, &mode);
+
+        // Welcome mail present at start
+        assert!(gm
+            .mail
+            .all_mail
+            .iter()
+            .any(|m| m.mail_type == MailType::Personal && m.key == "welcome"));
+
+        // casey_1 unlocks 3h after start with SLIME_DOORS >= 0
+        let ev0 = rt.step(&mut gm, &mode);
+        assert!(ev0.progress.sent_mail_keys.is_empty());
+        gm.world.world_time += 3.1 * 3600.0;
+        let ev1 = rt.step(&mut gm, &mode);
+        assert!(ev1.progress.sent_mail_keys.contains(&"casey_1".to_string()));
+
+        // Reading casey_1 queues wistful music & arms casey_2 (48h)
+        let r1 = MailDirector::select_and_read_mail(
+            &mut gm,
+            &mode,
+            &mut rt.progress,
+            MailType::Personal,
+            "casey_1",
+        );
+        assert!(r1.was_unread);
+        assert!(r1.wistful_music_queued);
+        assert_eq!(rt.on_returned_to_ranch(), (false, true));
+
+        gm.world.world_time += 48.1 * 3600.0;
+        let ev2 = rt.step(&mut gm, &mode);
+        assert!(ev2.progress.sent_mail_keys.contains(&"casey_2".to_string()));
+
+        // Fast-forward story flags up to HOBSON_END + reading casey_10 -> casey_11 -> hobson_1
+        let mut dummy_ev = ProgressStepEvents::default();
+        rt.progress.set_progress(&mut gm, &mode, ProgressType::SlimeDoors, 5, &mut dummy_ev);
+        rt.progress.set_progress(&mut gm, &mode, ProgressType::PlortDoor, 1, &mut dummy_ev);
+        rt.progress.set_progress(&mut gm, &mode, ProgressType::UnlockDesert, 1, &mut dummy_ev);
+        rt.progress.set_progress(&mut gm, &mode, ProgressType::HobsonEnd, 1, &mut dummy_ev);
+
+        for k in ["casey_2", "casey_3", "casey_4", "casey_5", "casey_6", "casey_7", "casey_8", "casey_9", "casey_10"] {
+            gm.mail.send_mail(MailType::Personal, k);
+            gm.mail.mark_read(MailType::Personal, k);
+        }
+        rt.progress.unlocked_trackers.insert(ProgressTrackerId::Casey1);
+        rt.progress.unlocked_trackers.insert(ProgressTrackerId::Casey2);
+        for t in [
+            ProgressTrackerId::Casey3,
+            ProgressTrackerId::Casey4,
+            ProgressTrackerId::Casey5,
+            ProgressTrackerId::Casey6,
+            ProgressTrackerId::Casey7,
+            ProgressTrackerId::Casey8,
+            ProgressTrackerId::Casey9,
+            ProgressTrackerId::Casey10,
+        ] {
+            rt.progress.unlocked_trackers.insert(t);
+        }
+
+        // Arm casey_11 (6h delay)
+        let _ = rt.step(&mut gm, &mode);
+        gm.world.world_time += 6.1 * 3600.0;
+        let ev11 = rt.step(&mut gm, &mode);
+        assert!(ev11.progress.sent_mail_keys.contains(&"casey_11".to_string()));
+
+        // Reading casey_11 queues end credits & arms hobson_1 (0.167h)
+        let r11 = MailDirector::select_and_read_mail(
+            &mut gm,
+            &mode,
+            &mut rt.progress,
+            MailType::Personal,
+            "casey_11",
+        );
+        assert!(r11.credits_queued);
+        assert_eq!(rt.on_returned_to_ranch(), (true, false));
+
+        gm.world.world_time += 0.2 * 3600.0;
+        let ev_h = rt.step(&mut gm, &mode);
+        assert!(ev_h.progress.sent_mail_keys.contains(&"hobson_1".to_string()));
+
+        // Reading hobson_1 unlocks HOBSON_END_UNLOCK
+        MailDirector::select_and_read_mail(
+            &mut gm,
+            &mode,
+            &mut rt.progress,
+            MailType::Personal,
+            "hobson_1",
+        );
+        assert!(gm.progress.has_progress(ProgressType::HobsonEndUnlock));
+
+        // 7Zee CorporatePartner progress unlocks MarketLink (11), Ammo4 (20), TeleporterGold (28)
+        rt.progress.set_progress(&mut gm, &mode, ProgressType::CorporatePartner, 28, &mut dummy_ev);
+        assert!(gm.player.has_upgrade(PlayerUpgrade::Ammo4));
+        assert!(gm.player.has_upgrade(PlayerUpgrade::GoldenSureshot));
+        assert!(gm.gadgets.blueprints.contains(&GadgetId::MarketLink));
+        assert!(gm.gadgets.blueprints.contains(&GadgetId::TeleporterGold));
+    }
+
+    #[test]
+    fn story_mail_partner_secret_style_and_mission_invites() {
+        use sr_ids::{PediaId, PlayerUpgrade, ProgressType};
+        use sr_model::{GameModel, MailType, TutorialId};
+
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut rt = StoryRuntime::default();
+        rt.init_model(&mut gm, &mode);
+        rt.mail.secret_style_dlc_enabled = true;
+
+        // First step schedules secret_styles (+600s); advancing past PARTNER_UNLOCK_TIME sends both
+        let _ = rt.step(&mut gm, &mode);
+        gm.world.world_time = PARTNER_UNLOCK_TIME + 1.0;
+        let ev = rt.step(&mut gm, &mode);
+        assert!(ev.mail.sent_mail.iter().any(|(_, k)| k == PARTNER_MAIL_KEY));
+        assert!(ev.mail.sent_mail.iter().any(|(_, k)| k == SECRET_STYLE_MAIL_KEY));
+
+        let read_p = MailDirector::select_and_read_mail(
+            &mut gm,
+            &mode,
+            &mut rt.progress,
+            MailType::Personal,
+            PARTNER_MAIL_KEY,
+        );
+        assert_eq!(read_p.unlocked_pedia, Some(PediaId::Partner));
+        assert!(gm.progress.has_progress(ProgressType::CorporatePartnerUnlock));
+
+        // Mission unlock conditions: Lab + Ruins + TreasureCracker2 -> viktor_invite
+        let mut pev = ProgressStepEvents::default();
+        rt.progress.set_progress(&mut gm, &mode, ProgressType::UnlockLab, 1, &mut pev);
+        rt.progress.set_progress(&mut gm, &mode, ProgressType::UnlockRuins, 1, &mut pev);
+        PlayerController::grant_upgrade(&mut gm.player, PlayerUpgrade::TreasureCracker2, 100.0);
+        let ev_v = rt.step(&mut gm, &mode);
+        assert!(gm.progress.has_progress(ProgressType::UnlockViktorMissions));
+        assert!(ev_v.progress.sent_mail_keys.contains(&VIKTOR_MAIL_KEY.to_string()));
+
+        let read_v = MailDirector::select_and_read_mail(
+            &mut gm,
+            &mode,
+            &mut rt.progress,
+            MailType::Personal,
+            VIKTOR_MAIL_KEY,
+        );
+        assert_eq!(read_v.triggered_tutorial, Some(TutorialId::EnterZoneViktorLab));
+    }
+
+    #[test]
+    fn story_journal_slimepedia_and_tutorial_dependencies() {
+        use sr_ids::{PediaId, ProgressType};
+        use sr_model::{GameModel, TutorialId};
+
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut rt = StoryRuntime::default();
+        rt.init_model(&mut gm, &mode);
+
+        // Hobson End journal sets HobsonEnd progress
+        let (activated, _) = rt.pedia.activate_journal_entry(
+            &mut gm,
+            &mode,
+            &mut rt.progress,
+            &JournalEntryDef::hobson_end(),
+        );
+        assert!(activated);
+        assert!(gm.progress.has_progress(ProgressType::HobsonEnd));
+
+        // Slimepedia unlocks by IdentifiableId and tracks completion excluding HIDDEN_ENTRIES
+        assert_eq!(
+            rt.pedia.maybe_show_popup_for_ident(&mut gm, &mode, IdentifiableId::MosaicSlime),
+            Some(PediaId::MosaicSlime)
+        );
+        assert!(!PediaDirector::check_completed_slimepedia(&mut gm));
+
+        for &pid in PediaId::ALL {
+            if !PEDIA_CATEGORY_HEADERS.contains(&pid) && !PEDIA_HIDDEN_ENTRIES.contains(&pid) {
+                PediaDirector::unlock_without_popup(&mut gm, pid);
+            }
+        }
+        assert!(PediaDirector::check_completed_slimepedia(&mut gm));
+        assert_eq!(gm.game_achieves.counts["COMPLETED_SLIMEPEDIA"], 1);
+
+        // Tutorial dependencies: Market waits for Plort to complete
+        rt.tutorials.set_in_market_area(&mut gm, &mode, true);
+        assert!(!gm.tutorials.popup_queue.contains(&TutorialId::Market));
+        rt.tutorials.on_vac(&mut gm, &mode, IdentifiableId::PinkPlort);
+        assert!(gm.tutorials.popup_queue.contains(&TutorialId::Plort));
+        let unblocked = rt.tutorials.complete_tutorial(&mut gm, &mode, TutorialId::Plort);
+        assert_eq!(unblocked, vec![TutorialId::Market]);
+        assert!(gm.tutorials.popup_queue.contains(&TutorialId::Market));
+    }
+
+    #[test]
+    fn achievements_and_end_game_summary_including_rush_v2() {
+        use sr_data::DataRegistry;
+        use sr_ids::LandPlotId;
+        use sr_math::Randoms;
+        use sr_model::GameModel;
+
+        let data = DataRegistry::builtin();
+        let classic_mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        gm.player.currency = 100_000;
+
+        // Ranch storage achievement
+        RanchDirector::ensure_plot(&mut gm, "c", LandPlotId::Empty);
+        RanchDirector::buy_plot(&mut gm, "c", LandPlotId::Corral).unwrap();
+        for u in [
+            sr_ids::LandPlotUpgrade::Walls,
+            sr_ids::LandPlotUpgrade::MusicBox,
+            sr_ids::LandPlotUpgrade::AirNet,
+            sr_ids::LandPlotUpgrade::SolarShield,
+            sr_ids::LandPlotUpgrade::PlortCollector,
+            sr_ids::LandPlotUpgrade::Feeder,
+        ] {
+            gm.land_plots.get_mut("c").unwrap().upgrades.insert(u);
+        }
+        RanchDirector::ensure_plot(&mut gm, "k", LandPlotId::Empty);
+        RanchDirector::buy_plot(&mut gm, "k", LandPlotId::Coop).unwrap();
+        for u in [
+            sr_ids::LandPlotUpgrade::Walls,
+            sr_ids::LandPlotUpgrade::Feeder,
+            sr_ids::LandPlotUpgrade::Vitamizer,
+            sr_ids::LandPlotUpgrade::DeluxeCoop,
+        ] {
+            gm.land_plots.get_mut("k").unwrap().upgrades.insert(u);
+        }
+        RanchDirector::ensure_plot(&mut gm, "s", LandPlotId::Empty);
+        RanchDirector::buy_plot(&mut gm, "s", LandPlotId::Silo).unwrap();
+        for u in [
+            sr_ids::LandPlotUpgrade::Storage2,
+            sr_ids::LandPlotUpgrade::Storage3,
+            sr_ids::LandPlotUpgrade::Storage4,
+        ] {
+            gm.land_plots.get_mut("s").unwrap().upgrades.insert(u);
+        }
+
+        AchievementsDirector::add_int_stat(&mut gm, "PLORTS_SOLD", 5000);
+        AchievementsDirector::add_int_stat(&mut gm, "CURRENCY", 100_000);
+        AchievementsDirector::add_game_int_stat(&mut gm, "FABRICATED_GADGETS", 35);
+        let earned = AchievementsDirector::evaluate_all(&mut gm);
+        assert!(earned.contains(&AchievementId::SellPlortsA));
+        assert!(earned.contains(&AchievementId::SellPlortsE));
+        assert!(earned.contains(&AchievementId::EarnCurrencyC));
+        assert!(earned.contains(&AchievementId::RanchUpgradedStorage));
+        assert!(earned.contains(&AchievementId::FabricateGadgetsB));
+        assert!(AchievementsDirector::calculate_game_progress(&gm) > 0.0);
+
+        // Rush Mode V2 EndGameV2UI score multiplier: 25 QuantumPlort (+8%) + 25 PinkPlort (+5%) = 1.13x
+        let rush_mode = GameModeSettings::for_mode(GameMode::TimeLimitV2);
+        let mut rush_gm = GameModel::new(GameMode::TimeLimitV2);
+        rush_gm.player.currency = 10_000;
+        let mut econ = EconomyDirector::default();
+        let mut rng = Randoms::from_seed(5);
+        econ.init_model(&mut rush_gm.world, &data, &rush_mode, &mut rng);
+
+        AchievementsDirector::add_game_plort_sold(&mut rush_gm, IdentifiableId::QuantumPlort, 25);
+        AchievementsDirector::add_game_plort_sold(&mut rush_gm, IdentifiableId::PinkPlort, 25);
+        let summary = AchievementsDirector::build_end_game_summary(&mut rush_gm, &econ);
+        assert!((summary.rush_score_multiplier - 1.13).abs() < 1e-4);
+        assert_eq!(summary.rush_final_score, 11300);
+
+        let rush_earned = AchievementsDirector::evaluate_all(&mut rush_gm);
+        assert!(rush_earned.contains(&AchievementId::TimeLimitCurrencyA));
+        assert!(!rush_earned.contains(&AchievementId::SellPlortsA)); // blocked in TimeLimitV2
+        let _ = classic_mode;
     }
 }
