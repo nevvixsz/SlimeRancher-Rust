@@ -248,3 +248,39 @@ pub enum AppearanceSaveSet {
     Classic = 0,
     SecretStyle = 1,
 }
+
+/// Port of `QuicksilverEnergyGenerator.State`.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum QuicksilverGeneratorState {
+    #[default]
+    Inactive = 0,
+    Countdown = 1,
+    Active = 2,
+    Cooldown = 3,
+}
+
+/// Port of `InstrumentModel.Instrument`.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum Instrument {
+    #[default]
+    None = -1,
+    Marimba = 0,
+    Bells = 1,
+    Cora = 2,
+    Glock = 3,
+    GlockLow = 4,
+    MusicBox = 5,
+    Organ = 6,
+    Piano = 7,
+    PianoElectric = 8,
+    Plunky = 9,
+    SingingLong = 10,
+    SingingShort = 11,
+    Vibe = 12,
+    VibeLow = 13,
+    Chiptune = 14,
+    Violin = 15,
+    Flute = 16,
+}
