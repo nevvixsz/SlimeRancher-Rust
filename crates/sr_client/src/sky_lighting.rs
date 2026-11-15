@@ -20,7 +20,7 @@ pub fn setup_sky_and_light(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: 14_000.0,
-            shadows_enabled: true,
+            shadows_enabled: std::env::var_os("SR_SHADOWS").is_some(),
             ..default()
         },
         Transform::from_xyz(25.0, 45.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),

@@ -385,8 +385,14 @@ pub fn setup_world_scene(
     ));
 
     // FPS Camera
+    let msaa = if std::env::var_os("SR_MSAA").is_some() {
+        Msaa::Sample4
+    } else {
+        Msaa::Off
+    };
     commands.spawn((
         Camera3d::default(),
+        msaa,
         Projection::Perspective(PerspectiveProjection {
             fov: 72.0f32.to_radians(),
             ..default()

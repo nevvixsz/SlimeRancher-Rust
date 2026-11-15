@@ -83,12 +83,12 @@ fn main() {
                     ..default()
                 })
                 .set(PbrPlugin {
-                    // Fall back to CPU mesh uniform building so DX12 FL 11_0 GPUs
-                    // (e.g. Fermi GTX 580 with max_storage_buffers_per_shader_stage == 2)
-                    // do not panic creating the 4-storage-buffer GPU preprocess layout.
+                    // Keep forward PBR lean and fall back to CPU mesh uniform building so
+                    // DX12 FL 11_0 GPUs (e.g. Fermi GTX 580) avoid unsupported compute/prepass/deferred pipelines.
+                    prepass_enabled: false,
+                    add_default_deferred_lighting_plugin: false,
                     use_gpu_instance_buffer_builder: std::env::var_os("SR_GPU_PREPROCESS")
                         .is_some(),
-                    ..default()
                 }),
         )
         .insert_non_send_resource(CliArgsResource(cli))
