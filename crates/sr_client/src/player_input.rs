@@ -105,15 +105,11 @@ pub fn step_simulation_system(
         ];
         let ident = cycle[look.spawn_cycle % cycle.len()];
         look.spawn_cycle += 1;
-        let spawn_pos = sim_res.sim.model.player.position
-            + Vec3::Y * 1.4
-            + sim_res.sim.motor.look_dir() * 3.0;
-        sim_res.sim.spawn_actor(
-            ident,
-            RegionSetId::Home,
-            spawn_pos,
-            sim_res.sim.motor.look_dir() * 2.0,
-        );
+        let look_dir = sim_res.sim.motor.look_dir();
+        let spawn_pos = sim_res.sim.model.player.position + Vec3::Y * 1.4 + look_dir * 3.0;
+        sim_res
+            .sim
+            .spawn_actor(ident, RegionSetId::Home, spawn_pos, look_dir * 2.0);
         let name = assets.ident_name(ident);
         sim_res.set_toast(format!("+ {name}"));
     }
