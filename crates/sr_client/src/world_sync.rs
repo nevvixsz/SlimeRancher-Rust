@@ -19,6 +19,7 @@ use crate::assets::ClientAssets;
 pub struct SimResource {
     pub sim: Simulation,
     pub last_events: TickEvents,
+    #[allow(dead_code)]
     pub save_path: Option<PathBuf>,
     pub world_dump: Option<WorldDump>,
     pub toast: Option<(String, f32)>,
@@ -32,12 +33,15 @@ impl SimResource {
 
 #[derive(Component)]
 pub struct ActorVisual {
+    #[allow(dead_code)]
     pub actor_id: i64,
+    #[allow(dead_code)]
     pub ident: IdentifiableId,
 }
 
 #[derive(Component)]
 pub struct GordoVisual {
+    #[allow(dead_code)]
     pub gordo_id: String,
 }
 
