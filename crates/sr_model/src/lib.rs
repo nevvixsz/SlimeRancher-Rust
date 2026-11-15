@@ -4,9 +4,12 @@ pub mod actor;
 pub mod ammo;
 pub mod enums;
 pub mod gadgets;
+pub mod game;
 pub mod meta;
+pub mod objects;
 pub mod player;
 pub mod ranch;
+pub mod world;
 
 pub use actor::{
     actor_ids, ActorKind, ActorModel, AnimalModel, EmotionState, LiquidSourceModel, PlortModel,
@@ -18,12 +21,19 @@ pub use gadgets::{
     BlueprintLockData, DroneModel, DroneProgramData, ExtractorModel, GadgetKind, GadgetModel,
     GadgetSiteModel, GadgetsModel, SnareModel, WarpDepotModel,
 };
+pub use game::GameModel;
 pub use meta::{
     AchievesModel, AppearancesModel, HolidayModel, InstrumentModel, MailEntry, MailModel,
     PediaModel, ProgressModel, TutorialsModel,
 };
+pub use objects::{
+    AccessDoorModel, DecorizerModel, EchoNoteGordoModel, GlitchImpostoModel,
+    GlitchSlimulationModel, GlitchTarrNodeModel, GordoModel, MasterSwitchModel, OasisModel,
+    PuzzleSlotModel, QuicksilverEnergyGeneratorModel, TreasurePodModel,
+};
 pub use player::{PlayerModel, UpgradeLockData};
 pub use ranch::{LandPlotModel, RanchCellModel, RanchModel};
+pub use world::{ExchangeItemEntry, ExchangeOffer, ExchangeRequestedItemEntry, WorldModel};
 
 #[cfg(test)]
 mod tests {
@@ -94,7 +104,6 @@ mod tests {
         p.apply_upgrade(PlayerUpgrade::SpareKey, true, 32400.0);
         assert_eq!(p.keys, 1);
 
-        // Overflowing 100 max_rads deals 10-unit damage chunks
         let dmg = p.add_rads(125.0, 32400.0);
         assert_eq!(dmg, 20);
         assert_eq!(p.curr_rads, 105.0);
@@ -138,5 +147,32 @@ mod tests {
         let g = GadgetsModel::new();
         assert_eq!(g.blueprints, vec![GadgetId::ExtractorDrillNovice]);
         assert!(!g.avail_blueprints.contains(&GadgetId::HydroShower));
+    }
+
+    #[test]
+    fn game_model_actor_lifecycle_and_rush_game_over() {
+        let mut gm = GameModel::new(GameMode::TimeLimitV2);
+        let id1 = gm.create_actor(
+            IdentifiableId::PinkSlime,
+            RegionSetId::Home,
+            Vec3::new(1.0, 2.0, 3.0),
+            Quat::IDENTITY,
+        );
+        let id2 = gm.create_actor(
+            IdentifiableId::RockSlime,
+            RegionSetId::Home,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+        );
+        assert_eq!(id1, 100);
+        assert_eq!(id2, 101);
+        assert_eq!(gm.actors_of_type(IdentifiableId::PinkSlime).count(), 1);
+        assert!(gm.destroy_actor(id1).is_some());
+        assert_eq!(gm.actors_of_type(IdentifiableId::PinkSlime).count(), 0);
+
+        assert!(!gm.is_game_over());
+        let end = gm.player.end_game_time.unwrap();
+        gm.world.world_time = end;
+        assert!(gm.is_game_over());
     }
 }

@@ -284,3 +284,26 @@ pub enum Instrument {
     Violin = 15,
     Flute = 16,
 }
+
+/// Port of `ExchangeDirector.NonIdentReward`.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum NonIdentReward {
+    #[default]
+    None = 0,
+    OgdenMix = 100,
+    OgdenGarden = 101,
+    OgdenRanch = 102,
+    MochiExtraMile = 200,
+    MochiCoop = 201,
+    MochiRanch = 202,
+    ViktorChickenCloner = 300,
+    ViktorDeluxeDrones = 301,
+    ViktorRanch = 302,
+    NewbucksSmall = 10000,
+    NewbucksMedium = 10001,
+    NewbucksLarge = 10002,
+    NewbucksHuge = 10003,
+    NewbucksMochi = 10004,
+    TimeExtension12h = 20000,
+}
