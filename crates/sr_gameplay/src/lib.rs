@@ -1,7 +1,9 @@
 //! Player gameplay systems: `PlayerState`, `Ammo`, `WeaponVacuum`, and actor lifecycle rules.
 
+pub mod ammo;
 pub mod player;
 
+pub use ammo::AmmoController;
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 
 #[cfg(test)]
@@ -44,5 +46,49 @@ mod tests {
         assert_eq!(PlayerController::treasure_cracker_level(&model), 1);
         PlayerController::grant_upgrade(&mut model, PlayerUpgrade::Ammo4, 32400.0);
         assert_eq!(model.max_ammo, 100);
+    }
+
+    #[test]
+    fn ammo_controller_enforces_liquid_slot_and_emotion_stack() {
+        let mut model = PlayerModel::default();
+        let mut ammo = AmmoController::default();
+
+        // Slot 4 (liquid) is unusable until LiquidSlot upgrade
+        assert!(!ammo.maybe_add_to_slot(
+            &mut model,
+            IdentifiableId::WaterLiquid,
+            None,
+            1,
+            32400.0
+        ));
+        PlayerController::grant_upgrade(&mut model, PlayerUpgrade::LiquidSlot, 32400.0);
+        assert!(ammo.maybe_add_to_slot(
+            &mut model,
+            IdentifiableId::WaterLiquid,
+            None,
+            1,
+            32400.0
+        ));
+        assert_eq!(
+            ammo.slot_id(&model, 4, 32400.0),
+            IdentifiableId::WaterLiquid
+        );
+
+        let snap = sr_model::SlimeEmotionSnapshot {
+            agitation: 0.2,
+            fear: 0.0,
+            hunger: 0.7,
+        };
+        assert!(ammo.maybe_add_to_slot(
+            &mut model,
+            IdentifiableId::PinkSlime,
+            Some(snap),
+            1,
+            32400.0
+        ));
+        assert_eq!(ammo.slot_count(&model, 0), 1);
+        let popped = ammo.decrement_selected(&mut model, 1, 32400.0);
+        assert_eq!(popped, Some(snap));
+        assert_eq!(ammo.slot_count(&model, 0), 0);
     }
 }
