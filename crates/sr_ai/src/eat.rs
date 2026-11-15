@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sr_data::{DataRegistry, GameModeSettings};
 use sr_ids::{IdentifiableId, RegionSetId, SlimeEmotion};
 use sr_math::{Quat, Randoms, Vec3};
-use sr_model::{ActorKind, GameModel, PlortModel, SlimeModel};
+use sr_model::{ActorKind, GameModel, SlimeModel};
 use sr_physics::{PhysicsWorld, RigidBody};
 
 use crate::emotions::SlimeEmotionRuntime;

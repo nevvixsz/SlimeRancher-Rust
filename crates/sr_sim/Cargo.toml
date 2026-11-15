@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 serde.workspace = true
+sr_ai = { path = "../sr_ai" }
 sr_data = { path = "../sr_data" }
 sr_gameplay = { path = "../sr_gameplay" }
 sr_ids = { path = "../sr_ids" }

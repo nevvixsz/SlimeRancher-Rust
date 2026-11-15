@@ -322,7 +322,7 @@ fn toy_favorite_matches(slime: IdentifiableId, toy: IdentifiableId) -> bool {
             | (IdentifiableId::PhosphorSlime, IdentifiableId::NightLightToy)
             | (IdentifiableId::RadSlime, IdentifiableId::PowerCellToy)
             | (IdentifiableId::BoomSlime, IdentifiableId::BombBallToy)
-            | (IdentifiableId::HoneySlime, IdentifiableId::BumbleBallToy)
+            | (IdentifiableId::HoneySlime, IdentifiableId::BuzzyBeeToy)
             | (IdentifiableId::PuddleSlime, IdentifiableId::RubberDuckyToy)
             | (IdentifiableId::CrystalSlime, IdentifiableId::CrystalBallToy)
             | (IdentifiableId::HunterSlime, IdentifiableId::StuffedChickenToy)

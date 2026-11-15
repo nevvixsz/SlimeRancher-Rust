@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 use sr_data::DataRegistry;
-use sr_ids::{IdentifiableId, RegionSetId, UpgradeId};
+use sr_ids::{IdentifiableId, PlayerUpgrade, RegionSetId};
 use sr_math::{Quat, Randoms, Vec3};
 use sr_model::{ActorKind, GameModel, SlimeModel};
 use sr_physics::{ImpactEvent, PhysicsWorld, RigidBody};
@@ -260,7 +260,7 @@ impl RareAbilityState {
             });
             // Also check nearby fast moving non-gold food/plort items
             if gold_hit {
-                let mult = if model.player.upgrades.contains(&UpgradeId::GoldenSureshot) {
+                let mult = if model.player.upgrades.contains(&PlayerUpgrade::GoldenSureshot) {
                     3
                 } else {
                     1
