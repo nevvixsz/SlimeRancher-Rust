@@ -68,7 +68,7 @@ impl Simulation {
             player_ctrl: PlayerController::default(),
             ammo: AmmoController::default(),
             vacuum: WeaponVacuum::default(),
-            rng: Randoms::new(),
+            rng: Randoms::default(),
             was_game_over: false,
         }
     }

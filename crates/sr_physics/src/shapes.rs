@@ -24,6 +24,32 @@ impl CollisionLayers {
     }
 }
 
+impl std::ops::BitOr for CollisionLayers {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for CollisionLayers {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl std::ops::BitAnd for CollisionLayers {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl std::ops::BitAndAssign for CollisionLayers {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
+
 /// Static collider geometry in the world.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StaticShape {
