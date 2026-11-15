@@ -2,6 +2,7 @@
 
 pub mod actors;
 pub mod ammo;
+pub mod dlc;
 pub mod economy;
 pub mod player;
 pub mod ranch;
@@ -14,6 +15,7 @@ pub use actors::{
     BREAK_COLLISION_THRESHOLD,
 };
 pub use ammo::AmmoController;
+pub use dlc::*;
 pub use economy::{
     build_market_listings, current_seven_zee_rank, deposit_plorts, get_plort_sold_count,
     next_seven_zee_rank, plort_sold_stat_key, purchase_next_seven_zee_rank, step_market_deposits,
