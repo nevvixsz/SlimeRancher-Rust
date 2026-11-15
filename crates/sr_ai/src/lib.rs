@@ -1,11 +1,17 @@
 //! Slime AI, emotions, subbehaviour plexer, diet/largo/tarr lifecycle, unique abilities, and Gordos.
 
 pub mod emotions;
+pub mod plexer;
 
 pub use emotions::{
     DriveCalculator, EmotionEnvironment, SlimeEmotionRuntime, ANGRY_CUTOFF, FAVORITE_TOY_FACTOR,
     HUNGRY_CUTOFF, MUSIC_BOX_FACTOR, NON_FAVORITE_TOY_FACTOR, POLLEN_SOURCE_AGITATION_PER_HOUR,
     STARVING_AGITATION_PER_HOUR, STARVING_CUTOFF, TERRIFIED_CUTOFF,
+};
+pub use plexer::{
+    gather_stimuli, ActiveSubbehaviour, PlexerOutput, SlimePlexerState, SlimeStimuli,
+    ATTACK_PLAYER_COOLDOWN, ATTACK_PLAYER_DAMAGE, DEFAULT_ACTIVATION_DELAY, GROUNDED_CHECK_FREQ,
+    MIN_RELEVANCY, RETHINK_TIME,
 };
 
 #[cfg(test)]
