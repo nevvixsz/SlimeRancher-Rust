@@ -5,8 +5,8 @@ use sr_ai::{AiStepEvents, SlimeAiCoordinator};
 use sr_data::{DataRegistry, GameModeSettings};
 use sr_gameplay::{
     spawn_physical_actor, step_actor_lifecycle, ActorLifecycleEvents, AmmoController, DeathOutcome,
-    DeathSource, PlayerController, RanchRuntime, RanchStepEvents, VacEvents, VacInput,
-    WeaponVacuum,
+    DeathSource, EconomyRuntime, EconomyStepEvents, PlayerController, RanchRuntime,
+    RanchStepEvents, VacEvents, VacInput, WeaponVacuum,
 };
 use sr_ids::{GameMode, IdentifiableId, RegionSetId};
 use sr_math::{Randoms, Vec3};
@@ -27,6 +27,7 @@ pub struct TickEvents {
     pub ranch: RanchStepEvents,
     pub ai: AiStepEvents,
     pub world: WorldStepEvents,
+    pub economy: EconomyStepEvents,
     pub player_death: Option<DeathOutcome>,
 }
 
@@ -45,6 +46,7 @@ pub struct Simulation {
     pub ranch: RanchRuntime,
     pub ai: SlimeAiCoordinator,
     pub world: WorldRuntime,
+    pub economy: EconomyRuntime,
     pub rng: Randoms,
     was_game_over: bool,
     ff_start_time: Option<f64>,
@@ -68,7 +70,7 @@ impl Simulation {
         let time = TimeDirector::default();
         time.init_world_model(&mut model.world);
         model.player.reset(&mode_settings);
-        Self {
+        let mut sim = Self {
             data,
             mode_settings,
             model,
@@ -81,10 +83,18 @@ impl Simulation {
             ranch: RanchRuntime::default(),
             ai: SlimeAiCoordinator::default(),
             world: WorldRuntime::default(),
+            economy: EconomyRuntime::default(),
             rng: Randoms::default(),
             was_game_over: false,
             ff_start_time: None,
-        }
+        };
+        sim.economy.ensure_initialized(
+            &mut sim.model,
+            &sim.data,
+            &sim.mode_settings,
+            &mut sim.rng,
+        );
+        sim
     }
 
     /// Spawns a physical actor into both `GameModel` and `PhysicsWorld`.
@@ -167,6 +177,7 @@ impl Simulation {
         );
 
         // World streaming, spawners, puzzle doors, and Glass Desert weather
+        let curr_day = TimeDirector::curr_day(&self.model.world);
         let hour_of_day = TimeDirector::curr_hour(&self.model.world);
         events.world = self.world.step(
             &mut self.model,
@@ -174,6 +185,17 @@ impl Simulation {
             &self.mode_settings,
             hour_of_day,
             scaled_dt,
+            &mut self.rng,
+        );
+
+        // Economy, Plort Market, MarketLink deposits, and Range Exchange
+        events.economy = self.economy.step(
+            &mut self.model,
+            &mut self.physics,
+            &self.data,
+            &self.mode_settings,
+            curr_day,
+            hour_of_day,
             &mut self.rng,
         );
 
