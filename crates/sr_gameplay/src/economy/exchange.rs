@@ -91,8 +91,8 @@ impl ExchangeDirector {
             (Id::PogoFruit, 10.0),
             (Id::CuberryFruit, 15.0),
             (Id::MangoFruit, 20.0),
-            (Id::PhaseLemon, 25.0),
-            (Id::PricklyPearFruit, 30.0),
+            (Id::LemonFruit, 25.0),
+            (Id::PearFruit, 30.0),
             (Id::CarrotVeggie, 10.0),
             (Id::BeetVeggie, 15.0),
             (Id::OcaocaVeggie, 20.0),
@@ -168,11 +168,11 @@ impl ExchangeDirector {
             ),
             (
                 ProgressType::UnlockRuins,
-                vec![Id::PhaseLemon, Id::QuantumPlort, Id::StrangeDiamondCraft],
+                vec![Id::LemonFruit, Id::QuantumPlort, Id::StrangeDiamondCraft],
             ),
             (
                 ProgressType::UnlockDesert,
-                vec![Id::PricklyPearFruit, Id::ParsnipVeggie, Id::PaintedHen, Id::DervishPlort, Id::MosaicPlort, Id::TanglePlort, Id::LavaDustCraft, Id::SilkySandCraft],
+                vec![Id::PearFruit, Id::ParsnipVeggie, Id::PaintedHen, Id::DervishPlort, Id::MosaicPlort, Id::TanglePlort, Id::LavaDustCraft, Id::SilkySandCraft],
             ),
         ];
 
@@ -207,9 +207,9 @@ impl ExchangeDirector {
             RancherProfile {
                 name: "ogden".into(),
                 num_blurbs: 3,
-                requests: vec![Id::PogoFruit, Id::CuberryFruit, Id::MangoFruit, Id::CarrotVeggie, Id::BeetVeggie, Id::OcaocaVeggie, Id::PhaseLemon],
+                requests: vec![Id::PogoFruit, Id::CuberryFruit, Id::MangoFruit, Id::CarrotVeggie, Id::BeetVeggie, Id::OcaocaVeggie, Id::LemonFruit],
                 rewards: common_foods.clone(),
-                rare_rewards: vec![Id::PricklyPearFruit, Id::ParsnipVeggie],
+                rare_rewards: vec![Id::PearFruit, Id::ParsnipVeggie],
             },
             RancherProfile {
                 name: "mochi".into(),
