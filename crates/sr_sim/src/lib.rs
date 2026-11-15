@@ -31,7 +31,7 @@ mod tests {
 
         // Next dawn (06:00) from 09:01 on day 1 should be 06:00 on day 2
         let dawn = TimeDirector::get_next_dawn(&sim.model.world);
-        assert_eq!(TimeDirector::day_fraction(dawn), 0.25);
+        assert!((TimeDirector::day_fraction(dawn) - 0.25).abs() < 1e-6);
         assert!((dawn - (86400.0 + 6.0 * 3600.0)).abs() < 1.0);
     }
 

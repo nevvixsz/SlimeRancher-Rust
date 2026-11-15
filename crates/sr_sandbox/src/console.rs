@@ -59,6 +59,7 @@ impl DevConsole {
             "move" => self.cmd_move(sim, &parts[1..]),
             "step" => self.cmd_step(sim, &parts[1..]),
             "clear" => self.cmd_clear(sim),
+            "gordos" => Self::cmd_gordos(sim),
             "stats" => Self::cmd_stats(sim),
             _ => format!("Unknown command '{}'. Type 'help' for commands.", parts[0]),
         };
@@ -84,6 +85,7 @@ impl DevConsole {
             "  move <x> <z> [secs]        - Move along local axes for duration",
             "  step <secs>                - Advance simulation by <secs>",
             "  clear                      - Remove all spawned actors",
+            "  gordos                     - Show Gordo feed counts and pop states",
             "  stats                      - Show player vitals, time, vacpack slots, actor count",
         ]
         .join("\n")
@@ -383,6 +385,35 @@ impl DevConsole {
         sim.model.actors_by_ident.clear();
         sim.physics.bodies.clear();
         format!("Cleared {count} actors")
+    }
+
+    fn cmd_gordos(sim: &Simulation) -> String {
+        if sim.ai.world_gordos.is_empty() {
+            return "No Gordos registered.".into();
+        }
+        let mut lines = Vec::new();
+        for g in &sim.ai.world_gordos {
+            let (eaten, target) = sim
+                .model
+                .gordos
+                .get(&g.gordo_id)
+                .map(|m| (m.gordo_eaten_count, m.target_count))
+                .unwrap_or((0, 0));
+            let state = if eaten == -1 {
+                "POPPED".to_string()
+            } else {
+                format!("{eaten}/{target}")
+            };
+            lines.push(format!(
+                "{} ({}) @ ({:.1}, {:.1}, {:.1}): {state}",
+                g.gordo_id,
+                g.slime_ident.as_csharp_name(),
+                g.pos.x,
+                g.pos.y,
+                g.pos.z
+            ));
+        }
+        lines.join("\n")
     }
 
     fn cmd_stats(sim: &Simulation) -> String {

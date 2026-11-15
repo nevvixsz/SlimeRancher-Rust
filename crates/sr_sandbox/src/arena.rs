@@ -1,6 +1,7 @@
 //! Test arena ("пробная карта") setup with floor, perimeter walls, corral, pond, garden,
 //! plort market dropzone, and initial actors for early physics & vacpack testing.
 
+use sr_ai::{GordoRewardKind, WorldGordo};
 use sr_ids::{IdentifiableId, LandPlotId, RegionSetId};
 use sr_math::Vec3;
 use sr_model::LandPlotModel;
@@ -120,6 +121,29 @@ pub fn setup_test_arena(sim: &mut Simulation) {
     for (ident, pos) in starters {
         sim.spawn_actor(ident, RegionSetId::Home, pos, Vec3::ZERO);
     }
+
+    // 7. Arena Pink Gordo at (0, 0, -14) (30 food to pop -> SlimeKey + 3 Pink Slimes)
+    let gordo_pos = Vec3::new(0.0, 0.0, -14.0);
+    if !sim.model.gordos.contains_key("gordo_arena_pink") {
+        sim.ai.register_gordo(
+            &mut sim.model,
+            WorldGordo {
+                gordo_id: "gordo_arena_pink".into(),
+                slime_ident: IdentifiableId::PinkSlime,
+                pos: gordo_pos,
+                region: RegionSetId::Home,
+                rewards: vec![
+                    GordoRewardKind::SlimeKey,
+                    GordoRewardKind::CratesAndSlimes {
+                        crate_id: IdentifiableId::CrateReef01,
+                        crate_count: 2,
+                    },
+                ],
+                spawn_slime_count: 3,
+            },
+            30,
+        );
+    }
 }
 
 /// Renders an ASCII top-down radar map (`[-24, 24]` around origin) for CLI inspection.
@@ -165,11 +189,23 @@ pub fn render_ascii_map(sim: &Simulation) -> String {
             };
         }
     }
+    for g in &sim.ai.world_gordos {
+        let popped = sim
+            .model
+            .gordos
+            .get(&g.gordo_id)
+            .map_or(false, |gm| gm.gordo_eaten_count == -1);
+        if !popped {
+            if let Some((x, z)) = to_cell(g.pos) {
+                grid[z][x] = 'O';
+            }
+        }
+    }
     if let Some((x, z)) = to_cell(sim.model.player.position) {
         grid[z][x] = '@';
     }
 
-    let mut out = String::from("Legend: @=Player S=Slime p=Plort f=Food #=Crate C=Corral G=Garden ~=Pond $=Market\n");
+    let mut out = String::from("Legend: @=Player S=Slime O=Gordo p=Plort f=Food #=Crate C=Corral G=Garden ~=Pond $=Market\n");
     for row in grid {
         let line: String = row.into_iter().collect();
         out.push_str(&line);

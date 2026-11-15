@@ -1,6 +1,7 @@
 //! Root simulation coordinator combining `DataRegistry`, `GameModel`, `GameModeSettings`,
 //! `TimeDirector`, `PhysicsWorld`, `PlayerMotor`, `PlayerController`, `AmmoController`, and `WeaponVacuum`.
 
+use sr_ai::{AiStepEvents, SlimeAiCoordinator};
 use sr_data::{DataRegistry, GameModeSettings};
 use sr_gameplay::{
     spawn_physical_actor, step_actor_lifecycle, ActorLifecycleEvents, AmmoController, DeathOutcome,
@@ -21,6 +22,7 @@ pub struct TickEvents {
     pub delta_world_time: f64,
     pub vac: VacEvents,
     pub lifecycle: ActorLifecycleEvents,
+    pub ai: AiStepEvents,
     pub player_death: Option<DeathOutcome>,
 }
 
@@ -36,6 +38,7 @@ pub struct Simulation {
     pub player_ctrl: PlayerController,
     pub ammo: AmmoController,
     pub vacuum: WeaponVacuum,
+    pub ai: SlimeAiCoordinator,
     pub rng: Randoms,
     was_game_over: bool,
 }
@@ -68,6 +71,7 @@ impl Simulation {
             player_ctrl: PlayerController::default(),
             ammo: AmmoController::default(),
             vacuum: WeaponVacuum::default(),
+            ai: SlimeAiCoordinator::default(),
             rng: Randoms::default(),
             was_game_over: false,
         }
@@ -131,6 +135,40 @@ impl Simulation {
             &overlaps,
             &mut self.rng,
         );
+
+        // Slime AI, emotions, eating, unique abilities, and Gordos
+        let hour_of_day = TimeDirector::curr_hour(&self.model.world);
+        let player_alive = self.model.player.curr_health > 0.0;
+        events.ai = self.ai.step(
+            &mut self.model,
+            &mut self.physics,
+            &self.data,
+            &self.mode_settings,
+            &impacts,
+            self.vacuum.held,
+            player_alive,
+            hour_of_day,
+            scaled_dt,
+            &mut self.rng,
+        );
+
+        let total_ai_dmg = (events.ai.player_damage + events.ai.player_fire_damage).round() as i32;
+        if total_ai_dmg > 0 {
+            PlayerController::damage(
+                &mut self.model.player,
+                &self.mode_settings,
+                total_ai_dmg,
+                world_time,
+            );
+        }
+        if events.ai.player_rad_delta > 0.0 {
+            self.player_ctrl.absorb_rads(
+                &mut self.model.player,
+                &self.mode_settings,
+                events.ai.player_rad_delta,
+                world_time,
+            );
+        }
 
         // Player recovery
         self.model
