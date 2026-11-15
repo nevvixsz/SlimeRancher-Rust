@@ -1,9 +1,14 @@
 //! Player gameplay systems: `PlayerState`, `Ammo`, `WeaponVacuum`, and actor lifecycle rules.
 
+pub mod actors;
 pub mod ammo;
 pub mod player;
 pub mod vacuum;
 
+pub use actors::{
+    apply_water_spray, spawn_physical_actor, step_actor_lifecycle, ActorLifecycleEvents,
+    BREAK_COLLISION_THRESHOLD,
+};
 pub use ammo::AmmoController;
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use vacuum::{
@@ -179,5 +184,43 @@ mod tests {
         );
         assert!(ev_burst.air_burst_fired);
         assert_eq!(gm.player.curr_energy, 80.0);
+    }
+
+    #[test]
+    fn break_on_impact_spawns_crate_rewards_and_sea_kill_removes_actor() {
+        use sr_ids::RegionSetId;
+        use sr_math::{Randoms, Vec3};
+        use sr_model::GameModel;
+        use sr_physics::{CollisionLayers, PhysicsWorld, StaticCollider, StaticShape};
+
+        let mut gm = GameModel::default();
+        let mut pw = PhysicsWorld::new();
+        pw.add_static(StaticCollider {
+            id: "floor".into(),
+            layers: CollisionLayers::WORLD,
+            is_trigger: false,
+            shape: StaticShape::GroundPlane { height: 0.0 },
+        });
+        let crate_id = spawn_physical_actor(
+            &mut gm,
+            &mut pw,
+            IdentifiableId::CrateReef01,
+            RegionSetId::Home,
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::new(0.0, -20.0, 0.0),
+        );
+        let mut rng = Randoms::with_seed(42);
+        let mut broken = false;
+        for _ in 0..30 {
+            let (impacts, overlaps) = pw.step(1.0 / 60.0);
+            let ev = step_actor_lifecycle(&mut gm, &mut pw, &impacts, &overlaps, &mut rng);
+            if ev.broken_crates.contains(&crate_id) {
+                broken = true;
+                break;
+            }
+        }
+        assert!(broken);
+        assert!(gm.actor(crate_id).is_none());
+        assert!(gm.actors.len() >= 2);
     }
 }
