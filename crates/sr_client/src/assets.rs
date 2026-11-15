@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use bevy::audio::Volume;
+use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::*;
 use sr_ids::IdentifiableId;
 use sr_tools::{AssetManifest, LocalizationSet};
@@ -48,6 +49,7 @@ pub struct ClientAssets {
     pub sfx_plort_sell: Option<Handle<AudioSource>>,
     pub sfx_airburst: Option<Handle<AudioSource>>,
     pub bgm_ranch: Option<Handle<AudioSource>>,
+    pub world_scene_model: Option<Handle<Scene>>,
 }
 
 impl ClientAssets {
@@ -185,6 +187,7 @@ pub fn load_client_assets(
     let mut sfx_plort_sell = None;
     let mut sfx_airburst = None;
     let mut bgm_ranch = None;
+    let mut world_scene_model = None;
 
     if local_root.is_some() {
         let load_tex = |candidates: &[&str]| -> Option<Handle<Image>> {
@@ -217,6 +220,15 @@ pub fn load_client_assets(
         sfx_plort_sell = load_aud(&["plort_sell", "newbucks", "cash", "coin", "market"]);
         sfx_airburst = load_aud(&["airburst", "pulse", "shockwave"]);
         bgm_ranch = load_aud(&["ranch_day", "ranchmusic", "ranch", "day_01"]);
+
+        if let Some(rel) = manifest.find_model(&["world", "ranch", "slimerancher", "zone_ranch", "arena"]) {
+            let lower = rel.to_ascii_lowercase();
+            if lower.ends_with(".glb") || lower.ends_with(".gltf") {
+                world_scene_model = Some(
+                    asset_server.load(GltfAssetLabel::Scene(0).from_asset(asset_rel_path(rel))),
+                );
+            }
+        }
     }
 
     ClientAssets {
@@ -236,6 +248,7 @@ pub fn load_client_assets(
         sfx_plort_sell,
         sfx_airburst,
         bgm_ranch,
+        world_scene_model,
     }
 }
 
