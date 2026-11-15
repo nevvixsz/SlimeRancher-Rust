@@ -3,4 +3,5 @@
 .DS_Store
 *.log
 /local_ref/
+/local_assets/
 /Unselected files/

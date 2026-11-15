@@ -12,6 +12,7 @@ members = [
     "crates/sr_sim",
     "crates/sr_persist",
     "crates/sr_sandbox",
+    "crates/sr_tools",
 ]
 
 [workspace.package]
