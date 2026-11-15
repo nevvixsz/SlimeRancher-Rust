@@ -15,7 +15,9 @@ use bevy::prelude::*;
 
 use assets::{find_workspace_root, load_client_assets, start_bgm_system, Language};
 use hud::{setup_hud, update_hud};
-use player_input::{handle_cursor_grab, step_simulation_system, CameraLookState};
+use player_input::{
+    handle_cursor_grab, step_simulation_system, sync_vacpack_visuals_system, CameraLookState,
+};
 use ranch_visuals::sync_ranch_visuals_system;
 use sky_lighting::{setup_sky_and_light, update_sky_and_light};
 use slime_visuals::update_slime_animations_system;
@@ -118,6 +120,7 @@ fn main() {
             (
                 handle_cursor_grab,
                 step_simulation_system.after(handle_cursor_grab),
+                sync_vacpack_visuals_system.after(step_simulation_system),
                 sync_actors_and_gordos_system.after(step_simulation_system),
                 update_slime_animations_system.after(sync_actors_and_gordos_system),
                 sync_ranch_visuals_system.after(step_simulation_system),
