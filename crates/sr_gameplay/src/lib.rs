@@ -15,11 +15,15 @@ pub use ammo::AmmoController;
 pub use economy::{
     build_market_listings, current_seven_zee_rank, deposit_plorts, get_plort_sold_count,
     next_seven_zee_rank, plort_sold_stat_key, purchase_next_seven_zee_rank, step_market_deposits,
-    unlock_seven_zee, CoinsType, CurrValueEntry, DepositResponse, EconomyDirector,
-    MarketDepositZone, MarketListing, PriceTrend, SevenZeeError, SevenZeePurchaseResult,
-    SevenZeeRank, CHROMA_UNLOCK_RANK, CORPORATE_PARTNER_MAX_RANK, DEFAULT_DAILY_SHUTDOWN_MINS,
-    DEFAULT_SATURATION_RECOVERY, MOCHI_BONUS_CHANCE, MOCHI_BONUS_FACTOR, RUSH_PLORT_BONUS_COUNT,
-    SEVEN_ZEE_RANKS, SLIME_TOYS_UNLOCK_RANK, STAT_PLORTS_SOLD,
+    unlock_seven_zee, AcceptOutcome, CoinsType, CurrValueEntry, DepositResponse, EconomyDirector,
+    EconomyRuntime, EconomyStepEvents, ExchangeDirector, ExchangeStepEvents, MarketDepositZone,
+    MarketListing, PriceTrend, ProgressRewardLevel, RancherProfile, SevenZeeError,
+    SevenZeePurchaseResult, SevenZeeRank, BONUS_PROB, CHROMA_UNLOCK_RANK,
+    CORPORATE_PARTNER_MAX_RANK, DAILY_OFFER_HOUR, DEFAULT_DAILY_SHUTDOWN_MINS,
+    DEFAULT_SATURATION_RECOVERY, EARLY_EXCHANGE_HOURS, MAX_OFFER_VAL, MIN_OFFER_VAL,
+    MOCHI_BONUS_CHANCE, MOCHI_BONUS_FACTOR, MOCHI_RECUR_AMOUNT, OGDEN_RECUR_AMOUNT, RANCHER_IDS,
+    RARE_PROB, REWARD_BONUS_MULT, REWARD_VAL_MULT, RUSH_PLORT_BONUS_COUNT, SEVEN_ZEE_RANKS,
+    SLIME_TOYS_UNLOCK_RANK, STAT_PLORTS_SOLD, VIKTOR_RECUR_AMOUNT,
 };
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
@@ -368,5 +372,195 @@ mod tests {
         gm.progress.set_progress(ProgressType::CorporatePartner, 10);
         assert!(toys.purchaseable_toys(&gm).contains(&IdentifiableId::PuzzleCubeToy));
         assert!(toys.buy_toy(&mut gm, &mut pw, IdentifiableId::PuzzleCubeToy, Vec3::ZERO).is_ok());
+    }
+
+    #[test]
+    fn economy_director_pricing_saturation_recovery_and_shutdown() {
+        use sr_data::DataRegistry;
+        use sr_math::Randoms;
+        use sr_model::GameModel;
+
+        let data = DataRegistry::builtin();
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut rng = Randoms::from_seed(42);
+
+        let mut econ1 = EconomyDirector::default();
+        econ1.init_model(&mut gm.world, &data, &mode, &mut rng);
+        let day0_pink = econ1.get_curr_value(IdentifiableId::PinkPlort).unwrap();
+        assert!(day0_pink > 0);
+
+        // Midnight shutdown window 00:00 .. 00:05
+        assert!(econ1.is_market_shutdown(&mode, 0.02));
+        assert!(!econ1.is_market_shutdown(&mode, 0.25));
+
+        // Selling 100 Pink Plorts raises saturation, lowering Day 1 price
+        econ1.register_sold(&mut gm.world, IdentifiableId::PinkPlort, 100);
+        let sat_after_sale = gm.world.market_saturation[&IdentifiableId::PinkPlort];
+        gm.world.world_time = 86400.0;
+        assert!(econ1.step(&mut gm.world, &mode, 1));
+        let sat_after_midnight = gm.world.market_saturation[&IdentifiableId::PinkPlort];
+        assert!((sat_after_midnight - sat_after_sale * 0.75).abs() < 1e-3);
+        assert!(econ1.get_change_in_value(IdentifiableId::PinkPlort).is_some());
+    }
+
+    #[test]
+    fn plort_market_deposit_mochi_bonus_market_link_and_rush_listings() {
+        use sr_data::DataRegistry;
+        use sr_ids::{ProgressType, RegionSetId};
+        use sr_math::{Randoms, Vec3};
+        use sr_model::GameModel;
+        use sr_physics::PhysicsWorld;
+
+        let data = DataRegistry::builtin();
+        let mode = GameModeSettings::for_mode(GameMode::TimeLimitV2);
+        let mut gm = GameModel::new(GameMode::TimeLimitV2);
+        let mut pw = PhysicsWorld::new();
+        let mut rng = Randoms::from_seed(7);
+
+        let mut rt = EconomyRuntime::default();
+        rt.ensure_initialized(&mut gm, &data, &mode, &mut rng);
+        // Rush mode disables dynamic market & shutdown and uses 1.5x base value
+        assert!(!rt.market.is_market_shutdown(&mode, 0.01));
+        assert_eq!(rt.market.get_curr_value(IdentifiableId::PinkPlort), Some(11)); // round(7 * 1.5) = 11
+
+        rt.deposit_zones.push(MarketDepositZone {
+            id: "market_link_1".into(),
+            pos: Vec3::new(10.0, 0.0, 0.0),
+            radius: 2.0,
+            is_market_link: true,
+        });
+        spawn_physical_actor(
+            &mut gm,
+            &mut pw,
+            IdentifiableId::PinkPlort,
+            RegionSetId::Home,
+            Vec3::new(10.5, 0.0, 0.0),
+            Vec3::ZERO,
+        );
+        let ev = rt.step(&mut gm, &mut pw, &data, &mode, 1, 9.0, &mut rng);
+        assert_eq!(ev.market_deposits.len(), 1);
+        assert_eq!(gm.player.currency, 11);
+
+        // Deposit 24 more to hit Rush Mode 25-plort bonus
+        gm.progress.set_progress(ProgressType::MochiRewards, 1);
+        let resp = deposit_plorts(
+            &rt.market,
+            &mut gm,
+            &mode,
+            IdentifiableId::PinkPlort,
+            24,
+            9.0,
+            1.0,
+            false,
+            &mut rng,
+        );
+        assert_eq!(resp.deposits, 24);
+        assert!(resp.currency >= 24 * 11);
+        let listings = build_market_listings(&rt.market, &gm, &mode);
+        let pink = listings
+            .iter()
+            .find(|l| l.id == IdentifiableId::PinkPlort)
+            .unwrap();
+        assert_eq!(pink.sold_count, 25);
+        assert!(pink.rush_bonus_complete);
+        assert_eq!(pink.trend, PriceTrend::BonusComplete);
+    }
+
+    #[test]
+    fn seven_zee_28_ranks_upgrades_and_blueprints() {
+        use sr_ids::{GadgetId, PediaId, ProgressType};
+        use sr_model::GameModel;
+
+        let mut gm = GameModel::new(GameMode::Classic);
+        assert_eq!(
+            purchase_next_seven_zee_rank(&mut gm, true),
+            Err(SevenZeeError::Locked)
+        );
+        unlock_seven_zee(&mut gm);
+        gm.player.currency = 5_000_000;
+
+        for expected_rank in 1..=CORPORATE_PARTNER_MAX_RANK {
+            let res = purchase_next_seven_zee_rank(&mut gm, true).unwrap();
+            assert_eq!(res.new_rank, expected_rank);
+        }
+        assert_eq!(
+            purchase_next_seven_zee_rank(&mut gm, true),
+            Err(SevenZeeError::MaxRankReached)
+        );
+        assert_eq!(gm.progress.get_progress(ProgressType::CorporatePartner), 28);
+        assert!(gm.pedia.unlocked.contains(&PediaId::Chroma));
+        assert!(gm.pedia.unlocked.contains(&PediaId::SlimeToys));
+        assert!(gm.player.upgrades.contains(&PlayerUpgrade::GoldenSureshot));
+        assert!(gm.gadgets.blueprints.contains(&GadgetId::MarketLink));
+        assert!(gm.gadgets.blueprints.contains(&GadgetId::TeleporterGold));
+        assert_eq!(gm.player.max_ammo, 100);
+        assert_eq!(gm.player.max_health, 250);
+    }
+
+    #[test]
+    fn range_exchange_daily_offer_early_bonus_and_ogden_progress() {
+        use sr_ids::{ProgressType, RegionSetId};
+        use sr_math::{Randoms, Vec3};
+        use sr_model::{GameModel, NonIdentReward, OfferType};
+        use sr_physics::PhysicsWorld;
+
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut pw = PhysicsWorld::new();
+        let mut rng = Randoms::from_seed(17);
+        let ex = ExchangeDirector::default();
+        ExchangeDirector::init_model(&mut gm.world, &mode);
+
+        // Day 2 at 12:05 PM triggers pending rancher ("thora" first)
+        gm.world.world_time = 86400.0 + (DAILY_OFFER_HOUR as f64) * 3600.0 + 1.0;
+        let ev = ex.step(&mut gm, &mode, 2, &mut rng);
+        assert_eq!(ev.created_pending_ranchers, vec!["thora".to_string()]);
+
+        let offer = ex
+            .select_daily_offer(&mut gm, &mode, 2, "thora", true, &mut rng)
+            .unwrap();
+        assert_eq!(gm.progress.get_progress(ProgressType::ExchangeThora), 1);
+
+        // Fulfill every requested item immediately -> triggers early bonus + rewards
+        let mut completed = false;
+        for req in &offer.requests {
+            for _ in 0..req.count {
+                let out = ex.try_accept_item(
+                    &mut gm,
+                    &mut pw,
+                    OfferType::General,
+                    req.id,
+                    Vec3::ZERO,
+                    RegionSetId::Home,
+                    &mut rng,
+                );
+                assert!(out.accepted);
+                if out.completed {
+                    completed = true;
+                    assert!(out.early_bonus);
+                    assert!(out.newbucks_awarded >= 100);
+                }
+            }
+        }
+        assert!(completed);
+        assert!(!gm.world.curr_offers.contains_key(&OfferType::General));
+
+        // Ogden special progress offer awards OgdenMix -> OgdenRewards = 1 + OgdenRecur unlocked
+        assert!(ex.maybe_start_progress_offer(&mut gm, OfferType::Ogden));
+        let og = gm.world.curr_offers[&OfferType::Ogden].clone();
+        assert_eq!(og.rewards[0].spec_reward, NonIdentReward::OgdenMix);
+        for _ in 0..og.requests[0].count {
+            ex.try_accept_item(
+                &mut gm,
+                &mut pw,
+                OfferType::Ogden,
+                og.requests[0].id,
+                Vec3::ZERO,
+                RegionSetId::Home,
+                &mut rng,
+            );
+        }
+        assert_eq!(gm.progress.get_progress(ProgressType::OgdenRewards), 1);
     }
 }
