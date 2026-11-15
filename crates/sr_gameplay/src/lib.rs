@@ -27,9 +27,13 @@ pub use economy::{
     SLIME_TOYS_UNLOCK_RANK, STAT_PLORTS_SOLD, VIKTOR_RECUR_AMOUNT,
 };
 pub use science::{
-    builtin_blueprint_unlock_rules, builtin_gadget_definitions, spec_for_extractor,
+    bait_gordo_snare, builtin_blueprint_unlock_rules, builtin_gadget_definitions,
+    check_gordo_snares, deposit_warp_depot, feed_snared_gordo, spec_for_extractor,
+    step_utility_gadgets, trigger_chicken_cloner, use_teleporter, withdraw_warp_depot,
     BlueprintUnlockRule, ExtractorProduceEntry, ExtractorSpec, ExtractorStepEvents,
-    ExtractorSystem, GadgetDirector, GadgetDirectorStepEvents, GadgetError, REFINERY_MAX,
+    ExtractorSystem, GadgetDirector, GadgetDirectorStepEvents, GadgetError, UtilityGadgetEvents,
+    HYDRO_TURRET_RANGE, MED_STATION_HEAL_PER_SEC, REFINERY_MAX, SNARED_GORDO_TARGET_COUNT,
+    TAMING_BELL_RANGE, WARP_DEPOT_MAX_STACK,
 };
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
