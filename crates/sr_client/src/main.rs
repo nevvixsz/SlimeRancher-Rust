@@ -8,6 +8,7 @@ mod world_sync;
 
 use std::path::PathBuf;
 
+use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 
 use assets::{find_workspace_root, load_client_assets, start_bgm_system, Language};
@@ -79,6 +80,14 @@ fn main() {
                 })
                 .set(AssetPlugin {
                     file_path: asset_root.to_string_lossy().into_owned(),
+                    ..default()
+                })
+                .set(PbrPlugin {
+                    // Fall back to CPU mesh uniform building so DX12 FL 11_0 GPUs
+                    // (e.g. Fermi GTX 580 with max_storage_buffers_per_shader_stage == 2)
+                    // do not panic creating the 4-storage-buffer GPU preprocess layout.
+                    use_gpu_instance_buffer_builder: std::env::var_os("SR_GPU_PREPROCESS")
+                        .is_some(),
                     ..default()
                 }),
         )
