@@ -2,6 +2,7 @@
 //! plort market dropzone, and initial actors for early physics & vacpack testing.
 
 use sr_ai::{GordoRewardKind, WorldGordo};
+use sr_gameplay::PlotBounds;
 use sr_ids::{IdentifiableId, LandPlotId, RegionSetId};
 use sr_math::Vec3;
 use sr_model::LandPlotModel;
@@ -85,6 +86,28 @@ pub fn setup_test_arena(sim: &mut Simulation) {
         "sandbox_garden".into(),
         LandPlotModel::new("sandbox_garden", LandPlotId::Garden),
     );
+    sim.model.land_plots.insert(
+        "sandbox_pond".into(),
+        LandPlotModel::new("sandbox_pond", LandPlotId::Pond),
+    );
+    sim.ranch.register_bounds(PlotBounds {
+        plot_id: "sandbox_corral".into(),
+        center: landmarks::CORRAL_CENTER,
+        half_extents: Vec3::new(5.0, 3.0, 5.0),
+        region: RegionSetId::Home,
+    });
+    sim.ranch.register_bounds(PlotBounds {
+        plot_id: "sandbox_garden".into(),
+        center: landmarks::GARDEN_CENTER,
+        half_extents: Vec3::new(5.0, 3.0, 5.0),
+        region: RegionSetId::Home,
+    });
+    sim.ranch.register_bounds(PlotBounds {
+        plot_id: "sandbox_pond".into(),
+        center: landmarks::POND_CENTER,
+        half_extents: Vec3::new(4.0, 2.0, 4.0),
+        region: RegionSetId::Home,
+    });
 
     // 4. Water Pond trigger (`LiquidSource` around (-14, 0, -14))
     sim.physics.add_static(StaticCollider {

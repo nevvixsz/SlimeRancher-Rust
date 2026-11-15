@@ -13,8 +13,13 @@ pub use actors::{
 pub use ammo::AmmoController;
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
-    plot_purchase_cost, upgrade_purchase_cost, upgrade_to_deluxe_crop, PlotOpError,
-    RanchDirector, RanchExpansion,
+    clear_garden_crop, crop_for_item, deposit_feeder_food, feeder_cycle_hours, plant_garden_crop,
+    plot_purchase_cost, step_corrals_and_coops, step_feed_speed, step_gardens_ponds_incinerators,
+    upgrade_purchase_cost, upgrade_to_deluxe_crop, water_garden, withdraw_collector_plorts,
+    AirNetState, CorralCoopEvents, GardenPondIncineratorEvents, GardenRuntimeState, PlotBounds,
+    PlotOpError, RanchDirector, RanchExpansion, RanchRuntime, RanchStepEvents, SiloController,
+    ToyDirector, BASE_TOYS, CORPORATE_LEVEL_UNLOCK, FASTFORWARD_CHUNK_SECS, FASTFORWARD_MIN_SECS,
+    UPGRADED_TOYS,
 };
 pub use vacuum::{
     VacEvents, VacInput, VacMode, VacuumableSize, WeaponVacuum, AIR_BURST_POWER, AIR_BURST_RADIUS,
@@ -227,5 +232,131 @@ mod tests {
         assert!(broken);
         assert!(gm.actor(crate_id).is_none());
         assert!(gm.actors.len() >= 2);
+    }
+
+    #[test]
+    fn ranch_plot_purchase_upgrades_and_silo_capacity() {
+        use sr_ids::{LandPlotId, LandPlotUpgrade};
+        use sr_model::GameModel;
+
+        let mut gm = GameModel::new(GameMode::Classic);
+        gm.player.currency = 5000;
+        RanchDirector::ensure_plot(&mut gm, "plot_1", LandPlotId::Empty);
+
+        // Build Silo (450 NB)
+        assert_eq!(RanchDirector::buy_plot(&mut gm, "plot_1", LandPlotId::Silo), Ok(()));
+        assert_eq!(gm.player.currency, 5000 - 450);
+
+        // Cannot skip Storage2 straight to Storage3
+        assert_eq!(
+            RanchDirector::buy_upgrade(&mut gm, "plot_1", LandPlotUpgrade::Storage3),
+            Err(PlotOpError::PrerequisiteUpgradeMissing)
+        );
+        assert_eq!(
+            RanchDirector::buy_upgrade(&mut gm, "plot_1", LandPlotUpgrade::Storage2),
+            Ok(())
+        );
+        assert_eq!(
+            RanchDirector::buy_upgrade(&mut gm, "plot_1", LandPlotUpgrade::Storage3),
+            Ok(())
+        );
+        assert_eq!(
+            RanchDirector::buy_upgrade(&mut gm, "plot_1", LandPlotUpgrade::Storage4),
+            Ok(())
+        );
+
+        let plot = gm.land_plots.get_mut("plot_1").unwrap();
+        assert_eq!(SiloController::usable_slot_count(plot), 12);
+        let stored = SiloController::deposit_to_slot(plot, 0, IdentifiableId::PinkPlort, 350);
+        assert_eq!(stored, 300);
+        assert_eq!(
+            SiloController::withdraw_from_slot(plot, 0, 120),
+            Some((IdentifiableId::PinkPlort, 120))
+        );
+    }
+
+    #[test]
+    fn corral_feeder_collector_airnet_and_garden_harvest() {
+        use sr_ids::{LandPlotId, LandPlotUpgrade, RegionSetId};
+        use sr_math::{Randoms, Vec3};
+        use sr_model::{GameModel, SpawnResourceId};
+        use sr_physics::PhysicsWorld;
+
+        let mut gm = GameModel::new(GameMode::Classic);
+        gm.player.currency = 10000;
+        let mut pw = PhysicsWorld::new();
+        let mut rng = Randoms::from_seed(9);
+        let mut ranch = RanchRuntime::default();
+
+        RanchDirector::ensure_plot(&mut gm, "corral_1", LandPlotId::Empty);
+        RanchDirector::buy_plot(&mut gm, "corral_1", LandPlotId::Corral).unwrap();
+        RanchDirector::buy_upgrade(&mut gm, "corral_1", LandPlotUpgrade::Feeder).unwrap();
+        RanchDirector::buy_upgrade(&mut gm, "corral_1", LandPlotUpgrade::PlortCollector).unwrap();
+        RanchDirector::buy_upgrade(&mut gm, "corral_1", LandPlotUpgrade::AirNet).unwrap();
+        ranch.register_bounds(PlotBounds {
+            plot_id: "corral_1".into(),
+            center: Vec3::ZERO,
+            half_extents: Vec3::new(5.0, 3.0, 5.0),
+            region: RegionSetId::Home,
+        });
+
+        // Deposit carrots into feeder and drop a plort inside the corral
+        {
+            let p = gm.land_plots.get_mut("corral_1").unwrap();
+            assert_eq!(deposit_feeder_food(p, IdentifiableId::CarrotVeggie, 10), 10);
+        }
+        spawn_physical_actor(
+            &mut gm,
+            &mut pw,
+            IdentifiableId::PinkPlort,
+            RegionSetId::Home,
+            Vec3::new(1.0, 0.5, 1.0),
+            Vec3::ZERO,
+        );
+
+        // Advance world_time past feeder + collector trigger
+        let wt = gm.world.world_time + 7.0 * 3600.0;
+        gm.world.world_time = wt;
+        let ev = ranch.step(&mut gm, &mut pw, wt, 3600.0, 0.1, &mut rng);
+        assert!(!ev.corral_coop.feeder_ejected.is_empty());
+        assert_eq!(
+            ev.corral_coop.collector_stored,
+            vec![("corral_1".to_string(), IdentifiableId::PinkPlort)]
+        );
+        let withdrawn = withdraw_collector_plorts(gm.land_plots.get_mut("corral_1").unwrap(), 0, 5);
+        assert_eq!(withdrawn, Some((IdentifiableId::PinkPlort, 1)));
+
+        // Garden with DeluxeGarden auto-upgrades CuberryTree -> CuberryTreeDlx
+        RanchDirector::ensure_plot(&mut gm, "garden_1", LandPlotId::Empty);
+        RanchDirector::buy_plot(&mut gm, "garden_1", LandPlotId::Garden).unwrap();
+        RanchDirector::buy_upgrade(&mut gm, "garden_1", LandPlotUpgrade::DeluxeGarden).unwrap();
+        let mut gs = GardenRuntimeState::default();
+        assert!(plant_garden_crop(
+            gm.land_plots.get_mut("garden_1").unwrap(),
+            &mut gs,
+            IdentifiableId::CuberryFruit,
+            wt
+        ));
+        assert_eq!(gm.land_plots["garden_1"].attached_id, SpawnResourceId::CuberryTreeDlx);
+    }
+
+    #[test]
+    fn toy_director_unlocks_upgraded_toys_at_corporate_rank_10() {
+        use sr_ids::ProgressType;
+        use sr_math::Vec3;
+        use sr_model::GameModel;
+        use sr_physics::PhysicsWorld;
+
+        let mut gm = GameModel::new(GameMode::Classic);
+        gm.player.currency = 1000;
+        let mut pw = PhysicsWorld::new();
+        let toys = ToyDirector::default();
+
+        assert!(!toys.purchaseable_toys(&gm).contains(&IdentifiableId::PuzzleCubeToy));
+        assert!(toys.buy_toy(&mut gm, &mut pw, IdentifiableId::PuzzleCubeToy, Vec3::ZERO).is_err());
+
+        gm.progress.set_progress(ProgressType::CorporatePartner, 10);
+        assert!(toys.purchaseable_toys(&gm).contains(&IdentifiableId::PuzzleCubeToy));
+        assert!(toys.buy_toy(&mut gm, &mut pw, IdentifiableId::PuzzleCubeToy, Vec3::ZERO).is_ok());
     }
 }

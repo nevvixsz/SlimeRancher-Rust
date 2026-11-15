@@ -5,7 +5,8 @@ use sr_ai::{AiStepEvents, SlimeAiCoordinator};
 use sr_data::{DataRegistry, GameModeSettings};
 use sr_gameplay::{
     spawn_physical_actor, step_actor_lifecycle, ActorLifecycleEvents, AmmoController, DeathOutcome,
-    DeathSource, PlayerController, VacEvents, VacInput, WeaponVacuum,
+    DeathSource, PlayerController, RanchRuntime, RanchStepEvents, VacEvents, VacInput,
+    WeaponVacuum,
 };
 use sr_ids::{GameMode, IdentifiableId, RegionSetId};
 use sr_math::{Randoms, Vec3};
@@ -22,6 +23,7 @@ pub struct TickEvents {
     pub delta_world_time: f64,
     pub vac: VacEvents,
     pub lifecycle: ActorLifecycleEvents,
+    pub ranch: RanchStepEvents,
     pub ai: AiStepEvents,
     pub player_death: Option<DeathOutcome>,
 }
@@ -38,9 +40,11 @@ pub struct Simulation {
     pub player_ctrl: PlayerController,
     pub ammo: AmmoController,
     pub vacuum: WeaponVacuum,
+    pub ranch: RanchRuntime,
     pub ai: SlimeAiCoordinator,
     pub rng: Randoms,
     was_game_over: bool,
+    ff_start_time: Option<f64>,
 }
 
 impl Default for Simulation {
@@ -71,9 +75,11 @@ impl Simulation {
             player_ctrl: PlayerController::default(),
             ammo: AmmoController::default(),
             vacuum: WeaponVacuum::default(),
+            ranch: RanchRuntime::default(),
             ai: SlimeAiCoordinator::default(),
             rng: Randoms::default(),
             was_game_over: false,
+            ff_start_time: None,
         }
     }
 
@@ -105,8 +111,17 @@ impl Simulation {
             return events;
         }
 
+        if self.model.world.fast_forward_until.is_some() && self.ff_start_time.is_none() {
+            self.ff_start_time = Some(self.model.world.world_time);
+        }
+
         if let Some(false) = self.time.update(&mut self.model.world, dt) {
             events.fast_forward_finished = true;
+            if let Some(start_t) = self.ff_start_time.take() {
+                let end_t = self.model.world.world_time;
+                self.ranch
+                    .fast_forward_plots(&mut self.model, &mut self.physics, start_t, end_t, &mut self.rng);
+            }
         }
 
         let scaled_dt = dt * self.time.time_scale;
@@ -133,6 +148,17 @@ impl Simulation {
             &mut self.physics,
             &impacts,
             &overlaps,
+            &mut self.rng,
+        );
+
+        // Ranch plots: feeders, plort collectors, air nets, coops, gardens, ponds, incinerators
+        let delta_wt = TimeDirector::delta_world_time(&self.model.world);
+        events.ranch = self.ranch.step(
+            &mut self.model,
+            &mut self.physics,
+            world_time,
+            delta_wt,
+            scaled_dt,
             &mut self.rng,
         );
 

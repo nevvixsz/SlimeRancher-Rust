@@ -5,6 +5,7 @@ pub mod corral_coop;
 pub mod garden_pond_incinerator;
 pub mod plots;
 pub mod silo;
+pub mod toys;
 
 pub use corral_coop::{
     deposit_feeder_food, feeder_cycle_hours, step_corrals_and_coops, step_feed_speed,
@@ -26,4 +27,8 @@ pub use plots::{
 pub use silo::{
     SiloController, SILO_FULL_ACHIEVE_AMOUNT, SILO_FULL_ACHIEVE_SLOTS, SILO_MAX_PER_SLOT,
     SILO_MAX_SIDES, SILO_SLOTS_PER_SIDE, SILO_TOTAL_SLOTS,
+};
+pub use toys::{
+    RanchRuntime, RanchStepEvents, ToyDirector, BASE_TOYS, CORPORATE_LEVEL_UNLOCK,
+    FASTFORWARD_CHUNK_SECS, FASTFORWARD_MIN_SECS, UPGRADED_TOYS,
 };
