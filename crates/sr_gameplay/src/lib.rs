@@ -2,6 +2,7 @@
 
 pub mod actors;
 pub mod ammo;
+pub mod dlc;
 pub mod economy;
 pub mod player;
 pub mod ranch;
@@ -14,6 +15,7 @@ pub use actors::{
     BREAK_COLLISION_THRESHOLD,
 };
 pub use ammo::AmmoController;
+pub use dlc::*;
 pub use economy::{
     build_market_listings, current_seven_zee_rank, deposit_plorts, get_plort_sold_count,
     next_seven_zee_rank, plort_sold_stat_key, purchase_next_seven_zee_rank, step_market_deposits,
@@ -1140,5 +1142,297 @@ mod tests {
         assert!(rush_earned.contains(&AchievementId::TimeLimitCurrencyA));
         assert!(!rush_earned.contains(&AchievementId::SellPlortsA)); // blocked in TimeLimitV2
         let _ = classic_mode;
+    }
+
+    #[test]
+    fn step9_ogdens_wilds_kookadoba_nodes_and_crack() {
+        use sr_data::GameModeSettings;
+        use sr_ids::{GameMode, IdentifiableId, ProgressType, RegionSetId};
+        use sr_math::{Randoms, Vec3};
+        use sr_model::GameModel;
+        use sr_physics::PhysicsWorld;
+
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut pw = PhysicsWorld::new();
+        let mut rng = Randoms::from_seed(91);
+        let mut prog = ProgressDirector::default();
+        let mut wilds = WildsSystem::default();
+
+        assert!(!WildsSystem::can_enter_wilds(&gm, &mode));
+        gm.progress.set_unique_progress(ProgressType::UnlockMoss);
+        gm.progress
+            .set_unique_progress(ProgressType::UnlockOvergrowth);
+        assert!(WildsSystem::can_enter_wilds(&gm, &mode));
+
+        let entry_ev = wilds.enter_wilds(&mut gm, &mode, &mut prog).unwrap();
+        assert!(entry_ev
+            .newly_set
+            .contains(&ProgressType::EnterZoneOgdenRanch));
+        assert!(gm.progress.has_progress(ProgressType::UnlockWilds));
+
+        wilds.register_node("node_a", Vec3::new(10.0, 0.0, 10.0));
+        wilds.register_node("node_b", Vec3::new(15.0, 0.0, 15.0));
+
+        // First step initializes next_spawn_time
+        wilds.step(&mut gm, &mut pw, &mut rng);
+        gm.world.world_time += KOOKADOBA_SPAWN_DELAY_SECS + 1.0;
+        let ev = wilds.step(&mut gm, &mut pw, &mut rng);
+        assert_eq!(ev.grown_nodes.len(), 1);
+        let (node_id, fruit_id) = &ev.grown_nodes[0];
+        assert_eq!(gm.actors[fruit_id].ident, IdentifiableId::KookadobaFruit);
+        assert!(wilds.harvest_node(&mut gm, &mut pw, node_id));
+        assert!(!gm.actors.contains_key(fruit_id));
+
+        // Cracking a KookadobaBall spawns 3 KookadobaFruit actors
+        let ball_id = spawn_physical_actor(
+            &mut gm,
+            &mut pw,
+            IdentifiableId::KookadobaBall,
+            RegionSetId::Home,
+            Vec3::ZERO,
+            Vec3::ZERO,
+        );
+        let fruits = WildsSystem::crack_kookadoba_ball(&mut gm, &mut pw, ball_id, 3, &mut rng);
+        assert_eq!(fruits.len(), 3);
+        assert!(!gm.actors.contains_key(&ball_id));
+    }
+
+    #[test]
+    fn step9_mochi_nimble_valley_generators_checkpoints_and_plorts() {
+        use sr_data::GameModeSettings;
+        use sr_ids::{AmmoMode, GameMode, IdentifiableId, PediaId, ProgressType};
+        use sr_math::{Randoms, Vec3};
+        use sr_model::{GameModel, QuicksilverGeneratorState};
+        use sr_physics::PhysicsWorld;
+
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut pw = PhysicsWorld::new();
+        let mut rng = Randoms::from_seed(92);
+        let mut ammo = AmmoController::default();
+        let mut prog = ProgressDirector::default();
+        let mut pedia = PediaDirector::default();
+        let mut valley = ValleySystem::default();
+
+        gm.progress.set_unique_progress(ProgressType::UnlockQuarry);
+        gm.progress.set_unique_progress(ProgressType::UnlockGrotto);
+        let entry = valley
+            .enter_valley(&mut gm, &mode, &mut prog, &mut ammo)
+            .unwrap();
+        assert!(entry.newly_set.contains(&ProgressType::UnlockValley));
+        assert_eq!(gm.player.ammo_mode, AmmoMode::NimbleValley);
+
+        valley.register_generator(
+            &mut gm,
+            GeneratorConfig {
+                id: "gen_1".to_string(),
+                countdown_minutes: 0.05,
+                active_minutes: 10.0,
+                max_active_minutes: 30.0,
+                cooldown_minutes: 5.0,
+                spawn_positions: vec![Vec3::new(0.0, 0.0, 0.0)],
+                target_slime_count: 3,
+            },
+        );
+        valley.register_replacer("rep_pulse", IdentifiableId::ValleyAmmo1, 1.0);
+        valley.register_replacer("rep_field", IdentifiableId::ValleyAmmo2, 1.0);
+        assert!(valley.trigger_ammo_replacer(&mut gm, &mut ammo, "rep_pulse"));
+        assert!(valley.trigger_ammo_replacer(&mut gm, &mut ammo, "rep_field"));
+        assert_eq!(
+            gm.player.ammo_dict[&AmmoMode::NimbleValley].get_slot_id(1),
+            IdentifiableId::ValleyAmmo1
+        );
+        assert_eq!(
+            gm.player.ammo_dict[&AmmoMode::NimbleValley].get_slot_count(2),
+            3
+        );
+
+        assert!(valley.activate_generator(&mut gm, "gen_1"));
+        assert_eq!(
+            gm.quicksilver_generators["gen_1"].state,
+            QuicksilverGeneratorState::Countdown
+        );
+
+        // Advance past countdown -> Active & spawn 3 QuicksilverSlimes
+        gm.world.world_time += 10.0;
+        let ev1 = valley.step(&mut gm, &mut pw, &mut ammo, &mut pedia, &mut rng);
+        assert_eq!(ev1.activated_generators, vec!["gen_1".to_string()]);
+        assert_eq!(ev1.spawned_slimes.len(), 3);
+
+        // Checkpoint extends active window
+        let before = gm.quicksilver_generators["gen_1"].timer.unwrap();
+        assert!(valley.trigger_checkpoint(&mut gm, "gen_1", 5.0));
+        assert!(gm.quicksilver_generators["gen_1"].timer.unwrap() > before);
+
+        // Electric shock produces plorts, collector auto-adds to NimbleValley slot 0
+        let plorts = valley.shock_slimes_in_radius(&mut gm, &mut pw, Vec3::ZERO, 10.0);
+        assert_eq!(plorts.len(), 3);
+        gm.world.world_time += f64::from(DEFAULT_PLORT_COLLECT_MINS) * 60.0 + 1.0;
+        let ev2 = valley.step(&mut gm, &mut pw, &mut ammo, &mut pedia, &mut rng);
+        assert_eq!(ev2.collected_plorts, 3);
+        assert_eq!(ev2.pedia_unlocked, Some(PediaId::QuicksilverSlime));
+        assert_eq!(
+            gm.player.ammo_dict[&AmmoMode::NimbleValley].get_slot_count(0),
+            3
+        );
+
+        // Exit valley restores AmmoMode::Default and clears transient ValleyAmmo slots
+        valley.exit_valley(&mut gm, &mut ammo);
+        assert_eq!(gm.player.ammo_mode, AmmoMode::Default);
+        assert_eq!(
+            gm.player.ammo_dict[&AmmoMode::NimbleValley].get_slot_id(1),
+            IdentifiableId::None
+        );
+    }
+
+    #[test]
+    fn step9_viktor_slimulation_impostos_tarr_and_bug_reports() {
+        use sr_data::GameModeSettings;
+        use sr_ids::{AmmoMode, GameMode, IdentifiableId, PlayerUpgrade, ProgressType};
+        use sr_math::{Randoms, Vec3};
+        use sr_model::GameModel;
+        use sr_physics::PhysicsWorld;
+
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut pw = PhysicsWorld::new();
+        let mut rng = Randoms::from_seed(93);
+        let mut ammo = AmmoController::default();
+        let mut prog = ProgressDirector::default();
+        let mut tut = TutorialDirector::default();
+        let mut slim = SlimulationsSystem::default();
+
+        gm.progress.set_unique_progress(ProgressType::UnlockLab);
+        gm.progress.set_unique_progress(ProgressType::UnlockRuins);
+        gm.player.upgrades.insert(PlayerUpgrade::TreasureCracker2);
+        assert!(SlimulationsSystem::can_enter_viktor_lab(&gm, &mode));
+
+        slim.register_imposto(
+            &mut gm,
+            ImpostoConfig {
+                id: "imp_1".to_string(),
+                pos: Vec3::ZERO,
+                spawn_pos: Vec3::new(1.0, 0.0, 1.0),
+                weight: 1.0,
+            },
+        );
+        slim.register_tarr_node(
+            &mut gm,
+            TarrNodeConfig {
+                id: "node_1".to_string(),
+                pos: Vec3::new(20.0, 0.0, 20.0),
+                dist_sq_from_entrance: 800.0,
+                spawner_positions: vec![Vec3::new(20.0, 0.0, 20.0)],
+            },
+        );
+        slim.register_debug_spray_source(&mut gm, "spray_1", Vec3::new(2.0, 0.0, 2.0));
+
+        let entry = slim
+            .enter_slimulation(&mut gm, &mode, &mut prog, &mut tut)
+            .unwrap();
+        assert!(entry.newly_set.contains(&ProgressType::EnterZoneSlimulation));
+        assert!(slim.consume_debug_spray_source(&mut gm, &mode, &mut ammo, &mut tut, "spray_1"));
+        assert_eq!(
+            gm.player.ammo_dict[&AmmoMode::Default].get_slot_id(4),
+            IdentifiableId::GlitchDebugSprayLiquid
+        );
+        assert_eq!(
+            gm.player.ammo_dict[&AmmoMode::Default].get_slot_count(4),
+            GLITCH_DEBUG_SPRAY_MAX_AMMO
+        );
+
+        let glitched = slim.expose_imposto(&mut gm, &mut pw, "imp_1", &mut rng);
+        assert!((1..=3).contains(&glitched.len()));
+        assert!(!gm.glitch.impostos["imp_1"].is_active);
+
+        // Add GlitchSlimes to vacpack, take tarr damage, then exit -> GlitchBugReport
+        assert!(ammo.maybe_add_to_slot(
+            &mut gm.player,
+            IdentifiableId::GlitchSlime,
+            None,
+            10,
+            gm.world.world_time
+        ));
+        let lost = slim.apply_tarr_damage_exposure(&mut gm, &mode, &mut tut, &mut rng);
+        assert!((1..=3).contains(&lost));
+        let remaining_expected = 10 - lost;
+        let converted = slim.exit_slimulation(&mut gm);
+        assert_eq!(converted, remaining_expected);
+        assert_eq!(
+            gm.player.ammo_dict[&AmmoMode::Default].get_slot_id(0),
+            IdentifiableId::GlitchBugReport
+        );
+        assert!(slim.store_glitch_item(IdentifiableId::GlitchBugReport));
+        assert_eq!(slim.storage_count, 1);
+
+        // Sterilizing a GlitchTarrSlime prevents timed split
+        let tarr_id = slim.spawn_glitch_tarr(&mut gm, &mut pw, Vec3::ZERO, 1.0, &mut rng);
+        assert!(slim.sterilize_tarr(&mut gm, &mut pw, tarr_id));
+        assert!(!gm.actors.contains_key(&tarr_id));
+    }
+
+    #[test]
+    fn step9_holiday_gordos_and_secret_style_largo_propagation() {
+        use sr_data::{DataRegistry, GameModeSettings};
+        use sr_ids::{GameMode, IdentifiableId, PediaId};
+        use sr_math::Randoms;
+        use sr_model::{AppearanceSaveSet, GameModel};
+
+        let data = DataRegistry::builtin();
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut rng = Randoms::from_seed(94);
+        let mut pedia = PediaDirector::default();
+        let mut holiday = HolidayDirector::default();
+
+        // Weekend of week 51 (Snowflake / Star ornaments) + Dec 25 (Wiggly Wonderland Echo Note Gordo)
+        let xmas_weekend = HolidayDate::new(2026, 12, 25, 5, 51);
+        holiday.sync_holidays(&mut gm, xmas_weekend);
+        assert!(!gm.holiday.event_gordos.is_empty());
+        assert!(!gm.holiday.event_echo_note_gordos.is_empty());
+        assert!(gm.gordos.contains_key("gordoPinkParty13"));
+        assert!(gm.echo_note_gordos.contains_key("gordoEchoNote11"));
+
+        let party_def = HolidayDirector::find_live_party_gordo(xmas_weekend).unwrap();
+        let ornament = HolidayDirector::roll_party_ornament(party_def, &mut rng);
+        assert!(ornament.is_ornament());
+
+        let echo_drop =
+            HolidayDirector::trigger_echo_note_gordo(&mut gm, &mode, &mut pedia, "gordoEchoNote11");
+        assert_eq!(echo_drop, Some(IdentifiableId::EchoNote11));
+        assert!(gm.pedia.unlocked.contains(&PediaId::EchoNoteGordoSlime));
+
+        // Secret Style unlocks & dependent Largo appearance propagation
+        let app = SlimeAppearanceDirector::default();
+        SlimeAppearanceDirector::init_defaults(&mut gm, &data.slimes);
+        assert_eq!(
+            SlimeAppearanceDirector::selected_appearance(&gm, IdentifiableId::PinkRockLargo),
+            AppearanceSaveSet::Classic
+        );
+        app.unlock_appearance(&mut gm, IdentifiableId::PinkSlime, AppearanceSaveSet::SecretStyle);
+        app.unlock_appearance(&mut gm, IdentifiableId::RockSlime, AppearanceSaveSet::SecretStyle);
+        app.select_appearance(
+            &mut gm,
+            &data.slimes,
+            IdentifiableId::PinkSlime,
+            AppearanceSaveSet::SecretStyle,
+        );
+        // Only Pink is SecretStyle -> PinkRockLargo stays Classic
+        assert_eq!(
+            SlimeAppearanceDirector::selected_appearance(&gm, IdentifiableId::PinkRockLargo),
+            AppearanceSaveSet::Classic
+        );
+        // Once Rock is also SecretStyle -> PinkRockLargo propagates to SecretStyle
+        app.select_appearance(
+            &mut gm,
+            &data.slimes,
+            IdentifiableId::RockSlime,
+            AppearanceSaveSet::SecretStyle,
+        );
+        assert_eq!(
+            SlimeAppearanceDirector::selected_appearance(&gm, IdentifiableId::PinkRockLargo),
+            AppearanceSaveSet::SecretStyle
+        );
     }
 }
