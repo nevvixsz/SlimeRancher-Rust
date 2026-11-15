@@ -267,7 +267,7 @@ pub fn step_corrals_and_coops(
                 if !b.contains_xz(actor.pos) {
                     continue;
                 }
-                if actor.ident == IdentifiableId::Roostro {
+                if actor.ident == IdentifiableId::Rooster {
                     has_roostro = true;
                     adults += 1;
                 } else if actor.ident.is_meat() {
