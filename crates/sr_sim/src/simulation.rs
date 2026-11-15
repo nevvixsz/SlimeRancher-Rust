@@ -12,6 +12,7 @@ use sr_ids::{GameMode, IdentifiableId, RegionSetId};
 use sr_math::{Randoms, Vec3};
 use sr_model::GameModel;
 use sr_physics::{PhysicsWorld, PlayerMotor, PlayerMoveInput};
+use sr_world::{WorldRuntime, WorldStepEvents};
 
 use crate::time::TimeDirector;
 
@@ -25,6 +26,7 @@ pub struct TickEvents {
     pub lifecycle: ActorLifecycleEvents,
     pub ranch: RanchStepEvents,
     pub ai: AiStepEvents,
+    pub world: WorldStepEvents,
     pub player_death: Option<DeathOutcome>,
 }
 
@@ -42,6 +44,7 @@ pub struct Simulation {
     pub vacuum: WeaponVacuum,
     pub ranch: RanchRuntime,
     pub ai: SlimeAiCoordinator,
+    pub world: WorldRuntime,
     pub rng: Randoms,
     was_game_over: bool,
     ff_start_time: Option<f64>,
@@ -77,6 +80,7 @@ impl Simulation {
             vacuum: WeaponVacuum::default(),
             ranch: RanchRuntime::default(),
             ai: SlimeAiCoordinator::default(),
+            world: WorldRuntime::default(),
             rng: Randoms::default(),
             was_game_over: false,
             ff_start_time: None,
@@ -162,8 +166,18 @@ impl Simulation {
             &mut self.rng,
         );
 
-        // Slime AI, emotions, eating, unique abilities, and Gordos
+        // World streaming, spawners, puzzle doors, and Glass Desert weather
         let hour_of_day = TimeDirector::curr_hour(&self.model.world);
+        events.world = self.world.step(
+            &mut self.model,
+            &mut self.physics,
+            &self.mode_settings,
+            hour_of_day,
+            scaled_dt,
+            &mut self.rng,
+        );
+
+        // Slime AI, emotions, eating, unique abilities, and Gordos
         let player_alive = self.model.player.curr_health > 0.0;
         events.ai = self.ai.step(
             &mut self.model,
@@ -178,7 +192,10 @@ impl Simulation {
             &mut self.rng,
         );
 
-        let total_ai_dmg = (events.ai.player_damage + events.ai.player_fire_damage).round() as i32;
+        let total_ai_dmg = (events.ai.player_damage
+            + events.ai.player_fire_damage
+            + events.world.desert.player_fire_damage)
+            .round() as i32;
         if total_ai_dmg > 0 {
             PlayerController::damage(
                 &mut self.model.player,
