@@ -387,7 +387,7 @@ fn store_in_collector(plot: &mut LandPlotModel, plort: IdentifiableId) -> bool {
 
 fn mature_chick_id(chick: IdentifiableId, rng: &mut Randoms) -> IdentifiableId {
     if rng.get_probability(0.15) {
-        return IdentifiableId::Roostro;
+        return IdentifiableId::Rooster;
     }
     match chick {
         IdentifiableId::BriarChick => IdentifiableId::BriarHen,
