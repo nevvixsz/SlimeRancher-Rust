@@ -164,91 +164,99 @@ impl ExtractorSystem {
                 .copied()
                 .unwrap_or(Vec3::new(0.0, 1.0, 0.0));
 
-            let Some(site) = model.gadget_sites.get_mut(&sid) else {
-                continue;
-            };
-            let Some(ref mut gadget) = site.attached else {
-                self.cycle_end_times.remove(&sid);
-                continue;
-            };
-            let Some(spec) = spec_for_extractor(gadget.ident) else {
-                continue;
-            };
-            let GadgetKind::Extractor(ref mut ex) = gadget.kind else {
-                continue;
-            };
+            let mut pending_spawn: Option<(IdentifiableId, Vec3)> = None;
 
-            // Initialize newly placed extractor
-            if !self.cycle_end_times.contains_key(&sid) {
-                if ex.cycles_remaining == 0 && ex.queued_to_produce == 0 {
-                    ex.cycles_remaining = if spec.infinite_cycles {
-                        spec.cycles
-                    } else {
-                        (spec.cycles - 1).max(0)
-                    };
+            {
+                let Some(site) = model.gadget_sites.get_mut(&sid) else {
+                    continue;
+                };
+                let Some(ref mut gadget) = site.attached else {
+                    self.cycle_end_times.remove(&sid);
+                    continue;
+                };
+                let Some(spec) = spec_for_extractor(gadget.ident) else {
+                    continue;
+                };
+                let GadgetKind::Extractor(ref mut ex) = gadget.kind else {
+                    continue;
+                };
+
+                // Initialize newly placed extractor
+                if !self.cycle_end_times.contains_key(&sid) {
+                    if ex.cycles_remaining == 0 && ex.queued_to_produce == 0 {
+                        ex.cycles_remaining = if spec.infinite_cycles {
+                            spec.cycles
+                        } else {
+                            (spec.cycles - 1).max(0)
+                        };
+                    }
+                    self.cycle_end_times
+                        .insert(sid.clone(), wt + (spec.hours_per_cycle as f64) * 3600.0);
+                    continue;
                 }
-                self.cycle_end_times
-                    .insert(sid.clone(), wt + (spec.hours_per_cycle as f64) * 3600.0);
-                continue;
+
+                if ex.queued_to_produce > 0 {
+                    if wt >= ex.next_produce_time {
+                        // Pick weighted zone-valid craft resource
+                        let eligible: Vec<&ExtractorProduceEntry> = spec
+                            .produces
+                            .iter()
+                            .filter(|p| p.restrict_zone.map_or(true, |rz| rz == zone))
+                            .collect();
+                        let total_w: f32 = eligible.iter().map(|e| e.weight.max(0.0)).sum();
+                        if total_w > 0.0 {
+                            let mut roll = rng.get_in_range_f32(0.0, total_w);
+                            let mut chosen = eligible[0].id;
+                            for e in &eligible {
+                                roll -= e.weight.max(0.0);
+                                if roll <= 0.0 {
+                                    chosen = e.id;
+                                    break;
+                                }
+                            }
+                            let vel = Vec3::new(
+                                rng.get_in_range_f32(-1.5, 1.5),
+                                3.0,
+                                rng.get_in_range_f32(-1.5, 1.5),
+                            );
+                            pending_spawn = Some((chosen, vel));
+                        }
+
+                        ex.queued_to_produce -= 1;
+                        if ex.queued_to_produce <= 0 {
+                            ex.next_produce_time = 0.0;
+                            if ex.cycles_remaining <= 0 && !spec.infinite_cycles {
+                                to_destroy.push((sid.clone(), gadget.ident));
+                            } else {
+                                if !spec.infinite_cycles {
+                                    ex.cycles_remaining -= 1;
+                                }
+                                self.cycle_end_times.insert(
+                                    sid.clone(),
+                                    wt + (spec.hours_per_cycle as f64) * 3600.0,
+                                );
+                            }
+                        } else {
+                            ex.next_produce_time = wt + 0.004166667 * 3600.0;
+                        }
+                    }
+                } else if let Some(&end_t) = self.cycle_end_times.get(&sid) {
+                    if wt >= end_t {
+                        ev.ready_sites.push(sid.clone());
+                    }
+                }
             }
 
-            if ex.queued_to_produce > 0 {
-                if wt >= ex.next_produce_time {
-                    // Pick weighted zone-valid craft resource
-                    let eligible: Vec<&ExtractorProduceEntry> = spec
-                        .produces
-                        .iter()
-                        .filter(|p| p.restrict_zone.map_or(true, |rz| rz == zone))
-                        .collect();
-                    let total_w: f32 = eligible.iter().map(|e| e.weight.max(0.0)).sum();
-                    if total_w > 0.0 {
-                        let mut roll = rng.get_in_range_f32(0.0, total_w);
-                        let mut chosen = eligible[0].id;
-                        for e in &eligible {
-                            roll -= e.weight.max(0.0);
-                            if roll <= 0.0 {
-                                chosen = e.id;
-                                break;
-                            }
-                        }
-                        let vel = Vec3::new(
-                            rng.get_in_range_f32(-1.5, 1.5),
-                            3.0,
-                            rng.get_in_range_f32(-1.5, 1.5),
-                        );
-                        let aid = spawn_physical_actor(
-                            model,
-                            physics,
-                            chosen,
-                            region_for_zone(zone),
-                            spawn_pos + Vec3::Y * 1.2,
-                            vel,
-                        );
-                        ev.spawned_items.push((sid.clone(), aid, chosen));
-                    }
-
-                    ex.queued_to_produce -= 1;
-                    if ex.queued_to_produce <= 0 {
-                        ex.next_produce_time = 0.0;
-                        if ex.cycles_remaining <= 0 && !spec.infinite_cycles {
-                            to_destroy.push((sid.clone(), gadget.ident));
-                        } else {
-                            if !spec.infinite_cycles {
-                                ex.cycles_remaining -= 1;
-                            }
-                            self.cycle_end_times.insert(
-                                sid.clone(),
-                                wt + (spec.hours_per_cycle as f64) * 3600.0,
-                            );
-                        }
-                    } else {
-                        ex.next_produce_time = wt + 0.004166667 * 3600.0;
-                    }
-                }
-            } else if let Some(&end_t) = self.cycle_end_times.get(&sid) {
-                if wt >= end_t {
-                    ev.ready_sites.push(sid.clone());
-                }
+            if let Some((chosen, vel)) = pending_spawn {
+                let aid = spawn_physical_actor(
+                    model,
+                    physics,
+                    chosen,
+                    region_for_zone(zone),
+                    spawn_pos + Vec3::Y * 1.2,
+                    vel,
+                );
+                ev.spawned_items.push((sid.clone(), aid, chosen));
             }
         }
 

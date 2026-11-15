@@ -112,8 +112,7 @@ pub fn use_teleporter(
 
     model.player.position = dest_pos + Vec3::Y * 1.2;
     model.player.curr_region_set_id = dest_region;
-    motor.pos = model.player.position;
-    motor.vel = Vec3::ZERO;
+    motor.velocity = Vec3::ZERO;
 
     Some((partner_id, dest_pos, dest_region))
 }
@@ -283,7 +282,7 @@ pub fn check_gordo_snares(
         let mut favored_gordo: Option<IdentifiableId> = None;
         let mut potential_gordos: Vec<IdentifiableId> = Vec::new();
 
-        for def in data.slimes.iter() {
+        for def in data.slimes.slimes.values() {
             if def.is_largo {
                 continue;
             }
@@ -299,7 +298,7 @@ pub fn check_gordo_snares(
                 .diet
                 .major_food_groups
                 .iter()
-                .any(|fg| fg.contains(bait))
+                .any(|fg| IdentifiableId::ids_in_food_group(*fg).contains(&bait))
             {
                 potential_gordos.push(gid);
             }
@@ -398,7 +397,7 @@ pub fn feed_snared_gordo(
             .diet
             .major_food_groups
             .iter()
-            .any(|fg| fg.contains(food_id));
+            .any(|fg| IdentifiableId::ids_in_food_group(*fg).contains(&food_id));
     if !eats {
         return (false, false);
     }

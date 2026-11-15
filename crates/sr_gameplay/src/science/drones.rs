@@ -187,10 +187,21 @@ pub fn set_drone_program(
 }
 
 /// Groups plots, refinery/market endpoints, and drone stations belonging to a single ranch zone.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DroneNetworkScope {
     pub zone: ZoneId,
     pub plot_ids: Vec<String>,
     pub has_plort_market: bool,
     pub has_refinery_link: bool,
+}
+
+impl Default for DroneNetworkScope {
+    fn default() -> Self {
+        Self {
+            zone: ZoneId::Ranch,
+            plot_ids: Vec::new(),
+            has_plort_market: false,
+            has_refinery_link: false,
+        }
+    }
 }
