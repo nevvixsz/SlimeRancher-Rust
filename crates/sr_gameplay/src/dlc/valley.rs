@@ -299,59 +299,55 @@ impl ValleySystem {
             let Some(gen_model) = model.quicksilver_generators.get_mut(&gid) else {
                 continue;
             };
-            match gen_model.state {
-                QuicksilverGeneratorState::Countdown => {
-                    if let Some(t) = gen_model.timer {
-                        if wt >= t {
-                            gen_model.state = QuicksilverGeneratorState::Active;
-                            gen_model.timer = Some(wt + f64::from(cfg.active_minutes) * 60.0);
-                            ev.activated_generators.push(gid.clone());
-                        }
+            if gen_model.state == QuicksilverGeneratorState::Countdown {
+                if let Some(t) = gen_model.timer {
+                    if wt >= t {
+                        gen_model.state = QuicksilverGeneratorState::Active;
+                        gen_model.timer = Some(wt + f64::from(cfg.active_minutes) * 60.0);
+                        ev.activated_generators.push(gid.clone());
                     }
                 }
-                QuicksilverGeneratorState::Active => {
-                    if let Some(t) = gen_model.timer {
-                        if wt >= t {
-                            gen_model.state = QuicksilverGeneratorState::Cooldown;
-                            gen_model.timer = Some(wt + f64::from(cfg.cooldown_minutes) * 60.0);
-                            ev.ended_generators.push(gid.clone());
-                            // Despawn spawned quicksilver slimes when generator shuts off
-                            if let Some(slimes) = self.generator_slimes.remove(&gid) {
-                                for sid in slimes {
-                                    model.destroy_actor(sid);
-                                    physics.remove_body(sid);
-                                }
+            }
+            if gen_model.state == QuicksilverGeneratorState::Active {
+                if let Some(t) = gen_model.timer {
+                    if wt >= t {
+                        gen_model.state = QuicksilverGeneratorState::Cooldown;
+                        gen_model.timer = Some(wt + f64::from(cfg.cooldown_minutes) * 60.0);
+                        ev.ended_generators.push(gid.clone());
+                        // Despawn spawned quicksilver slimes when generator shuts off
+                        if let Some(slimes) = self.generator_slimes.remove(&gid) {
+                            for sid in slimes {
+                                model.destroy_actor(sid);
+                                physics.remove_body(sid);
                             }
-                            continue;
                         }
-                    }
-                    // Maintain active QuicksilverSlime population
-                    let list = self.generator_slimes.entry(gid.clone()).or_default();
-                    list.retain(|sid| model.actors.contains_key(sid));
-                    while list.len() < cfg.target_slime_count && !cfg.spawn_positions.is_empty() {
-                        let idx = rng.get_in_range_i32(0, cfg.spawn_positions.len() as i32) as usize;
-                        let pos = cfg.spawn_positions[idx.min(cfg.spawn_positions.len() - 1)];
-                        let sid = spawn_physical_actor(
-                            model,
-                            physics,
-                            IdentifiableId::QuicksilverSlime,
-                            RegionSetId::Valley,
-                            pos,
-                            Vec3::ZERO,
-                        );
-                        list.push(sid);
-                        ev.spawned_slimes.push(sid);
+                        continue;
                     }
                 }
-                QuicksilverGeneratorState::Cooldown => {
-                    if let Some(t) = gen_model.timer {
-                        if wt >= t {
-                            gen_model.state = QuicksilverGeneratorState::Inactive;
-                            gen_model.timer = None;
-                        }
+                // Maintain active QuicksilverSlime population
+                let list = self.generator_slimes.entry(gid.clone()).or_default();
+                list.retain(|sid| model.actors.contains_key(sid));
+                while list.len() < cfg.target_slime_count && !cfg.spawn_positions.is_empty() {
+                    let idx = rng.get_in_range_i32(0, cfg.spawn_positions.len() as i32) as usize;
+                    let pos = cfg.spawn_positions[idx.min(cfg.spawn_positions.len() - 1)];
+                    let sid = spawn_physical_actor(
+                        model,
+                        physics,
+                        IdentifiableId::QuicksilverSlime,
+                        RegionSetId::Valley,
+                        pos,
+                        Vec3::ZERO,
+                    );
+                    list.push(sid);
+                    ev.spawned_slimes.push(sid);
+                }
+            } else if gen_model.state == QuicksilverGeneratorState::Cooldown {
+                if let Some(t) = gen_model.timer {
+                    if wt >= t {
+                        gen_model.state = QuicksilverGeneratorState::Inactive;
+                        gen_model.timer = None;
                     }
                 }
-                QuicksilverGeneratorState::Inactive => {}
             }
         }
 
