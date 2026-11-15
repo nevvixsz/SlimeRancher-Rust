@@ -6,7 +6,7 @@ use sr_data::{DataRegistry, GameModeSettings};
 use sr_gameplay::{
     spawn_physical_actor, step_actor_lifecycle, ActorLifecycleEvents, AmmoController, DeathOutcome,
     DeathSource, EconomyRuntime, EconomyStepEvents, PlayerController, RanchRuntime,
-    RanchStepEvents, VacEvents, VacInput, WeaponVacuum,
+    RanchStepEvents, ScienceRuntime, ScienceStepEvents, VacEvents, VacInput, WeaponVacuum,
 };
 use sr_ids::{GameMode, IdentifiableId, RegionSetId};
 use sr_math::{Randoms, Vec3};
@@ -28,6 +28,7 @@ pub struct TickEvents {
     pub ai: AiStepEvents,
     pub world: WorldStepEvents,
     pub economy: EconomyStepEvents,
+    pub science: ScienceStepEvents,
     pub player_death: Option<DeathOutcome>,
 }
 
@@ -47,6 +48,7 @@ pub struct Simulation {
     pub ai: SlimeAiCoordinator,
     pub world: WorldRuntime,
     pub economy: EconomyRuntime,
+    pub science: ScienceRuntime,
     pub rng: Randoms,
     was_game_over: bool,
     ff_start_time: Option<f64>,
@@ -84,6 +86,7 @@ impl Simulation {
             ai: SlimeAiCoordinator::default(),
             world: WorldRuntime::default(),
             economy: EconomyRuntime::default(),
+            science: ScienceRuntime::default(),
             rng: Randoms::default(),
             was_game_over: false,
             ff_start_time: None,
@@ -94,6 +97,9 @@ impl Simulation {
             &sim.mode_settings,
             &mut sim.rng,
         );
+        sim.science
+            .director
+            .init_model(&mut sim.model, &sim.mode_settings);
         sim
     }
 
@@ -135,6 +141,18 @@ impl Simulation {
                 let end_t = self.model.world.world_time;
                 self.ranch
                     .fast_forward_plots(&mut self.model, &mut self.physics, start_t, end_t, &mut self.rng);
+                let ff_hour = TimeDirector::curr_hour(&self.model.world);
+                self.science.drones.fast_forward_drones(
+                    &mut self.model,
+                    &mut self.physics,
+                    &self.ranch,
+                    &self.economy.market,
+                    &self.mode_settings,
+                    ff_hour,
+                    start_t,
+                    end_t,
+                    &mut self.rng,
+                );
             }
         }
 
@@ -196,6 +214,21 @@ impl Simulation {
             &self.mode_settings,
             curr_day,
             hour_of_day,
+            &mut self.rng,
+        );
+
+        // Slime Science: Blueprint unlocks, Extractors, Utilities, and Drones
+        let passed_5am = TimeDirector::on_passed_hour(&self.model.world, 5.0);
+        events.science = self.science.step(
+            &mut self.model,
+            &mut self.physics,
+            &self.data,
+            &self.mode_settings,
+            &self.ranch,
+            &self.economy.market,
+            passed_5am,
+            hour_of_day,
+            scaled_dt,
             &mut self.rng,
         );
 

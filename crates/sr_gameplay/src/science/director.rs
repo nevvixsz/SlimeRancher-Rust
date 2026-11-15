@@ -429,7 +429,7 @@ fn def(
 ) -> GadgetDefinition {
     GadgetDefinition {
         id,
-        pedia_link: PediaId::None,
+        pedia_link: PediaId::Science,
         blueprint_cost,
         craft_costs: craft_costs
             .into_iter()

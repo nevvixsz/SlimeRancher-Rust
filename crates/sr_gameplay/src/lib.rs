@@ -31,12 +31,13 @@ pub use science::{
     check_gordo_snares, deposit_warp_depot, drone_battery_fraction, drone_has_battery,
     drone_program_count, feed_snared_gordo, recharge_drone_battery, set_drone_program,
     spec_for_extractor, step_utility_gadgets, trigger_chicken_cloner, use_teleporter,
-    withdraw_warp_depot, BlueprintUnlockRule, DroneDestKind, DroneNetworkScope, DroneSourceKind,
-    DroneTargetCategory, ExtractorProduceEntry, ExtractorSpec, ExtractorStepEvents,
-    ExtractorSystem, GadgetDirector, GadgetDirectorStepEvents, GadgetError, UtilityGadgetEvents,
-    DRONE_AMMO_CAPACITY, DRONE_BATTERY_DURATION_HOURS, DRONE_BATTERY_DURATION_SECS,
-    HYDRO_TURRET_RANGE, MED_STATION_HEAL_PER_SEC, REFINERY_MAX, SNARED_GORDO_TARGET_COUNT,
-    TAMING_BELL_RANGE, WARP_DEPOT_MAX_STACK,
+    withdraw_warp_depot, BlueprintUnlockRule, DroneAiSystem, DroneDestKind, DroneNetworkScope,
+    DronePhase, DroneSourceKind, DroneStepEvents, DroneTargetCategory, ExtractorProduceEntry,
+    ExtractorSpec, ExtractorStepEvents, ExtractorSystem, GadgetDirector, GadgetDirectorStepEvents,
+    GadgetError, ScienceRuntime, ScienceStepEvents, UtilityGadgetEvents, DRONE_AMMO_CAPACITY,
+    DRONE_BATTERY_DURATION_HOURS, DRONE_BATTERY_DURATION_SECS, DRONE_FASTFORWARD_CYCLE_SECS,
+    DRONE_FLY_SPEED, HYDRO_TURRET_RANGE, MED_STATION_HEAL_PER_SEC, REFINERY_MAX,
+    SNARED_GORDO_TARGET_COUNT, TAMING_BELL_RANGE, WARP_DEPOT_MAX_STACK,
 };
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
@@ -575,5 +576,287 @@ mod tests {
             );
         }
         assert_eq!(gm.progress.get_progress(ProgressType::OgdenRewards), 1);
+    }
+
+    #[test]
+    fn slime_science_refinery_blueprints_fabricator_and_paired_teleporters() {
+        use sr_ids::{GadgetId, RegionSetId, ZoneId};
+        use sr_math::Vec3;
+        use sr_model::GameModel;
+        use sr_physics::PlayerMotor;
+
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut motor = PlayerMotor::default();
+        gm.player.currency = 5000;
+
+        let mut rt = ScienceRuntime::default();
+        rt.director.init_model(&mut gm, &mode);
+        rt.director.ensure_site(&mut gm, "site_ranch", ZoneId::Ranch);
+        rt.director.ensure_site(&mut gm, "site_desert", ZoneId::Desert);
+        rt.extractors.register_site_pos("site_ranch", Vec3::new(0.0, 0.0, 0.0));
+        rt.extractors.register_site_pos("site_desert", Vec3::new(100.0, 0.0, 100.0));
+
+        // Refinery max 999 & rejects non-craft/non-plort food
+        assert_eq!(GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::CarrotVeggie, 5), 0);
+        assert_eq!(GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::PinkPlort, 1500), 999);
+        assert_eq!(GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::StrangeDiamondCraft, 5), 5);
+
+        // Buy TeleporterPink blueprint and fabricate -> buy_in_pairs yields 2 teleporters
+        rt.director.buy_blueprint(&mut gm, &mode, GadgetId::TeleporterPink).unwrap();
+        assert_eq!(rt.director.fabricate_gadget(&mut gm, GadgetId::TeleporterPink).unwrap(), 2);
+
+        rt.director.place_gadget(&mut gm, "site_ranch", GadgetId::TeleporterPink, 0.0).unwrap();
+        rt.director.place_gadget(&mut gm, "site_desert", GadgetId::TeleporterPink, 0.0).unwrap();
+
+        let tp = use_teleporter(
+            &mut gm,
+            &mut motor,
+            &rt.extractors.site_positions,
+            &rt.director.site_zones,
+            "site_ranch",
+        )
+        .unwrap();
+        assert_eq!(tp.0, "site_desert");
+        assert_eq!(tp.2, RegionSetId::Desert);
+        assert!((gm.player.position - Vec3::new(100.0, 1.2, 100.0)).length() < 0.01);
+
+        // Removing one teleporter destroys its linked partner
+        rt.director.remove_gadget(&mut gm, "site_ranch").unwrap();
+        assert!(gm.gadget_sites["site_desert"].attached.is_none());
+    }
+
+    #[test]
+    fn extractors_zone_drops_interaction_and_cycle_expiry() {
+        use sr_data::DataRegistry;
+        use sr_ids::{GadgetId, ZoneId};
+        use sr_math::{Randoms, Vec3};
+        use sr_model::GameModel;
+        use sr_physics::PhysicsWorld;
+
+        let data = DataRegistry::builtin();
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        let mut pw = PhysicsWorld::new();
+        let mut rng = Randoms::from_seed(13);
+        let econ = EconomyDirector::default();
+        let ranch = RanchRuntime::default();
+
+        let mut rt = ScienceRuntime::default();
+        rt.director.init_model(&mut gm, &mode);
+        rt.director.ensure_site(&mut gm, "site_quarry", ZoneId::Quarry);
+        rt.extractors.register_site_pos("site_quarry", Vec3::new(10.0, 0.0, 10.0));
+
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::PinkPlort, 20);
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::RockPlort, 20);
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::RadPlort, 10);
+        assert_eq!(rt.director.fabricate_gadget(&mut gm, GadgetId::ExtractorDrillNovice).unwrap(), 1);
+        rt.director.place_gadget(&mut gm, "site_quarry", GadgetId::ExtractorDrillNovice, 0.0).unwrap();
+
+        // Initialize extractor cycle (12h)
+        let _ = rt.step(&mut gm, &mut pw, &data, &mode, &ranch, &econ, false, 9.0, 0.1, &mut rng);
+        assert!(!rt.extractors.is_ready(&gm, "site_quarry"));
+
+        // Advance past 12h -> ready & interact
+        gm.world.world_time += 12.1 * 3600.0;
+        let ev_ready = rt.step(&mut gm, &mut pw, &data, &mode, &ranch, &econ, false, 21.1, 0.1, &mut rng);
+        assert!(ev_ready.extractors.ready_sites.contains(&"site_quarry".to_string()));
+        assert!(rt.extractors.interact_extractor(&mut gm, "site_quarry", &mut rng));
+
+        // Step ejection ticks until all items spawn and Novice Drill (1 cycle) expires
+        let mut spawned_total = 0usize;
+        let mut expired = false;
+        for _ in 0..20 {
+            gm.world.world_time += 20.0;
+            let ev = rt.step(&mut gm, &mut pw, &data, &mode, &ranch, &econ, false, 21.2, 0.1, &mut rng);
+            spawned_total += ev.extractors.spawned_items.len();
+            if ev.extractors.expired_sites.contains(&"site_quarry".to_string()) {
+                expired = true;
+                break;
+            }
+        }
+        assert!((4..=8).contains(&spawned_total));
+        assert!(expired);
+        assert!(gm.gadget_sites["site_quarry"].attached.is_none());
+    }
+
+    #[test]
+    fn warp_depot_sync_gordo_snare_and_chicken_cloner() {
+        use sr_data::DataRegistry;
+        use sr_ids::{GadgetId, RegionSetId, ZoneId};
+        use sr_math::{Randoms, Vec3};
+        use sr_model::{GadgetKind, GameModel};
+        use sr_physics::PhysicsWorld;
+
+        let data = DataRegistry::builtin();
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        gm.player.currency = 10_000;
+        let mut pw = PhysicsWorld::new();
+        let mut rng = Randoms::from_seed(19);
+
+        let mut rt = ScienceRuntime::default();
+        rt.director.init_model(&mut gm, &mode);
+        rt.director.ensure_site(&mut gm, "wd_a", ZoneId::Ranch);
+        rt.director.ensure_site(&mut gm, "wd_b", ZoneId::Moss);
+        rt.director.ensure_site(&mut gm, "snare_1", ZoneId::Ranch);
+
+        // Paired WarpDepots share inventory across zones
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::PinkPlort, 30);
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::DeepBrineCraft, 10);
+        rt.director.buy_blueprint(&mut gm, &mode, GadgetId::WarpDepotPink).unwrap();
+        rt.director.fabricate_gadget(&mut gm, GadgetId::WarpDepotPink).unwrap();
+        rt.director.place_gadget(&mut gm, "wd_a", GadgetId::WarpDepotPink, 0.0).unwrap();
+        rt.director.place_gadget(&mut gm, "wd_b", GadgetId::WarpDepotPink, 0.0).unwrap();
+
+        assert_eq!(deposit_warp_depot(&mut gm, "wd_a", IdentifiableId::GoldPlort, 5), 5);
+        assert_eq!(withdraw_warp_depot(&mut gm, "wd_b", 3), Some((IdentifiableId::GoldPlort, 3)));
+        assert_eq!(withdraw_warp_depot(&mut gm, "wd_a", 5), Some((IdentifiableId::GoldPlort, 2)));
+
+        // Master Gordo Snare baited with Rooster -> guaranteed Hunter Gordo at 05:00
+        gm.gadgets.blueprints.push(GadgetId::GordoSnareMaster);
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::HunterPlort, 15);
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::RoyalJellyCraft, 5);
+        rt.director.fabricate_gadget(&mut gm, GadgetId::GordoSnareMaster).unwrap();
+        rt.director.place_gadget(&mut gm, "snare_1", GadgetId::GordoSnareMaster, 0.0).unwrap();
+        assert!(bait_gordo_snare(&mut gm, "snare_1", IdentifiableId::Rooster));
+        let snared = check_gordo_snares(&mut gm, &data, &mut rng);
+        assert_eq!(snared, vec![("snare_1".to_string(), IdentifiableId::HunterGordo)]);
+
+        let GadgetKind::Snare(ref sn) = gm.gadget_sites["snare_1"].attached.as_ref().unwrap().kind else {
+            panic!("expected snare");
+        };
+        assert_eq!(sn.gordo_type_id, IdentifiableId::HunterGordo);
+
+        // Feed snared Hunter Gordo 25 Roosters (favorite = 2x each -> 50) to pop it
+        for i in 0..25 {
+            let (ate, popped) = feed_snared_gordo(
+                &mut gm,
+                &mut pw,
+                &data,
+                "snare_1",
+                IdentifiableId::Rooster,
+                Vec3::ZERO,
+                RegionSetId::Home,
+                &mut rng,
+            );
+            assert!(ate);
+            assert_eq!(popped, i == 24);
+        }
+
+        // Chicken cloner accepts meat
+        let cid = spawn_physical_actor(
+            &mut gm,
+            &mut pw,
+            IdentifiableId::Hen,
+            RegionSetId::Home,
+            Vec3::ZERO,
+            Vec3::ZERO,
+        );
+        let cloned = trigger_chicken_cloner(&mut gm, &mut pw, cid, Vec3::ZERO, RegionSetId::Home, &mut rng);
+        assert!(cloned.is_some());
+    }
+
+    #[test]
+    fn drone_battery_programs_ai_delivery_to_market_and_fast_forward() {
+        use sr_data::DataRegistry;
+        use sr_ids::{GadgetId, LandPlotId, LandPlotUpgrade, RegionSetId, ZoneId};
+        use sr_math::{Randoms, Vec3};
+        use sr_model::GameModel;
+        use sr_physics::PhysicsWorld;
+
+        let data = DataRegistry::builtin();
+        let mode = GameModeSettings::for_mode(GameMode::Classic);
+        let mut gm = GameModel::new(GameMode::Classic);
+        gm.player.currency = 10_000;
+        let mut pw = PhysicsWorld::new();
+        let mut rng = Randoms::from_seed(29);
+
+        let mut econ = EconomyDirector::default();
+        econ.init_model(&mut gm.world, &data, &mode, &mut rng);
+
+        let mut ranch = RanchRuntime::default();
+        RanchDirector::ensure_plot(&mut gm, "corral_1", LandPlotId::Empty);
+        RanchDirector::buy_plot(&mut gm, "corral_1", LandPlotId::Corral).unwrap();
+        RanchDirector::buy_upgrade(&mut gm, "corral_1", LandPlotUpgrade::PlortCollector).unwrap();
+        ranch.register_bounds(PlotBounds {
+            plot_id: "corral_1".into(),
+            center: Vec3::ZERO,
+            half_extents: Vec3::new(5.0, 3.0, 5.0),
+            region: RegionSetId::Home,
+        });
+
+        // Drop a Pink Plort inside corral and collect it into PlortCollector
+        spawn_physical_actor(
+            &mut gm,
+            &mut pw,
+            IdentifiableId::PinkPlort,
+            RegionSetId::Home,
+            Vec3::new(1.0, 0.5, 1.0),
+            Vec3::ZERO,
+        );
+        let wt = gm.world.world_time + 1.5 * 3600.0;
+        gm.world.world_time = wt;
+        ranch.step(&mut gm, &mut pw, wt, 3600.0, 0.1, &mut rng);
+
+        let mut rt = ScienceRuntime::default();
+        rt.director.init_model(&mut gm, &mode);
+        rt.director.ensure_site(&mut gm, "drone_site_1", ZoneId::Ranch);
+        rt.extractors.register_site_pos("drone_site_1", Vec3::new(8.0, 0.0, 0.0));
+        gm.gadgets.blueprints.push(GadgetId::DroneAdvanced);
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::QuantumPlort, 20);
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::ManifoldCubeCraft, 5);
+        GadgetDirector::add_to_refinery(&mut gm, IdentifiableId::RoyalJellyCraft, 5);
+        rt.director.fabricate_gadget(&mut gm, GadgetId::DroneAdvanced).unwrap();
+        rt.director.place_gadget(&mut gm, "drone_site_1", GadgetId::DroneAdvanced, 0.0).unwrap();
+
+        assert!(set_drone_program(
+            &mut gm,
+            "drone_site_1",
+            0,
+            IdentifiableId::PinkPlort,
+            DroneSourceKind::PlortCollector,
+            DroneDestKind::PlortMarket,
+        ));
+        assert!(recharge_drone_battery(&mut gm, "drone_site_1", IdentifiableId::WaterLiquid));
+
+        let cash_before = gm.player.currency;
+        // Tick 1 gathers from PlortCollector; Tick 2 delivers to PlortMarket
+        let ev1 = rt.step(&mut gm, &mut pw, &data, &mode, &ranch, &econ, false, 10.5, 0.1, &mut rng);
+        assert_eq!(ev1.drones.gathered.len(), 1);
+        let ev2 = rt.step(&mut gm, &mut pw, &data, &mode, &ranch, &econ, false, 10.6, 0.1, &mut rng);
+        assert_eq!(ev2.drones.delivered.len(), 1);
+        assert!(gm.player.currency > cash_before);
+
+        // Fast-forward drone over 6h with ground plorts in corral
+        spawn_physical_actor(
+            &mut gm,
+            &mut pw,
+            IdentifiableId::RockPlort,
+            RegionSetId::Home,
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::ZERO,
+        );
+        set_drone_program(
+            &mut gm,
+            "drone_site_1",
+            1,
+            IdentifiableId::RockPlort,
+            DroneSourceKind::Corral,
+            DroneDestKind::Refinery,
+        );
+        let ff_ev = rt.drones.fast_forward_drones(
+            &mut gm,
+            &mut pw,
+            &ranch,
+            &econ,
+            &mode,
+            16.5,
+            wt,
+            wt + 6.0 * 3600.0,
+            &mut rng,
+        );
+        assert_eq!(ff_ev.delivered.len(), 1);
+        assert_eq!(GadgetDirector::get_refinery_count(&gm, IdentifiableId::RockPlort), 1);
     }
 }
