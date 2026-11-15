@@ -440,7 +440,7 @@ mod tests {
         );
         let ev = rt.step(&mut gm, &mut pw, &data, &mode, 1, 9.0, &mut rng);
         assert_eq!(ev.market_deposits.len(), 1);
-        assert_eq!(gm.player.currency, 11);
+        assert_eq!(gm.player.currency, 1011);
 
         // Deposit 24 more to hit Rush Mode 25-plort bonus
         gm.progress.set_progress(ProgressType::MochiRewards, 1);
@@ -495,7 +495,7 @@ mod tests {
         assert!(gm.gadgets.blueprints.contains(&GadgetId::MarketLink));
         assert!(gm.gadgets.blueprints.contains(&GadgetId::TeleporterGold));
         assert_eq!(gm.player.max_ammo, 100);
-        assert_eq!(gm.player.max_health, 250);
+        assert_eq!(gm.player.max_health, 350);
     }
 
     #[test]
