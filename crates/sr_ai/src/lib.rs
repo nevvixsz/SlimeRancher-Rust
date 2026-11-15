@@ -65,6 +65,7 @@ mod tests {
         // Music box + favorite toy boosts recovery factor and calms agitation faster
         rt.env.music_box_count = 1;
         rt.env.nearby_favorite_toy_count = 1;
+        rt.update_to_time(&mut sm, 32400.0 + 18000.0);
         let drive = DriveCalculator::new(SlimeEmotion::Hunger, 0.0, 0.0).drive(&sm);
         assert_eq!(drive, 1.0);
     }
