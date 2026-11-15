@@ -154,7 +154,7 @@ impl PediaDirector {
             ZoneId::Quarry => PediaId::Quarry,
             ZoneId::Moss => PediaId::Moss,
             ZoneId::Desert => PediaId::Desert,
-            ZoneId::Ruins | ZoneId::RuinsTrans => PediaId::Ruins,
+            ZoneId::Ruins | ZoneId::RuinsTransition => PediaId::Ruins,
             ZoneId::Sea => PediaId::Sea,
             ZoneId::OgdenRanch => PediaId::OgdenRetreat,
             ZoneId::MochiRanch => PediaId::MochiManor,

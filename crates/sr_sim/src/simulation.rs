@@ -4,9 +4,10 @@
 use sr_ai::{AiStepEvents, SlimeAiCoordinator};
 use sr_data::{DataRegistry, GameModeSettings};
 use sr_gameplay::{
-    spawn_physical_actor, step_actor_lifecycle, ActorLifecycleEvents, AmmoController, DeathOutcome,
-    DeathSource, EconomyRuntime, EconomyStepEvents, PlayerController, RanchRuntime,
-    RanchStepEvents, ScienceRuntime, ScienceStepEvents, VacEvents, VacInput, WeaponVacuum,
+    spawn_physical_actor, step_actor_lifecycle, AchievementsDirector, ActorLifecycleEvents,
+    AmmoController, DeathOutcome, DeathSource, EconomyRuntime, EconomyStepEvents,
+    PlayerController, RanchRuntime, RanchStepEvents, ScienceRuntime, ScienceStepEvents,
+    StoryRuntime, StoryStepEvents, VacEvents, VacInput, WeaponVacuum,
 };
 use sr_ids::{GameMode, IdentifiableId, RegionSetId};
 use sr_math::{Randoms, Vec3};
@@ -29,6 +30,7 @@ pub struct TickEvents {
     pub world: WorldStepEvents,
     pub economy: EconomyStepEvents,
     pub science: ScienceStepEvents,
+    pub story: StoryStepEvents,
     pub player_death: Option<DeathOutcome>,
 }
 
@@ -49,6 +51,7 @@ pub struct Simulation {
     pub world: WorldRuntime,
     pub economy: EconomyRuntime,
     pub science: ScienceRuntime,
+    pub story: StoryRuntime,
     pub rng: Randoms,
     was_game_over: bool,
     ff_start_time: Option<f64>,
@@ -87,6 +90,7 @@ impl Simulation {
             world: WorldRuntime::default(),
             economy: EconomyRuntime::default(),
             science: ScienceRuntime::default(),
+            story: StoryRuntime::default(),
             rng: Randoms::default(),
             was_game_over: false,
             ff_start_time: None,
@@ -100,6 +104,7 @@ impl Simulation {
         sim.science
             .director
             .init_model(&mut sim.model, &sim.mode_settings);
+        sim.story.init_model(&mut sim.model, &sim.mode_settings);
         sim
     }
 
@@ -172,6 +177,14 @@ impl Simulation {
             vac_input,
             scaled_dt,
         );
+        for &ident in &events.vac.captured {
+            self.story
+                .pedia
+                .maybe_show_popup_for_ident(&mut self.model, &self.mode_settings, ident);
+            self.story
+                .tutorials
+                .on_vac(&mut self.model, &self.mode_settings, ident);
+        }
 
         // Physics world step + crate impact / out-of-bounds / water rules
         let (impacts, overlaps) = self.physics.step(scaled_dt);
@@ -232,6 +245,9 @@ impl Simulation {
             &mut self.rng,
         );
 
+        // Story, Delayed Trackers, Mail, Slimepedia, and Achievements
+        events.story = self.story.step(&mut self.model, &self.mode_settings);
+
         // Slime AI, emotions, eating, unique abilities, and Gordos
         let player_alive = self.model.player.curr_health > 0.0;
         events.ai = self.ai.step(
@@ -290,6 +306,7 @@ impl Simulation {
                 &mut wt,
             );
             self.model.world.world_time = wt;
+            AchievementsDirector::add_game_int_stat(&mut self.model, "DEATHS", 1);
             events.player_death = Some(outcome);
         }
 
