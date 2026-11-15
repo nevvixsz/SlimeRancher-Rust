@@ -5,6 +5,7 @@ pub mod ammo;
 pub mod economy;
 pub mod player;
 pub mod ranch;
+pub mod science;
 pub mod vacuum;
 
 pub use actors::{
@@ -24,6 +25,10 @@ pub use economy::{
     MOCHI_BONUS_CHANCE, MOCHI_BONUS_FACTOR, MOCHI_RECUR_AMOUNT, OGDEN_RECUR_AMOUNT, RANCHER_IDS,
     RARE_PROB, REWARD_BONUS_MULT, REWARD_VAL_MULT, RUSH_PLORT_BONUS_COUNT, SEVEN_ZEE_RANKS,
     SLIME_TOYS_UNLOCK_RANK, STAT_PLORTS_SOLD, VIKTOR_RECUR_AMOUNT,
+};
+pub use science::{
+    builtin_blueprint_unlock_rules, builtin_gadget_definitions, BlueprintUnlockRule,
+    GadgetDirector, GadgetDirectorStepEvents, GadgetError, REFINERY_MAX,
 };
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
