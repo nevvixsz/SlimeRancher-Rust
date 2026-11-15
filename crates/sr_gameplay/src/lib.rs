@@ -2,6 +2,7 @@
 
 pub mod actors;
 pub mod ammo;
+pub mod economy;
 pub mod player;
 pub mod ranch;
 pub mod vacuum;
@@ -11,6 +12,9 @@ pub use actors::{
     BREAK_COLLISION_THRESHOLD,
 };
 pub use ammo::AmmoController;
+pub use economy::{
+    CurrValueEntry, EconomyDirector, DEFAULT_DAILY_SHUTDOWN_MINS, DEFAULT_SATURATION_RECOVERY,
+};
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
     clear_garden_crop, crop_for_item, deposit_feeder_food, feeder_cycle_hours, plant_garden_crop,
