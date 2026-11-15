@@ -100,61 +100,8 @@ pub fn step_simulation_system(
     mut sim_res: ResMut<SimResource>,
     mut target_info: ResMut<TargetInfo>,
     mut assets: ResMut<ClientAssets>,
-    registry: Res<VisualRegistry>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut cam_q: Query<
-        &mut Transform,
-        (
-            With<Camera3d>,
-            Without<VacMuzzleVisual>,
-            Without<VacBeamVisual>,
-            Without<ShootFlashVisual>,
-            Without<AirBurstVisual>,
-        ),
-    >,
-    mut muzzle_q: Query<
-        &mut Transform,
-        (
-            With<VacMuzzleVisual>,
-            Without<Camera3d>,
-            Without<VacBeamVisual>,
-            Without<ShootFlashVisual>,
-            Without<AirBurstVisual>,
-        ),
-    >,
-    mut beam_q: Query<
-        (&mut Transform, &mut Visibility),
-        (
-            With<VacBeamVisual>,
-            Without<Camera3d>,
-            Without<VacMuzzleVisual>,
-            Without<ShootFlashVisual>,
-            Without<AirBurstVisual>,
-        ),
-    >,
-    mut flash_q: Query<
-        (&mut Transform, &mut Visibility),
-        (
-            With<ShootFlashVisual>,
-            Without<Camera3d>,
-            Without<VacMuzzleVisual>,
-            Without<VacBeamVisual>,
-            Without<AirBurstVisual>,
-        ),
-    >,
-    mut burst_q: Query<
-        (&mut Transform, &mut Visibility),
-        (
-            With<AirBurstVisual>,
-            Without<Camera3d>,
-            Without<VacMuzzleVisual>,
-            Without<VacBeamVisual>,
-            Without<ShootFlashVisual>,
-        ),
-    >,
 ) {
     let dt = time.delta_secs().min(0.05);
-    let elapsed = time.elapsed_secs();
 
     // Animation timers
     look.recoil_timer = (look.recoil_timer - dt).max(0.0);
