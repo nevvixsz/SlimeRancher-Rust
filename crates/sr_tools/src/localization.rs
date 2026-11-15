@@ -20,6 +20,13 @@ pub const LOCALIZATION_BUNDLES: &[&str] = &[
     "ui",
 ];
 
+/// Built-in Russian localization compiled directly into the binary.
+pub const EMBEDDED_RU_JSON: &str =
+    include_str!("../../../assets/localization/localization_ru.json");
+/// Built-in English localization compiled directly into the binary.
+pub const EMBEDDED_EN_JSON: &str =
+    include_str!("../../../assets/localization/localization_en.json");
+
 #[derive(Debug, Error)]
 pub enum ToolsError {
     #[error("I/O error: {0}")]
@@ -127,11 +134,38 @@ impl LocalizationSet {
         Ok(())
     }
 
-    pub fn load_json(path: &Path) -> ToolsResult<Self> {
-        let raw = fs::read_to_string(path)?;
-        let mut set: Self = serde_json::from_str(&raw)?;
+    pub fn from_json_str(raw: &str) -> ToolsResult<Self> {
+        let mut set: Self = serde_json::from_str(raw)?;
         set.rebuild_index();
         Ok(set)
+    }
+
+    pub fn load_json(path: &Path) -> ToolsResult<Self> {
+        let raw = fs::read_to_string(path)?;
+        Self::from_json_str(&raw)
+    }
+
+    /// Loads the built-in localization (`"ru"` or `"en"`, falling back to `"en"`).
+    pub fn embedded(language: &str) -> ToolsResult<Self> {
+        let raw = match language.to_ascii_lowercase().as_str() {
+            "ru" | "ru-ru" => EMBEDDED_RU_JSON,
+            _ => EMBEDDED_EN_JSON,
+        };
+        Self::from_json_str(raw)
+    }
+
+    /// Loads `local_assets/localization/localization_<lang>.json` if present,
+    /// otherwise returns the built-in localization for `lang`.
+    pub fn load_with_override(language: &str, local_assets_dir: Option<&Path>) -> ToolsResult<Self> {
+        if let Some(dir) = local_assets_dir {
+            let override_path = dir
+                .join("localization")
+                .join(format!("localization_{}.json", language.to_ascii_lowercase()));
+            if override_path.is_file() {
+                return Self::load_json(&override_path);
+            }
+        }
+        Self::embedded(language)
     }
 }
 
