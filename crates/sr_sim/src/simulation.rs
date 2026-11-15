@@ -8,10 +8,11 @@ use sr_model::GameModel;
 use crate::time::TimeDirector;
 
 /// Events emitted by a single simulation tick.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct TickEvents {
     pub fast_forward_finished: bool,
     pub game_over_triggered: bool,
+    pub delta_world_time: f64,
 }
 
 /// Top-level simulation instance encapsulating world state, time, and static game definitions.
@@ -72,6 +73,7 @@ impl Simulation {
             events.game_over_triggered = true;
         }
 
+        events.delta_world_time = TimeDirector::delta_world_time(&self.model.world);
         self.time.late_update(&mut self.model.world);
         events
     }

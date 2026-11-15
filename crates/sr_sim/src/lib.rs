@@ -23,9 +23,11 @@ mod tests {
         assert_eq!(TimeDirector::format_time(TimeDirector::curr_time_minutes(&sim.model.world)), "09:00");
 
         // 1 real second = 60 game seconds = 1 game minute
-        sim.step(1.0);
+        let ev = sim.step(1.0);
         assert_eq!(sim.model.world.world_time, 32460.0);
-        assert_eq!(TimeDirector::delta_world_time(&sim.model.world), 60.0);
+        assert_eq!(ev.delta_world_time, 60.0);
+        // After LateUpdate, last_world_time catches up to world_time
+        assert_eq!(TimeDirector::delta_world_time(&sim.model.world), 0.0);
 
         // Next dawn (06:00) from 09:01 on day 1 should be 06:00 on day 2
         let dawn = TimeDirector::get_next_dawn(&sim.model.world);
