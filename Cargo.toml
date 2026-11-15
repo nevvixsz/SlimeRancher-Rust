@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/sr_math",
     "crates/sr_ids",
+    "crates/sr_data",
 ]
 
 [workspace.package]
