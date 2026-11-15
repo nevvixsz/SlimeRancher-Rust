@@ -2,12 +2,18 @@
 //! Teleporters/WarpDepots/GordoSnares/Utilities, and Drones).
 
 pub mod director;
+pub mod drones;
 pub mod extractors;
 pub mod gadgets;
 
 pub use director::{
     builtin_blueprint_unlock_rules, builtin_gadget_definitions, BlueprintUnlockRule,
     GadgetDirector, GadgetDirectorStepEvents, GadgetError, REFINERY_MAX,
+};
+pub use drones::{
+    drone_battery_fraction, drone_has_battery, drone_program_count, recharge_drone_battery,
+    set_drone_program, DroneDestKind, DroneNetworkScope, DroneSourceKind, DroneTargetCategory,
+    DRONE_AMMO_CAPACITY, DRONE_BATTERY_DURATION_HOURS, DRONE_BATTERY_DURATION_SECS,
 };
 pub use extractors::{
     spec_for_extractor, ExtractorProduceEntry, ExtractorSpec, ExtractorStepEvents, ExtractorSystem,

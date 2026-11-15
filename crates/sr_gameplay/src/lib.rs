@@ -28,10 +28,13 @@ pub use economy::{
 };
 pub use science::{
     bait_gordo_snare, builtin_blueprint_unlock_rules, builtin_gadget_definitions,
-    check_gordo_snares, deposit_warp_depot, feed_snared_gordo, spec_for_extractor,
-    step_utility_gadgets, trigger_chicken_cloner, use_teleporter, withdraw_warp_depot,
-    BlueprintUnlockRule, ExtractorProduceEntry, ExtractorSpec, ExtractorStepEvents,
+    check_gordo_snares, deposit_warp_depot, drone_battery_fraction, drone_has_battery,
+    drone_program_count, feed_snared_gordo, recharge_drone_battery, set_drone_program,
+    spec_for_extractor, step_utility_gadgets, trigger_chicken_cloner, use_teleporter,
+    withdraw_warp_depot, BlueprintUnlockRule, DroneDestKind, DroneNetworkScope, DroneSourceKind,
+    DroneTargetCategory, ExtractorProduceEntry, ExtractorSpec, ExtractorStepEvents,
     ExtractorSystem, GadgetDirector, GadgetDirectorStepEvents, GadgetError, UtilityGadgetEvents,
+    DRONE_AMMO_CAPACITY, DRONE_BATTERY_DURATION_HOURS, DRONE_BATTERY_DURATION_SECS,
     HYDRO_TURRET_RANGE, MED_STATION_HEAL_PER_SEC, REFINERY_MAX, SNARED_GORDO_TARGET_COUNT,
     TAMING_BELL_RANGE, WARP_DEPOT_MAX_STACK,
 };
