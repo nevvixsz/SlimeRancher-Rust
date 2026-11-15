@@ -1,0 +1,20 @@
+[package]
+name = "sr_client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bevy = { version = "0.15", features = ["wav", "mp3"] }
+sr_math = { path = "../sr_math" }
+sr_ids = { path = "../sr_ids" }
+sr_data = { path = "../sr_data" }
+sr_model = { path = "../sr_model" }
+sr_physics = { path = "../sr_physics" }
+sr_gameplay = { path = "../sr_gameplay" }
+sr_ai = { path = "../sr_ai" }
+sr_world = { path = "../sr_world" }
+sr_sim = { path = "../sr_sim" }
+sr_persist = { path = "../sr_persist" }
+sr_sandbox = { path = "../sr_sandbox" }
+sr_tools = { path = "../sr_tools" }

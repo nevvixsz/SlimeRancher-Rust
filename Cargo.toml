@@ -13,6 +13,7 @@ members = [
     "crates/sr_persist",
     "crates/sr_sandbox",
     "crates/sr_tools",
+    "crates/sr_client",
 ]
 
 [workspace.package]
