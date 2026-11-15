@@ -40,7 +40,12 @@ pub use science::{
     DRONE_FLY_SPEED, HYDRO_TURRET_RANGE, MED_STATION_HEAL_PER_SEC, REFINERY_MAX,
     SNARED_GORDO_TARGET_COUNT, TAMING_BELL_RANGE, WARP_DEPOT_MAX_STACK,
 };
-pub use story::{DelayedTrackerRule, ProgressDirector, ProgressStepEvents};
+pub use story::{
+    DelayedTrackerRule, MailDirector, MailReadOutcome, MailStepEvents, ProgressDirector,
+    ProgressStepEvents, CASEY_MAIL_FINAL, CASEY_MAIL_PREFIX, HOBSON_MAIL_KEY, MOCHI_MAIL_KEY,
+    OGDEN_MAIL_KEY, PARTNER_MAIL_KEY, PARTNER_UNLOCK_TIME, SECRET_STYLE_MAIL_DELAY,
+    SECRET_STYLE_MAIL_KEY, VIKTOR_MAIL_KEY,
+};
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
     clear_garden_crop, crop_for_item, deposit_feeder_food, feeder_cycle_hours, plant_garden_crop,
