@@ -5,7 +5,10 @@ members = [
     "crates/sr_ids",
     "crates/sr_data",
     "crates/sr_model",
+    "crates/sr_physics",
+    "crates/sr_gameplay",
     "crates/sr_sim",
+    "crates/sr_sandbox",
 ]
 
 [workspace.package]
