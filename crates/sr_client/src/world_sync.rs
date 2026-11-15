@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use sr_ai::GordoRewardKind;
 use sr_gameplay::{MarketDepositZone, WeaponVacuum};
 use sr_ids::{GameMode, IdentifiableId, LandPlotId, RegionSetId};
 use sr_model::LandPlotModel;
@@ -14,6 +13,10 @@ use sr_sim::{Simulation, TickEvents};
 use sr_tools::WorldDump;
 
 use crate::assets::ClientAssets;
+use crate::ranch_visuals::spawn_ranch_structures;
+use crate::slime_visuals::{
+    init_slime_shared_assets, spawn_actor_visual, spawn_gordo_visual, SlimeSharedAssets,
+};
 
 #[derive(Resource)]
 pub struct SimResource {
@@ -31,18 +34,11 @@ impl SimResource {
     }
 }
 
-#[derive(Component)]
-pub struct ActorVisual {
-    #[allow(dead_code)]
-    pub actor_id: i64,
-    #[allow(dead_code)]
-    pub ident: IdentifiableId,
-}
-
-#[derive(Component)]
-pub struct GordoVisual {
-    #[allow(dead_code)]
-    pub gordo_id: String,
+#[derive(Resource, Default)]
+pub struct TargetInfo {
+    pub title: String,
+    pub subtitle: String,
+    pub nearby_plot_id: Option<String>,
 }
 
 #[derive(Component)]
@@ -50,6 +46,15 @@ pub struct VacBeamVisual;
 
 #[derive(Component)]
 pub struct VacMuzzleVisual;
+
+#[derive(Component)]
+pub struct VacCoreVisual;
+
+#[derive(Component)]
+pub struct ShootFlashVisual;
+
+#[derive(Component)]
+pub struct AirBurstVisual;
 
 #[derive(Resource, Default)]
 pub struct VisualRegistry {
@@ -61,6 +66,7 @@ pub struct VisualRegistry {
     pub eye_mesh: Handle<Mesh>,
     pub eye_material: Handle<StandardMaterial>,
     pub pupil_material: Handle<StandardMaterial>,
+    pub vac_core_material: Handle<StandardMaterial>,
     pub materials: HashMap<IdentifiableId, Handle<StandardMaterial>>,
 }
 
@@ -134,16 +140,17 @@ pub fn build_initial_sim(save_path: Option<PathBuf>, assets: &ClientAssets) -> S
     sr_sandbox::setup_test_arena(&mut sim);
     sim.economy.deposit_zones.push(MarketDepositZone {
         id: "sandbox_market_zone".to_string(),
-        pos: landmarks::MARKET_CENTER + Vec3::Y * 1.2,
-        radius: 2.5,
+        pos: landmarks::MARKET_CENTER + Vec3::new(0.0, 1.1, 2.0),
+        radius: 2.6,
         is_market_link: false,
     });
 
-    // Extra lively starter slimes on the arena so the 3D scene immediately pops
+    // Extra lively starter slimes & food on the arena so the 3D scene immediately pops
     for (ident, pos) in [
         (IdentifiableId::PhosphorSlime, Vec3::new(-4.0, 1.0, 7.0)),
         (IdentifiableId::HoneySlime, Vec3::new(4.5, 1.0, 8.0)),
         (IdentifiableId::RadSlime, Vec3::new(-6.0, 1.0, -3.0)),
+        (IdentifiableId::CrystalSlime, landmarks::CORRAL_CENTER + Vec3::new(2.0, 1.0, -1.5)),
         (IdentifiableId::PogoFruit, landmarks::GARDEN_CENTER + Vec3::new(-1.0, 0.5, -1.0)),
         (IdentifiableId::Hen, Vec3::new(3.0, 0.8, -5.0)),
     ] {
@@ -160,7 +167,6 @@ pub fn build_initial_sim(save_path: Option<PathBuf>, assets: &ClientAssets) -> S
             {
                 Ok(model) => {
                     sim.model = model;
-                    // Place physical bodies for loaded actors when loading a save
                     for actor in sim.model.actors.values() {
                         let radius = WeaponVacuum::radius_of(actor.ident);
                         sim.physics.insert_body(sr_physics::RigidBody {
@@ -180,7 +186,6 @@ pub fn build_initial_sim(save_path: Option<PathBuf>, assets: &ClientAssets) -> S
         }
     }
 
-    // If a WorldDump is present and no custom save replaced plots, register its plot coordinates
     if let Some(ref dump) = world_dump {
         for p in &dump.land_plots {
             sim.model
@@ -212,7 +217,7 @@ pub fn setup_world_scene(
     sim_res: Res<SimResource>,
 ) {
     registry.sphere_mesh = meshes.add(Sphere::new(1.0).mesh().ico(4).unwrap());
-    registry.plort_mesh = meshes.add(Sphere::new(0.65).mesh().ico(1).unwrap());
+    registry.plort_mesh = meshes.add(Sphere::new(0.65).mesh().ico(0).unwrap());
     registry.crate_mesh = meshes.add(Cuboid::new(1.3, 1.3, 1.3));
     registry.eye_mesh = meshes.add(Sphere::new(0.14).mesh().uv(12, 8));
     registry.eye_material = materials.add(StandardMaterial {
@@ -225,6 +230,15 @@ pub fn setup_world_scene(
         unlit: true,
         ..default()
     });
+    registry.vac_core_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.32, 0.85, 1.0),
+        emissive: LinearRgba::rgb(0.18, 0.55, 0.85),
+        perceptual_roughness: 0.25,
+        ..default()
+    });
+
+    let shared = init_slime_shared_assets(&mut meshes, &mut materials);
+    commands.insert_resource(shared);
 
     // Ground floor (100x100)
     let ground_mat = materials.add(StandardMaterial {
@@ -280,65 +294,8 @@ pub fn setup_world_scene(
         ));
     }
 
-    // Corral walls around CORRAL_CENTER (semi-transparent energy fence + stone base)
-    let corral_wall_mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.32, 0.75, 0.95, 0.35),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
-    });
-    let cc = landmarks::CORRAL_CENTER;
-    for (offset, size) in [
-        (Vec3::new(0.0, 1.5, 5.25), Vec3::new(11.0, 3.0, 0.5)),
-        (Vec3::new(0.0, 1.5, -5.25), Vec3::new(11.0, 3.0, 0.5)),
-        (Vec3::new(5.25, 1.5, 0.0), Vec3::new(0.5, 3.0, 11.0)),
-        (Vec3::new(-5.25, 1.5, 0.0), Vec3::new(0.5, 3.0, 11.0)),
-    ] {
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
-            MeshMaterial3d(corral_wall_mat.clone()),
-            Transform::from_translation(cc + offset),
-        ));
-    }
-
-    // Garden soil patch
-    let garden_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.45, 0.28, 0.16),
-        perceptual_roughness: 0.95,
-        ..default()
-    });
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(10.0, 0.25, 10.0))),
-        MeshMaterial3d(garden_mat),
-        Transform::from_translation(landmarks::GARDEN_CENTER + Vec3::Y * 0.12),
-    ));
-
-    // Pond water surface
-    let pond_mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.18, 0.68, 0.95, 0.75),
-        base_color_texture: assets.water_texture.clone(),
-        alpha_mode: AlphaMode::Blend,
-        perceptual_roughness: 0.15,
-        ..default()
-    });
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(8.0, 0.22, 8.0))),
-        MeshMaterial3d(pond_mat),
-        Transform::from_translation(landmarks::POND_CENTER + Vec3::Y * 0.11),
-    ));
-
-    // Plort Market terminal
-    let market_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.18, 0.25, 0.36),
-        metallic: 0.4,
-        perceptual_roughness: 0.4,
-        ..default()
-    });
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(4.0, 2.5, 2.0))),
-        MeshMaterial3d(market_mat),
-        Transform::from_translation(landmarks::MARKET_CENTER + Vec3::Y * 1.25),
-    ));
+    // Ranch structures & upgrades (Corral, Garden, Pond, Plort Market, Gordo Dais, World GLTF)
+    spawn_ranch_structures(&mut commands, &mut meshes, &mut materials, &assets);
 
     // WorldDump markers (if user dumped real scene coordinates)
     if let Some(ref dump) = sim_res.world_dump {
@@ -356,35 +313,92 @@ pub fn setup_world_scene(
         }
     }
 
-    // Vacpack nozzle & suction beam attached to world (updated every frame from muzzle_origin)
+    // Multi-part Vacpack viewmodel (barrel + intake flare ring + glowing tank core)
     let muzzle_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.25, 0.30, 0.38),
-        metallic: 0.5,
+        base_color: Color::srgb(0.24, 0.30, 0.38),
+        metallic: 0.55,
+        perceptual_roughness: 0.35,
         ..default()
     });
-    commands.spawn((
-        Mesh3d(meshes.add(Cylinder::new(0.11, 0.55))),
-        MeshMaterial3d(muzzle_mat),
-        Transform::default(),
-        VacMuzzleVisual,
-    ));
+    let ring_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.92, 0.42, 0.16),
+        metallic: 0.4,
+        perceptual_roughness: 0.3,
+        ..default()
+    });
+    commands
+        .spawn((
+            Mesh3d(meshes.add(Cylinder::new(0.11, 0.60))),
+            MeshMaterial3d(muzzle_mat),
+            Transform::default(),
+            VacMuzzleVisual,
+        ))
+        .with_children(|p| {
+            // Intake ring at front tip (+Y in local cylinder space)
+            p.spawn((
+                Mesh3d(meshes.add(Torus::new(0.09, 0.15))),
+                MeshMaterial3d(ring_mat),
+                Transform::from_xyz(0.0, 0.30, 0.0)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            ));
+            // Glowing slot-color tank core
+            p.spawn((
+                Mesh3d(meshes.add(Cylinder::new(0.125, 0.20))),
+                MeshMaterial3d(registry.vac_core_material.clone()),
+                Transform::from_xyz(0.0, -0.05, 0.0),
+                VacCoreVisual,
+            ));
+        });
 
+    // Animated vacuum cone beam
     let beam_mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.45, 0.88, 1.0, 0.30),
-        emissive: LinearRgba::rgb(0.2, 0.6, 0.9),
+        base_color: Color::srgba(0.45, 0.88, 1.0, 0.28),
+        emissive: LinearRgba::rgb(0.20, 0.65, 0.95),
         alpha_mode: AlphaMode::Blend,
         unlit: true,
         ..default()
     });
     commands.spawn((
-        Mesh3d(meshes.add(Cylinder::new(0.32, 6.0))),
+        Mesh3d(meshes.add(Cone::new(0.52, 6.2))),
         MeshMaterial3d(beam_mat),
         Transform::default(),
         Visibility::Hidden,
         VacBeamVisual,
     ));
 
-    // FPS Camera
+    // Brief shoot muzzle flash
+    let flash_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(1.0, 0.78, 0.28, 0.75),
+        emissive: LinearRgba::rgb(0.95, 0.55, 0.10),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(0.22).mesh().ico(1).unwrap())),
+        MeshMaterial3d(flash_mat),
+        Transform::default(),
+        Visibility::Hidden,
+        ShootFlashVisual,
+    ));
+
+    // Expanding AirBurst shockwave torus
+    let burst_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.65, 0.95, 1.0, 0.55),
+        emissive: LinearRgba::rgb(0.35, 0.85, 1.0),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(Torus::new(0.82, 1.0))),
+        MeshMaterial3d(burst_mat),
+        Transform::default(),
+        Visibility::Hidden,
+        AirBurstVisual,
+    ));
+
+    // FPS Camera (Msaa::Off default for DX12 FL 11_0 compatibility; opt-in via SR_MSAA=1)
     let msaa = if std::env::var_os("SR_MSAA").is_some() {
         Msaa::Sample4
     } else {
@@ -405,6 +419,7 @@ pub fn sync_actors_and_gordos_system(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut registry: ResMut<VisualRegistry>,
+    shared: Res<SlimeSharedAssets>,
     assets: Res<ClientAssets>,
     sim_res: Res<SimResource>,
     mut transforms: Query<&mut Transform>,
@@ -441,62 +456,23 @@ pub fn sync_actors_and_gordos_system(
                         base_color: color,
                         base_color_texture: tex,
                         perceptual_roughness: if actor.ident.is_plort() { 0.15 } else { 0.45 },
-                        metallic: if actor.ident.is_plort() { 0.25 } else { 0.0 },
+                        metallic: if actor.ident.is_plort() { 0.30 } else { 0.0 },
                         ..default()
                     })
                 })
                 .clone();
 
-            let mesh = if actor.ident.is_plort() {
-                registry.plort_mesh.clone()
-            } else if actor.ident.is_standard_crate() {
-                registry.crate_mesh.clone()
-            } else {
-                registry.sphere_mesh.clone()
-            };
-
-            let scale = if actor.ident.is_standard_crate() {
-                Vec3::splat(1.0)
-            } else {
-                Vec3::splat(radius)
-            };
-
-            let mut entity_cmd = commands.spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(mat_handle),
-                Transform {
-                    translation: actor.pos,
-                    rotation: actor.rot,
-                    scale,
-                },
-                ActorVisual {
-                    actor_id,
-                    ident: actor.ident,
-                },
-            ));
-
-            // Add cute slime eyes on +Z front face
-            if actor.ident.is_slime() {
-                let eye_mesh = registry.eye_mesh.clone();
-                let eye_mat = registry.eye_material.clone();
-                let pupil_mat = registry.pupil_material.clone();
-                entity_cmd.with_children(|parent| {
-                    for side in [-0.32f32, 0.32f32] {
-                        parent.spawn((
-                            Mesh3d(eye_mesh.clone()),
-                            MeshMaterial3d(eye_mat.clone()),
-                            Transform::from_xyz(side, 0.20, 0.90),
-                        ));
-                        parent.spawn((
-                            Mesh3d(eye_mesh.clone()),
-                            MeshMaterial3d(pupil_mat.clone()),
-                            Transform::from_xyz(side, 0.20, 0.98).with_scale(Vec3::splat(0.55)),
-                        ));
-                    }
-                });
-            }
-
-            let ent = entity_cmd.id();
+            let ent = spawn_actor_visual(
+                &mut commands,
+                &registry,
+                &shared,
+                actor_id,
+                actor.ident,
+                actor.pos,
+                actor.rot,
+                radius,
+                mat_handle,
+            );
             registry.actor_entities.insert(actor_id, ent);
         }
     }
@@ -521,37 +497,16 @@ pub fn sync_actors_and_gordos_system(
                 perceptual_roughness: 0.4,
                 ..default()
             });
-            let eye_mesh = registry.eye_mesh.clone();
-            let eye_mat = registry.eye_material.clone();
-            let pupil_mat = registry.pupil_material.clone();
-            let ent = commands
-                .spawn((
-                    Mesh3d(registry.sphere_mesh.clone()),
-                    MeshMaterial3d(mat),
-                    Transform::from_translation(gordo.pos + Vec3::Y * 1.9)
-                        .with_scale(Vec3::splat(2.1)),
-                    GordoVisual {
-                        gordo_id: gordo.gordo_id.clone(),
-                    },
-                ))
-                .with_children(|parent| {
-                    for side in [-0.32f32, 0.32f32] {
-                        parent.spawn((
-                            Mesh3d(eye_mesh.clone()),
-                            MeshMaterial3d(eye_mat.clone()),
-                            Transform::from_xyz(side, 0.22, 0.90),
-                        ));
-                        parent.spawn((
-                            Mesh3d(eye_mesh.clone()),
-                            MeshMaterial3d(pupil_mat.clone()),
-                            Transform::from_xyz(side, 0.22, 0.98).with_scale(Vec3::splat(0.55)),
-                        ));
-                    }
-                })
-                .id();
+            let ent = spawn_gordo_visual(
+                &mut commands,
+                &registry,
+                &shared,
+                gordo.gordo_id.clone(),
+                gordo.slime_ident,
+                gordo.pos,
+                mat,
+            );
             registry.gordo_entities.insert(gordo.gordo_id.clone(), ent);
         }
     }
-
-    let _ = &GordoRewardKind::SlimeKey;
 }

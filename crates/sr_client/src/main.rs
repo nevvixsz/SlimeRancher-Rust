@@ -3,7 +3,9 @@
 mod assets;
 mod hud;
 mod player_input;
+mod ranch_visuals;
 mod sky_lighting;
+mod slime_visuals;
 mod world_sync;
 
 use std::path::PathBuf;
@@ -14,9 +16,12 @@ use bevy::prelude::*;
 use assets::{find_workspace_root, load_client_assets, start_bgm_system, Language};
 use hud::{setup_hud, update_hud};
 use player_input::{handle_cursor_grab, step_simulation_system, CameraLookState};
+use ranch_visuals::sync_ranch_visuals_system;
 use sky_lighting::{setup_sky_and_light, update_sky_and_light};
+use slime_visuals::update_slime_animations_system;
 use world_sync::{
-    build_initial_sim, setup_world_scene, sync_actors_and_gordos_system, VisualRegistry,
+    build_initial_sim, setup_world_scene, sync_actors_and_gordos_system, TargetInfo,
+    VisualRegistry,
 };
 
 struct CliArgs {
@@ -93,6 +98,7 @@ fn main() {
         )
         .insert_non_send_resource(CliArgsResource(cli))
         .init_resource::<CameraLookState>()
+        .init_resource::<TargetInfo>()
         .init_resource::<VisualRegistry>()
         .add_systems(
             PreStartup,
@@ -113,6 +119,8 @@ fn main() {
                 handle_cursor_grab,
                 step_simulation_system.after(handle_cursor_grab),
                 sync_actors_and_gordos_system.after(step_simulation_system),
+                update_slime_animations_system.after(sync_actors_and_gordos_system),
+                sync_ranch_visuals_system.after(step_simulation_system),
                 update_sky_and_light.after(step_simulation_system),
                 update_hud.after(step_simulation_system),
             ),
