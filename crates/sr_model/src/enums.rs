@@ -307,3 +307,58 @@ pub enum NonIdentReward {
     NewbucksMochi = 10004,
     TimeExtension12h = 20000,
 }
+
+/// Port of `ProgressDirector.ProgressTrackerId`.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ProgressTrackerId {
+    Casey1 = 0,
+    Casey2 = 1,
+    Casey3 = 2,
+    Casey4 = 3,
+    Casey5 = 4,
+    Casey6 = 5,
+    Casey7 = 6,
+    Casey8 = 7,
+    Casey9 = 8,
+    Casey10 = 9,
+    Casey11 = 10,
+    Hobson1 = 1000,
+    TimeAfterLabDocks = 2000,
+}
+
+impl ProgressTrackerId {
+    pub const ALL: &'static [Self] = &[
+        Self::Casey1,
+        Self::Casey2,
+        Self::Casey3,
+        Self::Casey4,
+        Self::Casey5,
+        Self::Casey6,
+        Self::Casey7,
+        Self::Casey8,
+        Self::Casey9,
+        Self::Casey10,
+        Self::Casey11,
+        Self::Hobson1,
+        Self::TimeAfterLabDocks,
+    ];
+
+    pub const fn mail_key(self) -> Option<&'static str> {
+        match self {
+            Self::Casey1 => Some("casey_1"),
+            Self::Casey2 => Some("casey_2"),
+            Self::Casey3 => Some("casey_3"),
+            Self::Casey4 => Some("casey_4"),
+            Self::Casey5 => Some("casey_5"),
+            Self::Casey6 => Some("casey_6"),
+            Self::Casey7 => Some("casey_7"),
+            Self::Casey8 => Some("casey_8"),
+            Self::Casey9 => Some("casey_9"),
+            Self::Casey10 => Some("casey_10"),
+            Self::Casey11 => Some("casey_11"),
+            Self::Hobson1 => Some("hobson_1"),
+            Self::TimeAfterLabDocks => None,
+        }
+    }
+}

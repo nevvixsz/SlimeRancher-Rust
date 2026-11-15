@@ -6,6 +6,7 @@ pub mod economy;
 pub mod player;
 pub mod ranch;
 pub mod science;
+pub mod story;
 pub mod vacuum;
 
 pub use actors::{
@@ -39,6 +40,7 @@ pub use science::{
     DRONE_FLY_SPEED, HYDRO_TURRET_RANGE, MED_STATION_HEAL_PER_SEC, REFINERY_MAX,
     SNARED_GORDO_TARGET_COUNT, TAMING_BELL_RANGE, WARP_DEPOT_MAX_STACK,
 };
+pub use story::{DelayedTrackerRule, ProgressDirector, ProgressStepEvents};
 pub use player::{DeathOutcome, DeathSource, PlayerController};
 pub use ranch::{
     clear_garden_crop, crop_for_item, deposit_feeder_food, feeder_cycle_hours, plant_garden_crop,
