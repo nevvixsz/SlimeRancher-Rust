@@ -145,18 +145,18 @@ impl RanchDirector {
                 plot.next_feeding_time = wt + 6.0 * 3600.0;
                 plot.feeder_cycle_speed = FeedSpeed::Normal;
                 plot.collector_next_time = wt + 3600.0;
-                plot.silo_ammo.insert(StorageType::Food, AmmoModel::new(1));
-                plot.silo_ammo.insert(StorageType::Plort, AmmoModel::new(4));
+                plot.silo_ammo.insert(StorageType::Food, AmmoModel::new(1, 1));
+                plot.silo_ammo.insert(StorageType::Plort, AmmoModel::new(4, 4));
             }
             LandPlotId::Coop => {
                 plot.next_feeding_time = wt + 6.0 * 3600.0;
                 plot.feeder_cycle_speed = FeedSpeed::Normal;
-                plot.silo_ammo.insert(StorageType::Food, AmmoModel::new(1));
+                plot.silo_ammo.insert(StorageType::Food, AmmoModel::new(1, 1));
             }
             LandPlotId::Silo => {
                 // Storage1 starts with 3 slots; STORAGE2..4 expand to 6, 9, 12 slots
                 plot.silo_ammo
-                    .insert(StorageType::NonSlimes, AmmoModel::new(12));
+                    .insert(StorageType::NonSlimes, AmmoModel::new(12, 3));
             }
             LandPlotId::Incinerator => {
                 plot.ash_units = 0.0;
