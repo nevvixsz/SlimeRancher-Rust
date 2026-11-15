@@ -46,28 +46,27 @@ mod tests {
 
     #[test]
     fn step10_binary_primitives_leb128_strings_and_markers() {
-        let mut w = BinWriter::new();
+        let mut bytes = Vec::new();
         let long_str = "S".repeat(300) + "Ω_slime";
-        w.write_string("SRTEST");
-        w.write_u32(12);
-        w.write_i16(DATA_PAYLOAD_BEGIN);
-        w.write_string(&long_str);
-        w.write_list(&[10i32, 20, 30], |w, v| w.write_i32(*v));
-        let mut pairs = std::collections::HashMap::new();
-        pairs.insert("alpha".to_string(), 1.5f32);
-        pairs.insert("beta".to_string(), -2.25f32);
-        w.write_dict(
-            &pairs,
-            |w, k| w.write_string(k),
-            |w, v| w.write_f32(*v),
-        );
-        w.write_i16(DATA_PAYLOAD_END);
+        {
+            let mut w = BinWriter::new(&mut bytes);
+            w.write_string("SRTEST").unwrap();
+            w.write_u32(12).unwrap();
+            w.write_i16(DATA_PAYLOAD_BEGIN).unwrap();
+            w.write_string(&long_str).unwrap();
+            w.write_list(&[10i32, 20, 30], |w, v| w.write_i32(*v)).unwrap();
+            let mut pairs = std::collections::HashMap::new();
+            pairs.insert("alpha".to_string(), 1.5f32);
+            pairs.insert("beta".to_string(), -2.25f32);
+            w.write_dict(&pairs, |w, k| w.write_string(k), |w, v| w.write_f32(*v))
+                .unwrap();
+            w.write_i16(DATA_PAYLOAD_END).unwrap();
+        }
 
-        let bytes = w.into_bytes();
-        let mut r = BinReader::new(&bytes);
+        let mut r = BinReader::new(std::io::Cursor::new(&bytes));
         assert_eq!(r.read_string().unwrap(), "SRTEST");
         assert_eq!(r.read_u32().unwrap(), 12);
-        r.expect_marker(DATA_PAYLOAD_BEGIN).unwrap();
+        r.read_marker(DATA_PAYLOAD_BEGIN).unwrap();
         assert_eq!(r.read_string().unwrap(), long_str);
         let list = r.read_list(|r| r.read_i32()).unwrap();
         assert_eq!(list, vec![10, 20, 30]);
@@ -76,15 +75,15 @@ mod tests {
             .unwrap();
         assert_eq!(dict.get("alpha"), Some(&1.5));
         assert_eq!(dict.get("beta"), Some(&-2.25));
-        r.expect_marker(DATA_PAYLOAD_END).unwrap();
-        assert_eq!(r.remaining(), 0);
+        r.read_marker(DATA_PAYLOAD_END).unwrap();
+        assert_eq!(r.stream_pos().unwrap(), bytes.len() as u64);
     }
 
     #[test]
     fn step10_game_v12_binary_roundtrip_and_summary_only() {
         let mut model = GameModel::new(GameMode::Classic);
         model.world.world_time = 123_456.75;
-        model.world.econ_seed = 42_001;
+        model.world.econ_seed = 42_001.0;
         model.world.curr_weather = Weather::Rain;
         model.world.curr_firestorm_mode = FirestormMode::Preparing;
         model.world.next_firestorm_time = 200_000.0;
@@ -98,7 +97,7 @@ mod tests {
         model.player.curr_energy = 140.0;
         model.player.position = Vec3::new(12.5, 4.25, -33.0);
         model.player.rotation = Quat::from_euler(glam::EulerRot::YXZ, 0.9, 0.25, 0.0);
-        model.player.curr_region_set_id = RegionSetId::Wilds;
+        model.player.curr_region_set_id = RegionSetId::Valley;
         model.player.upgrades.push(PlayerUpgrade::Jetpack);
         model.player.upgrade_locks.insert(
             PlayerUpgrade::Health3,
@@ -155,7 +154,7 @@ mod tests {
         // Actors: Slime + Produce + Plort
         let slime_id = model.create_actor(
             IdentifiableId::HunterSlime,
-            RegionSetId::Moss,
+            RegionSetId::Home,
             Vec3::new(1.0, 2.0, 3.0),
             Quat::IDENTITY,
         );
@@ -168,7 +167,7 @@ mod tests {
         }
         let fruit_id = model.create_actor(
             IdentifiableId::LemonFruit,
-            RegionSetId::Ruins,
+            RegionSetId::Desert,
             Vec3::new(-4.0, 1.5, 8.0),
             Quat::IDENTITY,
         );
@@ -213,7 +212,7 @@ mod tests {
             QuicksilverEnergyGeneratorModel {
                 id: "qseg_01".to_string(),
                 state: QuicksilverGeneratorState::Active,
-                timer: 45.5,
+                timer: Some(45.5),
             },
         );
         model.echo_note_gordos.insert(
@@ -256,7 +255,7 @@ mod tests {
         let bytes = v12.to_bytes().expect("GameV12::to_bytes");
 
         // 1. Summary-only read
-        let sum = GameV12::load_summary_only(&bytes).expect("load_summary_only");
+        let sum = GameV12::load_summary_from_bytes(&bytes).expect("load_summary_from_bytes");
         assert_eq!(sum.game_name, "slot_0");
         assert_eq!(sum.display_name, "My Ranch");
         assert_eq!(sum.summary.currency, 9876);
@@ -269,12 +268,12 @@ mod tests {
 
         assert_eq!(restored.game_mode, GameMode::Classic);
         assert_eq!(restored.world.world_time, 123_456.75);
-        assert_eq!(restored.world.econ_seed, 42_001);
+        assert_eq!(restored.world.econ_seed, 42_001.0);
         assert_eq!(restored.world.curr_weather, Weather::Rain);
         assert_eq!(restored.world.curr_firestorm_mode, FirestormMode::Preparing);
         assert_eq!(restored.player.currency, 9876);
         assert_eq!(restored.player.keys, 3);
-        assert_eq!(restored.player.curr_region_set_id, RegionSetId::Wilds);
+        assert_eq!(restored.player.curr_region_set_id, RegionSetId::Valley);
         assert!((restored.player.position - Vec3::new(12.5, 4.25, -33.0)).length() < 1e-4);
         let slot0 = restored.player.ammo_dict[&AmmoMode::Default].slots[0]
             .as_ref()
