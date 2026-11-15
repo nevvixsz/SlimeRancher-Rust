@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 
 use crate::binary::{
     BinReader, BinWriter, PersistError, PersistResult, PersistedDataset, DATA_PAYLOAD_BEGIN,
-    DATA_PAYLOAD_END, ELEMENT_SEPARATOR, SECTION_SEPARATOR,
+    ELEMENT_SEPARATOR, SECTION_SEPARATOR,
 };
 use crate::types::{
     AmmoDataV02, DecorizerV01, EchoNoteGordoV01, ExchangeOfferV04, FirestormV01,
@@ -885,5 +885,10 @@ impl GameV12 {
     pub fn from_bytes(bytes: &[u8]) -> PersistResult<Self> {
         let mut r = BinReader::new(std::io::Cursor::new(bytes));
         Self::load(&mut r)
+    }
+
+    pub fn load_summary_from_bytes(bytes: &[u8]) -> PersistResult<LoadedSummary> {
+        let mut r = BinReader::new(std::io::Cursor::new(bytes));
+        Self::load_summary_only(&mut r)
     }
 }

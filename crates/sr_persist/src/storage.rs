@@ -96,7 +96,7 @@ impl FileStorageProvider {
     pub fn load_summary(&self, game_name: &str) -> PersistResult<SaveSlotInfo> {
         let path = self.get_game_file(game_name);
         let bytes = fs::read(&path)?;
-        let summary = GameV12::load_summary_only(&bytes)?;
+        let summary = GameV12::load_summary_from_bytes(&bytes)?;
         Ok(SaveSlotInfo {
             game_name: game_name.to_string(),
             path,
