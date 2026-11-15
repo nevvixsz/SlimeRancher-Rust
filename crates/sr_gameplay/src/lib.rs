@@ -105,12 +105,12 @@ mod tests {
     #[test]
     fn weapon_vacuum_captures_slime_holds_largo_shoots_and_airbursts() {
         use sr_ids::RegionSetId;
-        use sr_math::{Quat, Vec3};
+        use sr_math::Quat;
         use sr_model::GameModel;
         use sr_physics::{CollisionLayers, PhysicsWorld, RigidBody, StaticCollider, StaticShape};
 
         let mut gm = GameModel::default();
-        let mut motor = PlayerMotor::default();
+        let motor = PlayerMotor::default();
         let mut ammo = AmmoController::default();
         let mut vac = WeaponVacuum::default();
         let mut pw = PhysicsWorld::new();
