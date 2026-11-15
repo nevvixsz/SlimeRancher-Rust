@@ -92,9 +92,14 @@ mod tests {
     #[test]
     fn player_upgrades_rads_and_recovery_match_csharp() {
         let mut p = PlayerModel::default();
+        let classic = GameModeSettings::for_mode(GameMode::Classic);
+        p.reset(&classic);
+        assert_eq!(p.currency, 250);
+        assert!(p.end_game_time.is_none());
+
         let rush = GameModeSettings::for_mode(GameMode::TimeLimitV2);
         p.reset(&rush);
-        assert_eq!(p.currency, 0);
+        assert_eq!(p.currency, 1000);
         assert!(p.end_game_time.is_some());
 
         p.apply_upgrade(PlayerUpgrade::Health2, true, 32400.0);
