@@ -4,6 +4,7 @@ members = [
     "crates/sr_math",
     "crates/sr_ids",
     "crates/sr_data",
+    "crates/sr_model",
 ]
 
 [workspace.package]
