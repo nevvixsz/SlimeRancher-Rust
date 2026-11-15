@@ -3,6 +3,7 @@
 pub mod actors;
 pub mod ammo;
 pub mod player;
+pub mod ranch;
 pub mod vacuum;
 
 pub use actors::{
@@ -11,6 +12,10 @@ pub use actors::{
 };
 pub use ammo::AmmoController;
 pub use player::{DeathOutcome, DeathSource, PlayerController};
+pub use ranch::{
+    plot_purchase_cost, upgrade_purchase_cost, upgrade_to_deluxe_crop, PlotOpError,
+    RanchDirector, RanchExpansion,
+};
 pub use vacuum::{
     VacEvents, VacInput, VacMode, VacuumableSize, WeaponVacuum, AIR_BURST_POWER, AIR_BURST_RADIUS,
     CAPTURE_DIST, EJECT_SPEED, MAX_VAC_DIST, SHOOT_COOLDOWN, STAMINA_PER_BURST,
