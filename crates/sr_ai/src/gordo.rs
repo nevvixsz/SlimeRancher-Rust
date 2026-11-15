@@ -118,7 +118,7 @@ pub fn step_gordos(
                             events.keys_awarded += 1;
                         }
                         GordoRewardKind::TeleporterUnlock { door_or_teleporter_id } => {
-                            if let Some(door) = model.world.access_doors.get_mut(door_or_teleporter_id) {
+                            if let Some(door) = model.doors.get_mut(door_or_teleporter_id) {
                                 door.state = sr_model::AccessDoorState::Open;
                             }
                         }
@@ -265,7 +265,7 @@ impl SlimeAiCoordinator {
                 Some(a) => (
                     a.ident,
                     a.pos,
-                    matches!(a.curr_region_set_id, RegionSetId::Home | RegionSetId::Ranch),
+                    matches!(a.curr_region_set_id, RegionSetId::Home),
                 ),
                 None => continue,
             };
