@@ -2,8 +2,9 @@
 
 /// Port of `Identifiable.Id`. Discriminants match C# `.sav` binary format.
 #[repr(i32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, serde::Serialize, serde::Deserialize)]
 pub enum IdentifiableId {
+    #[default]
     None = 0,
     RadSlime = 1,
     RockSlime = 2,

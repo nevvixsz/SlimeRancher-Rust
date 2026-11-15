@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use sr_data::GameModeSettings;
-use sr_ids::{AmmoMode, PlayerUpgrade, RegionSetId, Zone};
+use sr_ids::{AmmoMode, PlayerUpgrade, RegionSetId, ZoneId};
 use sr_math::{Quat, Vec3};
 
 use crate::ammo::AmmoModel;
@@ -59,7 +59,7 @@ pub struct PlayerModel {
     pub health_burst_after: f64,
     pub curr_health_burst_remaining: f32,
 
-    pub unlocked_zone_maps: HashSet<Zone>,
+    pub unlocked_zone_maps: HashSet<ZoneId>,
 
     pub max_health: i32,
     pub max_energy: i32,
@@ -81,7 +81,7 @@ impl Default for PlayerModel {
         ammo_dict.insert(AmmoMode::NimbleValley, AmmoModel::new(3, 3));
 
         let mut unlocked_zone_maps = HashSet::new();
-        unlocked_zone_maps.insert(Zone::Ranch);
+        unlocked_zone_maps.insert(ZoneId::Ranch);
 
         Self {
             curr_region_set_id: RegionSetId::Home,
@@ -146,11 +146,7 @@ impl PlayerModel {
     pub fn reset_for_game_mode(&mut self, settings: &GameModeSettings) {
         self.currency = settings.init_currency;
         self.currency_ever_collected = settings.init_currency;
-        if settings.end_at_noon_day > 0.0 {
-            self.end_game_time = Some(settings.end_time());
-        } else {
-            self.end_game_time = None;
-        }
+        self.end_game_time = settings.end_time();
     }
 
     pub fn set_energy(&mut self, energy: f32, world_time: f64) {

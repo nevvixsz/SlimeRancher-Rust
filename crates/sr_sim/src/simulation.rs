@@ -33,7 +33,11 @@ impl Default for Simulation {
 impl Simulation {
     pub fn new(game_mode: GameMode) -> Self {
         let data = DataRegistry::builtin();
-        let mode_settings = data.game_mode(game_mode).clone();
+        let mode_settings = data
+            .game_modes
+            .get(&game_mode)
+            .cloned()
+            .unwrap_or_else(|| GameModeSettings::for_mode(game_mode));
         let mut model = GameModel::new(game_mode);
         let time = TimeDirector::default();
         time.init_world_model(&mut model.world);
