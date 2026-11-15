@@ -968,8 +968,8 @@ mod tests {
 
         // 7Zee CorporatePartner progress unlocks MarketLink (11), Ammo4 (20), TeleporterGold (28)
         rt.progress.set_progress(&mut gm, &mode, ProgressType::CorporatePartner, 28, &mut dummy_ev);
-        assert!(gm.player.has_upgrade(PlayerUpgrade::Ammo4));
-        assert!(gm.player.has_upgrade(PlayerUpgrade::GoldenSureshot));
+        assert!(gm.player.upgrades.contains(&PlayerUpgrade::Ammo4));
+        assert!(gm.player.upgrades.contains(&PlayerUpgrade::GoldenSureshot));
         assert!(gm.gadgets.blueprints.contains(&GadgetId::MarketLink));
         assert!(gm.gadgets.blueprints.contains(&GadgetId::TeleporterGold));
     }
