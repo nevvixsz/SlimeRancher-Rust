@@ -2,9 +2,14 @@
 
 pub mod ammo;
 pub mod player;
+pub mod vacuum;
 
 pub use ammo::AmmoController;
 pub use player::{DeathOutcome, DeathSource, PlayerController};
+pub use vacuum::{
+    VacEvents, VacInput, VacMode, VacuumableSize, WeaponVacuum, AIR_BURST_POWER, AIR_BURST_RADIUS,
+    CAPTURE_DIST, EJECT_SPEED, MAX_VAC_DIST, SHOOT_COOLDOWN, STAMINA_PER_BURST,
+};
 
 #[cfg(test)]
 mod tests {
@@ -90,5 +95,89 @@ mod tests {
         let popped = ammo.decrement_selected(&mut model, 1, 32400.0);
         assert_eq!(popped, Some(snap));
         assert_eq!(ammo.slot_count(&model, 0), 0);
+    }
+
+    #[test]
+    fn weapon_vacuum_captures_slime_holds_largo_shoots_and_airbursts() {
+        use sr_ids::RegionSetId;
+        use sr_math::{Quat, Vec3};
+        use sr_model::GameModel;
+        use sr_physics::{CollisionLayers, PhysicsWorld, RigidBody, StaticCollider, StaticShape};
+
+        let mut gm = GameModel::default();
+        let mut motor = PlayerMotor::default();
+        let mut ammo = AmmoController::default();
+        let mut vac = WeaponVacuum::default();
+        let mut pw = PhysicsWorld::new();
+        pw.add_static(StaticCollider {
+            id: "floor".into(),
+            layers: CollisionLayers::WORLD,
+            is_trigger: false,
+            shape: StaticShape::GroundPlane { height: 0.0 },
+        });
+        PlayerController::grant_upgrade(&mut gm.player, PlayerUpgrade::AirBurst, 32400.0);
+
+        // Place a PinkSlime right in front of the muzzle
+        let muzzle = WeaponVacuum::muzzle_origin(&gm, &motor);
+        let slime_pos = muzzle + motor.look_dir() * 0.6;
+        let slime_id = gm.create_actor(
+            IdentifiableId::PinkSlime,
+            RegionSetId::Home,
+            slime_pos,
+            Quat::IDENTITY,
+        );
+        pw.insert_body(RigidBody {
+            actor_id: slime_id,
+            pos: slime_pos,
+            radius: 0.45,
+            use_gravity: false,
+            ..Default::default()
+        });
+
+        let ev = vac.step(
+            &mut gm,
+            &motor,
+            &mut ammo,
+            &mut pw,
+            VacInput {
+                vac_held: true,
+                ..Default::default()
+            },
+            1.0 / 60.0,
+        );
+        assert_eq!(ev.captured, vec![IdentifiableId::PinkSlime]);
+        assert_eq!(ammo.slot_count(&gm.player, 0), 1);
+
+        // Shoot it back out
+        vac.elapsed_time += 0.5;
+        let ev_shoot = vac.step(
+            &mut gm,
+            &motor,
+            &mut ammo,
+            &mut pw,
+            VacInput {
+                shoot_held: true,
+                ..Default::default()
+            },
+            1.0 / 60.0,
+        );
+        assert_eq!(ev_shoot.expelled.len(), 1);
+        let spawned_id = ev_shoot.expelled[0].0;
+        assert!(pw.bodies[&spawned_id].vel.z > 20.0);
+
+        // AirBurst pushes slime forward and consumes 20 energy
+        let ev_burst = vac.step(
+            &mut gm,
+            &motor,
+            &mut ammo,
+            &mut pw,
+            VacInput {
+                burst_pressed: true,
+                ..Default::default()
+            },
+            1.0 / 60.0,
+        );
+        assert!(ev_burst.air_burst_fired);
+        assert_eq!(gm.player.curr_energy, 80.0);
     }
 }
