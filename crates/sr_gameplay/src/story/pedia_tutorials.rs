@@ -94,7 +94,7 @@ impl PediaDirector {
             Id::DervishSlime => P::DervishSlime,
             Id::TangleSlime => P::TangleSlime,
             Id::SaberSlime => P::SaberSlime,
-            Id::QuicksilverSlime => P::QuicksilverSlime,
+            Id::QuicksilverSlime | Id::QuicksilverPlort => P::QuicksilverSlime,
             Id::GlitchSlime => P::GlitchSlime,
             Id::PartyGordo => P::PartyGordoSlime,
             Id::CarrotVeggie => P::Carrot,

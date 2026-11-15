@@ -5,9 +5,10 @@ use sr_ai::{AiStepEvents, SlimeAiCoordinator};
 use sr_data::{DataRegistry, GameModeSettings};
 use sr_gameplay::{
     spawn_physical_actor, step_actor_lifecycle, AchievementsDirector, ActorLifecycleEvents,
-    AmmoController, DeathOutcome, DeathSource, EconomyRuntime, EconomyStepEvents,
-    PlayerController, RanchRuntime, RanchStepEvents, ScienceRuntime, ScienceStepEvents,
-    StoryRuntime, StoryStepEvents, VacEvents, VacInput, WeaponVacuum,
+    AmmoController, DeathOutcome, DeathSource, DlcRuntime, DlcStepEvents, EconomyRuntime,
+    EconomyStepEvents, PlayerController, RanchRuntime, RanchStepEvents, ScienceRuntime,
+    ScienceStepEvents, SlimeAppearanceDirector, StoryRuntime, StoryStepEvents, VacEvents,
+    VacInput, WeaponVacuum,
 };
 use sr_ids::{GameMode, IdentifiableId, RegionSetId};
 use sr_math::{Randoms, Vec3};
@@ -31,6 +32,7 @@ pub struct TickEvents {
     pub economy: EconomyStepEvents,
     pub science: ScienceStepEvents,
     pub story: StoryStepEvents,
+    pub dlc: DlcStepEvents,
     pub player_death: Option<DeathOutcome>,
 }
 
@@ -52,6 +54,7 @@ pub struct Simulation {
     pub economy: EconomyRuntime,
     pub science: ScienceRuntime,
     pub story: StoryRuntime,
+    pub dlc: DlcRuntime,
     pub rng: Randoms,
     was_game_over: bool,
     ff_start_time: Option<f64>,
@@ -91,6 +94,7 @@ impl Simulation {
             economy: EconomyRuntime::default(),
             science: ScienceRuntime::default(),
             story: StoryRuntime::default(),
+            dlc: DlcRuntime::default(),
             rng: Randoms::default(),
             was_game_over: false,
             ff_start_time: None,
@@ -105,6 +109,7 @@ impl Simulation {
             .director
             .init_model(&mut sim.model, &sim.mode_settings);
         sim.story.init_model(&mut sim.model, &sim.mode_settings);
+        SlimeAppearanceDirector::init_defaults(&mut sim.model, &sim.data.slimes);
         sim
     }
 
@@ -247,6 +252,17 @@ impl Simulation {
 
         // Story, Delayed Trackers, Mail, Slimepedia, and Achievements
         events.story = self.story.step(&mut self.model, &self.mode_settings);
+
+        // Post-launch DLC systems (Ogden's Wilds, Mochi's Valley, Viktor's Slimulation)
+        events.dlc = self.dlc.step(
+            &mut self.model,
+            &self.mode_settings,
+            &mut self.physics,
+            &mut self.ammo,
+            &mut self.story.pedia,
+            &mut self.story.tutorials,
+            &mut self.rng,
+        );
 
         // Slime AI, emotions, eating, unique abilities, and Gordos
         let player_alive = self.model.player.curr_health > 0.0;
