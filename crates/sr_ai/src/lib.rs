@@ -1,6 +1,7 @@
 //! Slime AI, emotions, subbehaviour plexer, diet/largo/tarr lifecycle, unique abilities, and Gordos.
 
 pub mod abilities_classic;
+pub mod abilities_rare;
 pub mod eat;
 pub mod emotions;
 pub mod plexer;
@@ -10,6 +11,11 @@ pub use abilities_classic::{
     RockRollPhase, BOOM_EXPLODE_POWER, BOOM_EXPLODE_RADIUS, CRYSTAL_DAMAGE,
     PHOSPHOR_DAYLIGHT_BURN_SECS, PHOSPHOR_HOVER_HEIGHT, RAD_BASE_RADIUS, RAD_EXPAND_FACTOR,
     ROCK_ROLL_DAMAGE,
+};
+pub use abilities_rare::{
+    step_whirlwinds, RareAbilityEvents, RareAbilityState, WhirlwindHazard,
+    DERVISH_MAX_WHIRLWINDS, DERVISH_WHIRLWIND_CUTOFF, DERVISH_WHIRLWIND_RADIUS,
+    TANGLE_GRAPPLE_COOLDOWN, TANGLE_GRAPPLE_RANGE,
 };
 
 pub use eat::{
