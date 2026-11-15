@@ -362,7 +362,7 @@ impl DroneAiSystem {
                     let Some(plot) = model.land_plots.get_mut(&pid) else {
                         continue;
                     };
-                    plot.ashes_remaining = (plot.ashes_remaining + amount as f32).min(MAX_ASH_UNITS);
+                    plot.ash_units = (plot.ash_units + amount as f32).min(MAX_ASH_UNITS);
                     carry.1 = 0;
                     carry.0 = IdentifiableId::None;
                     return Some((pos, item_id, amount, 0));
