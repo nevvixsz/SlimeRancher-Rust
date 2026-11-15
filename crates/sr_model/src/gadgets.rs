@@ -80,40 +80,13 @@ pub struct GadgetModel {
 
 impl GadgetModel {
     pub fn new(ident: GadgetId, site_id: impl Into<String>, y_rotation: f32) -> Self {
-        let kind = if matches!(
-            ident,
-            GadgetId::ExtractorDrillNovice
-                | GadgetId::ExtractorDrillAdvanced
-                | GadgetId::ExtractorDrillMaster
-                | GadgetId::ExtractorDrillTitan
-                | GadgetId::ExtractorPumpNovice
-                | GadgetId::ExtractorPumpAdvanced
-                | GadgetId::ExtractorPumpMaster
-                | GadgetId::ExtractorPumpTitan
-                | GadgetId::ExtractorApiaryNovice
-                | GadgetId::ExtractorApiaryAdvanced
-                | GadgetId::ExtractorApiaryMaster
-                | GadgetId::ExtractorApiaryTitan
-        ) {
+        let kind = if ident.is_extractor() {
             GadgetKind::Extractor(ExtractorModel::default())
-        } else if matches!(
-            ident,
-            GadgetId::WarpDepotBlue
-                | GadgetId::WarpDepotGrey
-                | GadgetId::WarpDepotPink
-                | GadgetId::WarpDepotViolet
-                | GadgetId::WarpDepotRed
-                | GadgetId::WarpDepotGold
-                | GadgetId::WarpDepotIndigo
-                | GadgetId::WarpDepotEmerald
-        ) {
+        } else if ident.is_warp_depot() {
             GadgetKind::WarpDepot(WarpDepotModel::default())
-        } else if matches!(
-            ident,
-            GadgetId::GordoSnareNovice | GadgetId::GordoSnareAdvanced | GadgetId::GordoSnareMaster
-        ) {
+        } else if ident.is_snare() {
             GadgetKind::Snare(SnareModel::default())
-        } else if matches!(ident, GadgetId::Drone | GadgetId::DroneAdvanced) {
+        } else if ident.is_drone() {
             GadgetKind::Drone(DroneModel::default())
         } else {
             GadgetKind::Basic

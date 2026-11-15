@@ -142,4 +142,13 @@ impl GameModeSettings {
         map.insert(GameMode::TimeLimitV2, Self::time_limit_v2());
         map
     }
+
+    pub fn for_mode(mode: GameMode) -> Self {
+        match mode {
+            GameMode::Classic => Self::classic(),
+            GameMode::Casual => Self::casual(),
+            GameMode::TimeLimit => Self::time_limit(),
+            GameMode::TimeLimitV2 => Self::time_limit_v2(),
+        }
+    }
 }
