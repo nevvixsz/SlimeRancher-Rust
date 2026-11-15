@@ -117,4 +117,17 @@ l.hello = Welcome, {0}!
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn step11_embedded_localization_ru_and_en() {
+        let ru = LocalizationSet::embedded("ru").unwrap();
+        let en = LocalizationSet::embedded("en").unwrap();
+
+        assert!(ru.total_entries() > 2500);
+        assert!(en.total_entries() > 2500);
+        assert_eq!(ru.get("ui.t.pedia"), Some("Слаймопедия"));
+        assert_eq!(en.get("ui.t.pedia"), Some("Slimepedia"));
+        assert_eq!(ru.get("actor.l.beet_veggie"), Some("Сердцевёкла"));
+        assert_eq!(en.get("actor.l.beet_veggie"), Some("Heart Beet"));
+    }
 }
