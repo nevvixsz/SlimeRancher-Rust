@@ -209,7 +209,7 @@ mod tests {
             Vec3::new(0.0, 2.0, 0.0),
             Vec3::new(0.0, -20.0, 0.0),
         );
-        let mut rng = Randoms::with_seed(42);
+        let mut rng = Randoms::from_seed(42);
         let mut broken = false;
         for _ in 0..30 {
             let (impacts, overlaps) = pw.step(1.0 / 60.0);

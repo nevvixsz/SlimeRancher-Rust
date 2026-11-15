@@ -57,9 +57,9 @@ pub fn step_actor_lifecycle(
             physics.remove_body(crate_id);
             events.broken_crates.push(crate_id);
             let rewards = crate_reward_pool(crate_actor.ident);
-            let count = rng.get_in_range(2, 4);
+            let count = rng.get_in_range_i32(2, 5);
             for _ in 0..count {
-                let idx = rng.get_in_range(0, rewards.len() as i32 - 1) as usize;
+                let idx = rng.get_in_range_i32(0, rewards.len() as i32) as usize;
                 let reward_id = rewards[idx];
                 let jitter = Vec3::new(
                     rng.get_in_range_f32(-0.6, 0.6),
