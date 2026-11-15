@@ -10,6 +10,7 @@ members = [
     "crates/sr_ai",
     "crates/sr_world",
     "crates/sr_sim",
+    "crates/sr_persist",
     "crates/sr_sandbox",
 ]
 

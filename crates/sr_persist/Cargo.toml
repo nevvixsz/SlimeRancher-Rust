@@ -1,0 +1,14 @@
+[package]
+name = "sr_persist"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Binary .sav persistence (GameV12 compatible) and AutoSaveDirector for Slime Rancher Rust"
+
+[dependencies]
+sr_math = { path = "../sr_math" }
+sr_ids = { path = "../sr_ids" }
+sr_data = { path = "../sr_data" }
+sr_model = { path = "../sr_model" }
+glam.workspace = true
+thiserror.workspace = true
