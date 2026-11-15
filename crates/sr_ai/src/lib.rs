@@ -1,8 +1,14 @@
 //! Slime AI, emotions, subbehaviour plexer, diet/largo/tarr lifecycle, unique abilities, and Gordos.
 
+pub mod eat;
 pub mod emotions;
 pub mod plexer;
 
+pub use eat::{
+    step_slime_eat_and_tarr, EatStepEvents, SlimeEatState, DEFAULT_FERAL_LIFETIME_HOURS,
+    DIGEST_DELAY_SECS, DYNAMIC_FERAL_AGITATION, EAT_AGITATION_REDUCTION, EAT_HUNGER_REDUCTION,
+    SLIME_EAT_RADIUS, TARR_BITE_COOLDOWN, TARR_BITE_RADIUS, TARR_SUNLIGHT_BURN_RATE,
+};
 pub use emotions::{
     DriveCalculator, EmotionEnvironment, SlimeEmotionRuntime, ANGRY_CUTOFF, FAVORITE_TOY_FACTOR,
     HUNGRY_CUTOFF, MUSIC_BOX_FACTOR, NON_FAVORITE_TOY_FACTOR, POLLEN_SOURCE_AGITATION_PER_HOUR,
