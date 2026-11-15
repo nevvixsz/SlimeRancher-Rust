@@ -27,6 +27,7 @@ pub struct CameraLookState {
     pub pitch: f32,
     pub cursor_locked: bool,
     pub spawn_cycle: usize,
+    pub vac_active: bool,
     pub recoil_timer: f32,
     pub flash_timer: f32,
     pub burst_timer: f32,
@@ -40,6 +41,7 @@ impl Default for CameraLookState {
             pitch: -0.08,
             cursor_locked: false,
             spawn_cycle: 0,
+            vac_active: false,
             recoil_timer: 0.0,
             flash_timer: 0.0,
             burst_timer: 0.0,
@@ -422,7 +424,74 @@ pub fn step_simulation_system(
         sim_res.set_toast(msg);
     }
 
+    look.vac_active = vac_input.vac_held;
     sim_res.last_events = events;
+
+    // Look-at target raycast + nearby plot check for HUD prompt
+    let eye = sim_res.sim.model.player.position + Vec3::Y * 1.55;
+    let look_dir = sim_res.sim.motor.look_dir();
+    update_target_info(&sim_res, &assets, eye, look_dir, &mut target_info);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn sync_vacpack_visuals_system(
+    time: Res<Time>,
+    look: Res<CameraLookState>,
+    sim_res: Res<SimResource>,
+    registry: Res<VisualRegistry>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut cam_q: Query<
+        &mut Transform,
+        (
+            With<Camera3d>,
+            Without<VacMuzzleVisual>,
+            Without<VacBeamVisual>,
+            Without<ShootFlashVisual>,
+            Without<AirBurstVisual>,
+        ),
+    >,
+    mut muzzle_q: Query<
+        &mut Transform,
+        (
+            With<VacMuzzleVisual>,
+            Without<Camera3d>,
+            Without<VacBeamVisual>,
+            Without<ShootFlashVisual>,
+            Without<AirBurstVisual>,
+        ),
+    >,
+    mut beam_q: Query<
+        (&mut Transform, &mut Visibility),
+        (
+            With<VacBeamVisual>,
+            Without<Camera3d>,
+            Without<VacMuzzleVisual>,
+            Without<ShootFlashVisual>,
+            Without<AirBurstVisual>,
+        ),
+    >,
+    mut flash_q: Query<
+        (&mut Transform, &mut Visibility),
+        (
+            With<ShootFlashVisual>,
+            Without<Camera3d>,
+            Without<VacMuzzleVisual>,
+            Without<VacBeamVisual>,
+            Without<AirBurstVisual>,
+        ),
+    >,
+    mut burst_q: Query<
+        (&mut Transform, &mut Visibility),
+        (
+            With<AirBurstVisual>,
+            Without<Camera3d>,
+            Without<VacMuzzleVisual>,
+            Without<VacBeamVisual>,
+            Without<ShootFlashVisual>,
+        ),
+    >,
+) {
+    let elapsed = time.elapsed_secs();
 
     // Update vacpack tank core material color to active slot's item color
     let active_slot_id = sim_res.sim.ammo.slot_id(
@@ -452,7 +521,7 @@ pub fn step_simulation_system(
     // Sync Vacpack muzzle with shoot recoil & vac hum vibration
     let muzzle = WeaponVacuum::muzzle_origin(&sim_res.sim.model, &sim_res.sim.motor);
     let recoil_offset = look_dir * (-0.12 * (look.recoil_timer / 0.14));
-    let jitter = if vac_input.vac_held {
+    let jitter = if look.vac_active {
         Vec3::new(
             (elapsed * 48.0).sin() * 0.008,
             (elapsed * 55.0).cos() * 0.008,
@@ -473,7 +542,7 @@ pub fn step_simulation_system(
 
     // Animated vacuum cone beam (cone apex at muzzle, base extending 6m outward)
     for (mut b_tf, mut vis) in &mut beam_q {
-        if vac_input.vac_held {
+        if look.vac_active {
             *vis = Visibility::Visible;
             let pulse = 0.88 + 0.16 * (elapsed * 18.0).sin();
             let spin = Quat::from_axis_angle(look_dir, elapsed * 7.0);
@@ -515,9 +584,6 @@ pub fn step_simulation_system(
             *vis = Visibility::Hidden;
         }
     }
-
-    // Look-at target raycast + nearby plot check for HUD prompt
-    update_target_info(&sim_res, &assets, eye, look_dir, &mut target_info);
 }
 
 fn update_target_info(
@@ -564,9 +630,9 @@ fn update_target_info(
                     .curr_values
                     .get(&actor.ident)
                     .map(|e| e.curr_value)
-                    .unwrap_or(0);
-                if price > 0 {
-                    format!("{price} NB")
+                    .unwrap_or(0.0);
+                if price > 0.0 {
+                    format!("{:.0} NB", price.round())
                 } else {
                     String::new()
                 }
