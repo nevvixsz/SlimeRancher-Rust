@@ -303,7 +303,7 @@ pub struct AchievementsDirector;
 
 impl AchievementsDirector {
     pub fn add_int_stat(model: &mut GameModel, stat: &str, amount: i32) {
-        if model.curr_game_mode == GameMode::TimeLimitV2 && stat != "TIME_LIMIT_V2_CURRENCY" {
+        if model.game_mode == GameMode::TimeLimitV2 && stat != "TIME_LIMIT_V2_CURRENCY" {
             return;
         }
         *model
@@ -314,7 +314,7 @@ impl AchievementsDirector {
     }
 
     pub fn maybe_update_max_stat(model: &mut GameModel, stat: &str, val: i32) {
-        if model.curr_game_mode == GameMode::TimeLimitV2 && stat != "TIME_LIMIT_V2_CURRENCY" {
+        if model.game_mode == GameMode::TimeLimitV2 && stat != "TIME_LIMIT_V2_CURRENCY" {
             return;
         }
         let entry = model
@@ -328,7 +328,7 @@ impl AchievementsDirector {
     }
 
     pub fn add_enum_stat(model: &mut GameModel, stat: &str, val: i32) {
-        if model.curr_game_mode == GameMode::TimeLimitV2 {
+        if model.game_mode == GameMode::TimeLimitV2 {
             return;
         }
         model
@@ -407,7 +407,7 @@ impl AchievementsDirector {
     /// Evaluates all 57 achievement conditions and awards newly earned ones.
     pub fn evaluate_all(model: &mut GameModel) -> Vec<AchievementId> {
         let mut newly = Vec::new();
-        let mode = model.curr_game_mode;
+        let mode = model.game_mode;
 
         for &ach in AchievementId::ALL {
             if !ach.is_allowed_in_mode(mode) || Self::has_achievement(model, ach) {
@@ -584,7 +584,7 @@ impl AchievementsDirector {
 
         let currency = model.player.currency;
         let rush_final_score = ((currency as f32) * rush_score_multiplier).ceil() as i32;
-        if model.curr_game_mode == GameMode::TimeLimitV2 {
+        if model.game_mode == GameMode::TimeLimitV2 {
             Self::maybe_update_max_stat(model, "TIME_LIMIT_V2_CURRENCY", rush_final_score);
         }
 

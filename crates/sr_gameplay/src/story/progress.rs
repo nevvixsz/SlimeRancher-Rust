@@ -362,7 +362,7 @@ impl ProgressDirector {
                 .has_progress(ProgressType::UnlockViktorMissions)
             && model.progress.has_progress(ProgressType::UnlockLab)
             && model.progress.has_progress(ProgressType::UnlockRuins)
-            && model.player.has_upgrade(PlayerUpgrade::TreasureCracker2)
+            && model.player.upgrades.contains(&PlayerUpgrade::TreasureCracker2)
         {
             self.add_progress(model, mode, ProgressType::UnlockViktorMissions, ev);
             if mode.allow_mail() && model.mail.send_mail(MailType::Personal, "viktor_invite") {
