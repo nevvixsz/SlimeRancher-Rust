@@ -8,6 +8,7 @@ members = [
     "crates/sr_physics",
     "crates/sr_gameplay",
     "crates/sr_ai",
+    "crates/sr_world",
     "crates/sr_sim",
     "crates/sr_sandbox",
 ]
