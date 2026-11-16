@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-bevy = { version = "0.15", features = ["wav", "mp3"] }
+bevy = { version = "0.15", features = ["png", "tga", "webp", "wav", "vorbis", "mp3", "flac"] }
+serde = { workspace = true }
 sr_math = { path = "../sr_math" }
 sr_ids = { path = "../sr_ids" }
 sr_data = { path = "../sr_data" }

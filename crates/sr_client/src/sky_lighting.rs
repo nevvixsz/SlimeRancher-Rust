@@ -33,8 +33,13 @@ pub fn update_sky_and_light(
     mut clear: ResMut<ClearColor>,
     mut ambient: ResMut<AmbientLight>,
     mut suns: Query<(&mut DirectionalLight, &mut Transform), With<SunLight>>,
+    mut last_hour: Local<f32>,
 ) {
     let hour = TimeDirector::curr_hour(&sim.sim.model.world); // 0..24
+    if (*last_hour - hour).abs() < 0.01 {
+        return;
+    }
+    *last_hour = hour;
     // Noon (12h) -> sun high; Midnight (0h/24h) -> sun below horizon
     let sun_angle = ((hour - 6.0) / 24.0) * 2.0 * PI;
     let elevation = sun_angle.sin(); // +1 at 12h, -1 at 0h

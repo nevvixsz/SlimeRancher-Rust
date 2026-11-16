@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use bevy::math::Affine2;
 use bevy::prelude::*;
 use sr_gameplay::{MarketDepositZone, WeaponVacuum};
 use sr_ids::{GameMode, IdentifiableId, LandPlotId, RegionSetId};
@@ -240,7 +241,7 @@ pub fn setup_world_scene(
     let shared = init_slime_shared_assets(&mut meshes, &mut materials);
     commands.insert_resource(shared);
 
-    // Ground floor (100x100)
+    // Ground floor (100x100) with crisp tiled UV repeat
     let ground_mat = materials.add(StandardMaterial {
         base_color: if assets.ground_texture.is_some() {
             Color::WHITE
@@ -248,19 +249,36 @@ pub fn setup_world_scene(
             Color::srgb(0.36, 0.72, 0.34)
         },
         base_color_texture: assets.ground_texture.clone(),
+        uv_transform: Affine2::from_scale(Vec2::splat(25.0)),
         perceptual_roughness: 0.85,
         ..default()
     });
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(100.0, 100.0))),
-        MeshMaterial3d(ground_mat),
+        MeshMaterial3d(ground_mat.clone()),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
 
+    // Optional raw .obj world mesh from local_assets/Mesh/
+    if assets.world_scene_model.is_none() {
+        if let Some(ref world_obj) = assets.world_obj_mesh {
+            commands.spawn((
+                Mesh3d(world_obj.clone()),
+                MeshMaterial3d(ground_mat),
+                Transform::IDENTITY,
+            ));
+        }
+    }
+
     // Sea below the southern cliff
     let sea_mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.12, 0.56, 0.86, 0.88),
+        base_color: if assets.water_texture.is_some() {
+            Color::srgba(0.65, 0.88, 1.0, 0.88)
+        } else {
+            Color::srgba(0.12, 0.56, 0.86, 0.88)
+        },
         base_color_texture: assets.water_texture.clone(),
+        uv_transform: Affine2::from_scale(Vec2::splat(60.0)),
         alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.2,
         ..default()
@@ -274,11 +292,12 @@ pub fn setup_world_scene(
     // Perimeter low walls
     let wall_mat = materials.add(StandardMaterial {
         base_color: if assets.wall_texture.is_some() {
-            Color::srgb(0.85, 0.80, 0.75)
+            Color::WHITE
         } else {
             Color::srgb(0.56, 0.48, 0.42)
         },
         base_color_texture: assets.wall_texture.clone(),
+        uv_transform: Affine2::from_scale(Vec2::new(20.0, 1.0)),
         perceptual_roughness: 0.9,
         ..default()
     });
@@ -313,7 +332,7 @@ pub fn setup_world_scene(
         }
     }
 
-    // Multi-part Vacpack viewmodel (barrel + intake flare ring + glowing tank core)
+    // Multi-part Vacpack viewmodel (original `.obj` if available, else procedural barrel + intake ring + core)
     let muzzle_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.24, 0.30, 0.38),
         metallic: 0.55,
@@ -326,21 +345,28 @@ pub fn setup_world_scene(
         perceptual_roughness: 0.3,
         ..default()
     });
+    let vac_barrel_mesh = assets
+        .vacpack_mesh
+        .clone()
+        .unwrap_or_else(|| meshes.add(Cylinder::new(0.11, 0.60)));
+    let has_orig_vac = assets.vacpack_mesh.is_some();
     commands
         .spawn((
-            Mesh3d(meshes.add(Cylinder::new(0.11, 0.60))),
+            Mesh3d(vac_barrel_mesh),
             MeshMaterial3d(muzzle_mat),
             Transform::default(),
             VacMuzzleVisual,
         ))
         .with_children(|p| {
-            // Intake ring at front tip (+Y in local cylinder space)
-            p.spawn((
-                Mesh3d(meshes.add(Torus::new(0.09, 0.15))),
-                MeshMaterial3d(ring_mat),
-                Transform::from_xyz(0.0, 0.30, 0.0)
-                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-            ));
+            if !has_orig_vac {
+                // Intake ring at front tip (+Y in local cylinder space)
+                p.spawn((
+                    Mesh3d(meshes.add(Torus::new(0.09, 0.15))),
+                    MeshMaterial3d(ring_mat),
+                    Transform::from_xyz(0.0, 0.30, 0.0)
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ));
+            }
             // Glowing slot-color tank core
             p.spawn((
                 Mesh3d(meshes.add(Cylinder::new(0.125, 0.20))),
@@ -423,17 +449,21 @@ pub fn sync_actors_and_gordos_system(
     assets: Res<ClientAssets>,
     sim_res: Res<SimResource>,
     mut transforms: Query<&mut Transform>,
+    mut scratch_despawn: Local<Vec<i64>>,
 ) {
     let sim = &sim_res.sim;
     let dump = sim_res.world_dump.as_ref();
 
-    // 1. Remove despawned / vacuumed actors
-    let existing_ids: Vec<i64> = registry.actor_entities.keys().copied().collect();
-    for id in existing_ids {
+    // 1. Remove despawned / vacuumed actors (reusing Local scratch buffer = zero allocations)
+    scratch_despawn.clear();
+    for &id in registry.actor_entities.keys() {
         if !sim.model.actors.contains_key(&id) {
-            if let Some(ent) = registry.actor_entities.remove(&id) {
-                commands.entity(ent).despawn_recursive();
-            }
+            scratch_despawn.push(id);
+        }
+    }
+    for id in scratch_despawn.iter().copied() {
+        if let Some(ent) = registry.actor_entities.remove(&id) {
+            commands.entity(ent).despawn_recursive();
         }
     }
 
@@ -450,8 +480,12 @@ pub fn sync_actors_and_gordos_system(
                 .materials
                 .entry(actor.ident)
                 .or_insert_with(|| {
-                    let color = ident_color(actor.ident, dump);
                     let tex = assets.item_textures.get(&actor.ident).cloned();
+                    let color = if tex.is_some() {
+                        Color::WHITE
+                    } else {
+                        ident_color(actor.ident, dump)
+                    };
                     materials.add(StandardMaterial {
                         base_color: color,
                         base_color_texture: tex,
@@ -466,6 +500,7 @@ pub fn sync_actors_and_gordos_system(
                 &mut commands,
                 &registry,
                 &shared,
+                &assets,
                 actor_id,
                 actor.ident,
                 actor.pos,
@@ -491,16 +526,29 @@ pub fn sync_actors_and_gordos_system(
             continue;
         }
         if !registry.gordo_entities.contains_key(&gordo.gordo_id) {
-            let color = ident_color(gordo.slime_ident, dump);
-            let mat = materials.add(StandardMaterial {
-                base_color: color,
-                perceptual_roughness: 0.4,
-                ..default()
-            });
+            let mat = registry
+                .materials
+                .entry(gordo.slime_ident)
+                .or_insert_with(|| {
+                    let tex = assets.item_textures.get(&gordo.slime_ident).cloned();
+                    let color = if tex.is_some() {
+                        Color::WHITE
+                    } else {
+                        ident_color(gordo.slime_ident, dump)
+                    };
+                    materials.add(StandardMaterial {
+                        base_color: color,
+                        base_color_texture: tex,
+                        perceptual_roughness: 0.4,
+                        ..default()
+                    })
+                })
+                .clone();
             let ent = spawn_gordo_visual(
                 &mut commands,
                 &registry,
                 &shared,
+                &assets,
                 gordo.gordo_id.clone(),
                 gordo.slime_ident,
                 gordo.pos,
