@@ -238,8 +238,26 @@ impl AssetManifest {
         )
     }
 
+    /// Exact lowercase key lookup inside `textures`.
+    pub fn find_exact_texture(&self, exact_name: &str) -> Option<&str> {
+        let k = exact_name.to_ascii_lowercase();
+        self.textures.get(&k).map(String::as_str)
+    }
+
+    /// Exact lowercase key lookup inside `models`.
+    pub fn find_exact_model(&self, exact_name: &str) -> Option<&str> {
+        let k = exact_name.to_ascii_lowercase();
+        self.models.get(&k).map(String::as_str)
+    }
+
+    /// Exact lowercase key lookup inside `audio`.
+    pub fn find_exact_audio(&self, exact_name: &str) -> Option<&str> {
+        let k = exact_name.to_ascii_lowercase();
+        self.audio.get(&k).map(String::as_str)
+    }
+
     /// Prefers 3D albedo/diffuse textures (`_diffuse`, `_albedo`, `_color`, bare stem)
-    /// and strictly excludes UI icons, sprites, face decals, and PBR maps.
+    /// and strictly excludes UI icons, sprites, face decals, masks, ramps, and PBR maps.
     pub fn find_diffuse_texture(&self, candidates: &[&str]) -> Option<&str> {
         find_in_map_scored_ex(
             &self.textures,
@@ -247,8 +265,9 @@ impl AssetManifest {
             candidates,
             &[
                 "icon", "pedia", "sprite", "hud_", "ui_", "_normal", "_nrm", "_bump",
-                "_mask", "_rough", "_spec", "_ao", "_lut", "_ramp", "_emissive", "_shadow",
-                "eyes", "mouth", "face",
+                "_mask", "_map", "_rough", "_spec", "_ao", "_lut", "_ramp", "ramp_", "rmp_",
+                "nrm_", "msk_", "rgh_", "ao_", "over_", "alpha", "tut_", "emoji_", "splat",
+                "watermark", "atlas", "dial_", "_emissive", "_shadow", "eyes", "mouth", "face_",
             ],
             &[],
             &["diffuse", "albedo", "color", "tex"],
@@ -256,7 +275,19 @@ impl AssetManifest {
         )
     }
 
-    /// Finds original slime face textures (`eyes_happy`, `mouth_happy`, `slime_eyes_*`, etc.).
+    /// Finds original combined face textures (`face_default_happy`, `face_tabby_happy`, etc.).
+    pub fn find_full_face_texture(&self, prefix: &str, expr_tokens: &[&str]) -> Option<&str> {
+        let pfx = prefix.to_ascii_lowercase();
+        for &tok in expr_tokens {
+            let key = format!("{pfx}{}", tok.to_ascii_lowercase());
+            if let Some(rel) = self.textures.get(&key) {
+                return Some(rel.as_str());
+            }
+        }
+        None
+    }
+
+    /// Finds original slime face textures (`eyes_idle`, `mouth_idle`, `eyes_blink`, etc.).
     pub fn find_face_texture(&self, is_eyes: bool, expr_tokens: &[&str]) -> Option<&str> {
         let part_tokens: &[&str] = if is_eyes {
             &["eye"]
@@ -266,7 +297,12 @@ impl AssetManifest {
         let mut best: Option<(i32, &str)> = None;
         for (key, rel) in &self.textures {
             let clean = strip_asset_studio_suffix(key).trim();
-            if clean.contains("icon") || clean.contains("normal") || clean.contains("mask") {
+            if clean.contains("icon")
+                || clean.contains("normal")
+                || clean.contains("mask")
+                || clean.contains("henhen")
+                || clean.contains("interiorside")
+            {
                 continue;
             }
             if !part_tokens.iter().any(|p| clean.contains(p)) {

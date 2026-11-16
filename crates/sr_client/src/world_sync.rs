@@ -467,7 +467,11 @@ pub fn sync_actors_and_gordos_system(
                 .materials
                 .entry(actor.ident)
                 .or_insert_with(|| {
-                    let tex = assets.item_textures.get(&actor.ident).cloned();
+                    let tex = shared
+                        .composed_food_textures
+                        .get(&actor.ident)
+                        .cloned()
+                        .or_else(|| assets.item_textures.get(&actor.ident).cloned());
                     let color = if tex.is_some() {
                         Color::WHITE
                     } else {
@@ -476,8 +480,8 @@ pub fn sync_actors_and_gordos_system(
                     materials.add(StandardMaterial {
                         base_color: color,
                         base_color_texture: tex,
-                        perceptual_roughness: if actor.ident.is_plort() { 0.15 } else { 0.45 },
-                        metallic: if actor.ident.is_plort() { 0.30 } else { 0.0 },
+                        perceptual_roughness: if actor.ident.is_plort() { 0.12 } else { 0.45 },
+                        metallic: if actor.ident.is_plort() { 0.25 } else { 0.0 },
                         ..default()
                     })
                 })

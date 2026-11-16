@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 bevy = { version = "0.15", features = ["png", "tga", "webp", "wav", "vorbis", "mp3", "flac"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 serde = { workspace = true }
 sr_math = { path = "../sr_math" }
 sr_ids = { path = "../sr_ids" }

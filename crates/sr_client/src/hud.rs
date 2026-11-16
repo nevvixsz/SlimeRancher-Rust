@@ -64,24 +64,43 @@ pub struct HudCache {
 pub fn setup_hud(mut commands: Commands, assets: Res<ClientAssets>) {
     let font = assets.ui_font.clone();
 
-    // Center crosshair
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Percent(50.0),
-            top: Val::Percent(50.0),
-            width: Val::Px(6.0),
-            height: Val::Px(6.0),
-            margin: UiRect {
-                left: Val::Px(-3.0),
-                top: Val::Px(-3.0),
+    // Center crosshair (original reticleCircle.png when available, dot fallback)
+    if let Some(ref reticle) = assets.icon_reticle {
+        commands.spawn((
+            ImageNode::new(reticle.clone()),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.0),
+                top: Val::Percent(50.0),
+                width: Val::Px(24.0),
+                height: Val::Px(24.0),
+                margin: UiRect {
+                    left: Val::Px(-12.0),
+                    top: Val::Px(-12.0),
+                    ..default()
+                },
                 ..default()
             },
-            ..default()
-        },
-        BorderRadius::all(Val::Px(3.0)),
-        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.90)),
-    ));
+        ));
+    } else {
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.0),
+                top: Val::Percent(50.0),
+                width: Val::Px(6.0),
+                height: Val::Px(6.0),
+                margin: UiRect {
+                    left: Val::Px(-3.0),
+                    top: Val::Px(-3.0),
+                    ..default()
+                },
+                ..default()
+            },
+            BorderRadius::all(Val::Px(3.0)),
+            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.90)),
+        ));
+    }
 
     // Look-at Target Prompt below crosshair
     commands.spawn((
