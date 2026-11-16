@@ -478,11 +478,12 @@ pub fn init_slime_shared_assets(
             .map(|(m, _)| m)
             .unwrap_or_else(|| base_body_mesh.clone())
     };
-    let load_aligned_part = |key: &str| -> Option<Handle<Mesh>> {
-        let path = assets.slime_obj_paths.get(key)?;
-        let (mesh, _) = load_obj_aligned_from_disk(path, base_align, false, flip_y_180)?;
-        Some(meshes.add(mesh))
-    };
+    let puddle_raw = load_aligned_body("slime_puddle_lod0");
+    let gordo_raw = load_aligned_body("slime_gordo");
+    let tarr_raw = load_aligned_body("slime_tarr");
+    let saber_raw = load_aligned_body("slime_saber");
+    let gold_raw = load_aligned_body("slime_gold");
+    let quicksilver_raw = load_aligned_body("slime_quicksilver");
 
     // Conform face patches closely to the real slime_default surface!
     let full_face_patch_mesh = meshes.add(build_surface_patch_from_mesh(
@@ -517,12 +518,29 @@ pub fn init_slime_shared_assets(
     ));
 
     let slime_default_mesh = meshes.add(base_body_mesh);
-    let slime_puddle_mesh = meshes.add(load_aligned_body("slime_puddle_lod0"));
-    let slime_gordo_mesh = meshes.add(load_aligned_body("slime_gordo"));
-    let slime_tarr_mesh = meshes.add(load_aligned_body("slime_tarr"));
-    let slime_saber_mesh = meshes.add(load_aligned_body("slime_saber"));
-    let slime_gold_mesh = meshes.add(load_aligned_body("slime_gold"));
-    let slime_quicksilver_mesh = meshes.add(load_aligned_body("slime_quicksilver"));
+    let slime_puddle_mesh = meshes.add(puddle_raw);
+    let slime_gordo_mesh = meshes.add(gordo_raw);
+    let slime_tarr_mesh = meshes.add(tarr_raw);
+    let slime_saber_mesh = meshes.add(saber_raw);
+    let slime_gold_mesh = meshes.add(gold_raw);
+    let slime_quicksilver_mesh = meshes.add(quicksilver_raw);
+
+    let load_part_raw = |key: &str| -> Option<Mesh> {
+        let path = assets.slime_obj_paths.get(key)?;
+        let (mesh, _) = load_obj_aligned_from_disk(path, base_align, false, flip_y_180)?;
+        Some(mesh)
+    };
+    let tabby_ears_mesh = load_part_raw("ears_n_tail_lod0").map(|m| meshes.add(m));
+    let hunter_ears_mesh = load_part_raw("hunter_ears_n_tail_lod0").map(|m| meshes.add(m));
+    let rock_spine_mesh = load_part_raw("rocks_spine_lod0").map(|m| meshes.add(m));
+    let crystal_spine_mesh = load_part_raw("crystals_spine_lod0").map(|m| meshes.add(m));
+    let phosphor_wing_l_mesh = load_part_raw("wing_l").map(|m| meshes.add(m));
+    let phosphor_wing_r_mesh = load_part_raw("wing_r").map(|m| meshes.add(m));
+    let dervish_ring_mesh = load_part_raw("dervishring_lod0").map(|m| meshes.add(m));
+    let tangle_flower_mesh = load_part_raw("tangleflower_lod0").map(|m| meshes.add(m));
+    let lucky_coin_mesh = load_part_raw("luckycat_coin_lod0").map(|m| meshes.add(m));
+    let quicksilver_crest_mesh = load_part_raw("quicksilvercrest").map(|m| meshes.add(m));
+    let mosaic_shell_mesh = load_part_raw("mosaic_lod0").map(|m| meshes.add(m));
 
     // 2. 3-color vertical jelly materials for every slime species
     let mut slime_body_materials = HashMap::new();
@@ -654,17 +672,17 @@ pub fn init_slime_shared_assets(
         eyes_patch_mesh,
         mouth_patch_mesh,
 
-        tabby_ears_mesh: load_aligned_part("ears_n_tail_lod0"),
-        hunter_ears_mesh: load_aligned_part("hunter_ears_n_tail_lod0"),
-        rock_spine_mesh: load_aligned_part("rocks_spine_lod0"),
-        crystal_spine_mesh: load_aligned_part("crystals_spine_lod0"),
-        phosphor_wing_l_mesh: load_aligned_part("wing_l"),
-        phosphor_wing_r_mesh: load_aligned_part("wing_r"),
-        dervish_ring_mesh: load_aligned_part("dervishring_lod0"),
-        tangle_flower_mesh: load_aligned_part("tangleflower_lod0"),
-        lucky_coin_mesh: load_aligned_part("luckycat_coin_lod0"),
-        quicksilver_crest_mesh: load_aligned_part("quicksilvercrest"),
-        mosaic_shell_mesh: load_aligned_part("mosaic_lod0"),
+        tabby_ears_mesh,
+        hunter_ears_mesh,
+        rock_spine_mesh,
+        crystal_spine_mesh,
+        phosphor_wing_l_mesh,
+        phosphor_wing_r_mesh,
+        dervish_ring_mesh,
+        tangle_flower_mesh,
+        lucky_coin_mesh,
+        quicksilver_crest_mesh,
+        mosaic_shell_mesh,
 
         carrot_mesh: meshes.add(Cone::new(0.32, 1.15)),
         leaf_mesh: meshes.add(Cone::new(0.20, 0.45)),
