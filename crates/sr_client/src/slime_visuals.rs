@@ -1,20 +1,24 @@
 //! Original-style Slime Rancher visuals:
+//! - Original Unity `slime_default.obj` / `slime_puddle_LOD0.obj` / `slime_gordo.obj` / `slime_tarr.obj` /
+//!   `slime_saber.obj` / `slime_gold.obj` / `slime_quicksilver.obj` meshes when present
 //! - 3-color vertical jelly palette gradients (`Top` / `Middle` / `Bottom`)
-//! - Curved spherical face decals (eyes + mouth) using original `Texture2D` face sprites when available
-//!   or crisp anti-aliased RGBA sprites matching `SlimeFaceAnimator` states (`Happy`, `Blink`, `Elated`,
-//!   `Hungry`, `Starving`, `Angry`, `Feral`, `Scared`, `ChompOpen`)
-//! - Squash-and-stretch physics jiggle, Rad/Tarr pulsing auras, food/plort/crate/Gordo meshes.
+//! - Surface-conforming face decals (`face_default_*.png` or crisp anti-aliased `eyes` + `mouth`)
+//!   driven by `SlimeFaceAnimator` states (`Happy`, `Blink`, `Elated`, `Hungry`, `Starving`, `Angry`, `Feral`, `Scared`)
+//! - Original aligned 3D species attachments (`ears_n_tail_LOD0`, `hunter_ears_n_tail_LOD0`, `rocks_spine_LOD0`,
+//!   `crystals_spine_LOD0`, `wing_l`/`wing_r`, `dervishRing_LOD0`, `tangleFlower_LOD0`, `luckycat_coin_LOD0`,
+//!   `quicksilvercrest`, `mosaic_LOD0`)
+//! - Food map+mask+ramp texture composition.
 
 use std::collections::HashMap;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sr_ids::IdentifiableId;
 use sr_model::ActorKind;
 
-use crate::assets::{ClientAssets, SlimeExpr};
+use crate::assets::{build_food_composite_image, ClientAssets, SlimeExpr};
+use crate::obj_loader::{build_surface_patch_from_mesh, load_obj_aligned_from_disk};
 use crate::world_sync::{SimResource, VisualRegistry};
 
 #[derive(Component)]
@@ -22,6 +26,13 @@ pub struct SlimeBodyVisual {
     pub actor_id: i64,
     pub base_scale: f32,
     pub is_puddle: bool,
+}
+
+#[derive(Component)]
+pub struct SlimeFullFaceVisual {
+    pub actor_id: i64,
+    pub current: SlimeExpr,
+    pub is_tarr: bool,
 }
 
 #[derive(Component)]
@@ -55,9 +66,33 @@ pub struct GordoKeyVisual;
 
 #[derive(Resource, Default)]
 pub struct SlimeSharedAssets {
-    pub slime_sphere_mesh: Handle<Mesh>,
+    pub slime_default_mesh: Handle<Mesh>,
+    pub slime_puddle_mesh: Handle<Mesh>,
+    pub slime_gordo_mesh: Handle<Mesh>,
+    pub slime_tarr_mesh: Handle<Mesh>,
+    pub slime_saber_mesh: Handle<Mesh>,
+    pub slime_gold_mesh: Handle<Mesh>,
+    pub slime_quicksilver_mesh: Handle<Mesh>,
+
+    pub use_full_face_decal: bool,
+    pub full_face_patch_mesh: Handle<Mesh>,
     pub eyes_patch_mesh: Handle<Mesh>,
     pub mouth_patch_mesh: Handle<Mesh>,
+
+    // Original aligned 3D species accessories
+    pub tabby_ears_mesh: Option<Handle<Mesh>>,
+    pub hunter_ears_mesh: Option<Handle<Mesh>>,
+    pub rock_spine_mesh: Option<Handle<Mesh>>,
+    pub crystal_spine_mesh: Option<Handle<Mesh>>,
+    pub phosphor_wing_l_mesh: Option<Handle<Mesh>>,
+    pub phosphor_wing_r_mesh: Option<Handle<Mesh>>,
+    pub dervish_ring_mesh: Option<Handle<Mesh>>,
+    pub tangle_flower_mesh: Option<Handle<Mesh>>,
+    pub lucky_coin_mesh: Option<Handle<Mesh>>,
+    pub quicksilver_crest_mesh: Option<Handle<Mesh>>,
+    pub mosaic_shell_mesh: Option<Handle<Mesh>>,
+
+    // Fallback primitive meshes for items/extras without .obj
     pub carrot_mesh: Handle<Mesh>,
     pub leaf_mesh: Handle<Mesh>,
     pub ear_mesh: Handle<Mesh>,
@@ -69,10 +104,12 @@ pub struct SlimeSharedAssets {
     pub key_shaft_mesh: Handle<Mesh>,
 
     pub slime_body_materials: HashMap<IdentifiableId, Handle<StandardMaterial>>,
+    pub full_face_materials: HashMap<SlimeExpr, Handle<StandardMaterial>>,
     pub eyes_materials: HashMap<SlimeExpr, Handle<StandardMaterial>>,
     pub mouth_materials: HashMap<SlimeExpr, Handle<StandardMaterial>>,
     pub tarr_eyes_material: Handle<StandardMaterial>,
     pub tarr_mouth_material: Handle<StandardMaterial>,
+    pub composed_food_textures: HashMap<IdentifiableId, Handle<Image>>,
 
     pub leaf_material: Handle<StandardMaterial>,
     pub beak_material: Handle<StandardMaterial>,
@@ -84,12 +121,26 @@ pub struct SlimeSharedAssets {
     pub tarr_aura_material: Handle<StandardMaterial>,
     pub honey_cap_material: Handle<StandardMaterial>,
     pub fire_crest_material: Handle<StandardMaterial>,
+    pub dervish_ring_material: Handle<StandardMaterial>,
+    pub tangle_flower_material: Handle<StandardMaterial>,
+    pub mosaic_shell_material: Handle<StandardMaterial>,
     pub gold_key_material: Handle<StandardMaterial>,
 }
 
 impl SlimeSharedAssets {
     pub fn body_material_for(&self, ident: IdentifiableId) -> Option<Handle<StandardMaterial>> {
         self.slime_body_materials.get(&ident).cloned()
+    }
+
+    pub fn body_mesh_for(&self, ident: IdentifiableId) -> Handle<Mesh> {
+        match ident {
+            IdentifiableId::PuddleSlime => self.slime_puddle_mesh.clone(),
+            IdentifiableId::TarrSlime => self.slime_tarr_mesh.clone(),
+            IdentifiableId::SaberSlime => self.slime_saber_mesh.clone(),
+            IdentifiableId::GoldSlime => self.slime_gold_mesh.clone(),
+            IdentifiableId::QuicksilverSlime => self.slime_quicksilver_mesh.clone(),
+            _ => self.slime_default_mesh.clone(),
+        }
     }
 }
 
@@ -207,60 +258,6 @@ fn create_gradient_texture(
     ))
 }
 
-/// Builds a smooth curved spherical patch so face sprites wrap seamlessly onto the slime body
-/// with zero Z-fighting and zero flat-card corners sticking out.
-fn create_spherical_patch_mesh(
-    radius: f32,
-    yaw_min: f32,
-    yaw_max: f32,
-    elev_min: f32,
-    elev_max: f32,
-    cols: usize,
-    rows: usize,
-) -> Mesh {
-    let mut positions = Vec::with_capacity((cols + 1) * (rows + 1));
-    let mut normals = Vec::with_capacity((cols + 1) * (rows + 1));
-    let mut uvs = Vec::with_capacity((cols + 1) * (rows + 1));
-    let mut indices = Vec::with_capacity(cols * rows * 6);
-
-    for r in 0..=rows {
-        let vt = r as f32 / rows as f32;
-        // top row = elev_max (v = 0), bottom row = elev_min (v = 1)
-        let elev = elev_max + (elev_min - elev_max) * vt;
-        let ce = elev.cos();
-        let se = elev.sin();
-        for c in 0..=cols {
-            let ut = c as f32 / cols as f32;
-            // Looking at +Z face from outside: left edge = +yaw, right edge = -yaw
-            let yaw = yaw_max + (yaw_min - yaw_max) * ut;
-            let nx = ce * yaw.sin();
-            let ny = se;
-            let nz = ce * yaw.cos();
-            positions.push([nx * radius, ny * radius, nz * radius]);
-            normals.push([nx, ny, nz]);
-            uvs.push([ut, vt]);
-        }
-    }
-
-    let stride = cols + 1;
-    for r in 0..rows {
-        for c in 0..cols {
-            let i0 = (r * stride + c) as u32;
-            let i1 = i0 + 1;
-            let i2 = ((r + 1) * stride + c) as u32;
-            let i3 = i2 + 1;
-            indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
-        }
-    }
-
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
-}
-
 fn blend_px(buf: &mut [u8], w: usize, x: i32, y: i32, rgba: [u8; 4]) {
     if x < 0 || y < 0 || x >= w as i32 {
         return;
@@ -359,7 +356,6 @@ fn create_procedural_eyes_image(images: &mut Assets<Image>, expr: SlimeExpr, is_
                 if !is_tarr {
                     draw_filled_ellipse(&mut buf, w, h, *cx - 2.8, cy - 1.5, 3.6, 4.0, [255, 255, 255]);
                 }
-                // Slanted angry brow cut above each eye
                 let dir = if idx == 0 { 1.0 } else { -1.0 };
                 for step in -12..=12 {
                     let px = *cx + step as f32;
@@ -375,7 +371,6 @@ fn create_procedural_eyes_image(images: &mut Assets<Image>, expr: SlimeExpr, is_
             }
         }
         _ => {
-            // Happy / Hungry / Starving / ChompOpen: signature SR big glossy eyes with bright specular dot
             for cx in [left_cx, right_cx] {
                 draw_filled_ellipse(&mut buf, w, h, cx, cy + 2.0, 10.5, 13.0, eye_dark);
                 if !is_tarr {
@@ -412,7 +407,6 @@ fn create_procedural_mouth_image(images: &mut Assets<Image>, expr: SlimeExpr, is
             draw_arc_stroke(&mut buf, w, h, cx, cy - 4.0, 19.0, 11.0, false, 3.0, mouth_dark);
         }
         SlimeExpr::Elated | SlimeExpr::Hungry | SlimeExpr::Starving | SlimeExpr::ChompOpen => {
-            // Open D-shaped happy/hungry mouth with subtle tongue (just like image-4.png!)
             for y in 0..h {
                 for x in 0..w {
                     let dx = (x as f32 + 0.5 - cx) / 22.0;
@@ -452,6 +446,85 @@ pub fn init_slime_shared_assets(
     images: &mut Assets<Image>,
     assets: &ClientAssets,
 ) -> SlimeSharedAssets {
+    // 1. Load original slime_default.obj (and detect whether AssetStudio exported it facing -Z)
+    let fallback_sphere = Sphere::new(1.0).mesh().uv(32, 20);
+    let mut flip_y_180 = false;
+
+    if let (Some(body_p), Some(face_p)) = (
+        assets.slime_obj_paths.get("slime_default"),
+        assets.slime_obj_paths.get("slime_face_lod0"),
+    ) {
+        if let Some((_, body_b)) = load_obj_aligned_from_disk(body_p, None, false, false) {
+            if let Some((_, face_b)) = load_obj_aligned_from_disk(face_p, None, false, false) {
+                if face_b.center.z < body_b.center.z {
+                    flip_y_180 = true;
+                }
+            }
+        }
+    }
+
+    let (base_body_mesh, base_align) = assets
+        .slime_obj_paths
+        .get("slime_default")
+        .and_then(|p| load_obj_aligned_from_disk(p, None, true, flip_y_180))
+        .map(|(m, b)| (m, Some((b.center, b.scale))))
+        .unwrap_or_else(|| (fallback_sphere.clone(), None));
+
+    let load_aligned_body = |key: &str| -> Mesh {
+        assets
+            .slime_obj_paths
+            .get(key)
+            .and_then(|p| load_obj_aligned_from_disk(p, None, true, flip_y_180))
+            .map(|(m, _)| m)
+            .unwrap_or_else(|| base_body_mesh.clone())
+    };
+    let load_aligned_part = |key: &str| -> Option<Handle<Mesh>> {
+        let path = assets.slime_obj_paths.get(key)?;
+        let (mesh, _) = load_obj_aligned_from_disk(path, base_align, false, flip_y_180)?;
+        Some(meshes.add(mesh))
+    };
+
+    // Conform face patches closely to the real slime_default surface!
+    let full_face_patch_mesh = meshes.add(build_surface_patch_from_mesh(
+        &base_body_mesh,
+        0.020,
+        -0.55,
+        0.55,
+        -0.36,
+        0.44,
+        12,
+        10,
+    ));
+    let eyes_patch_mesh = meshes.add(build_surface_patch_from_mesh(
+        &base_body_mesh,
+        0.018,
+        -0.52,
+        0.52,
+        -0.02,
+        0.44,
+        10,
+        6,
+    ));
+    let mouth_patch_mesh = meshes.add(build_surface_patch_from_mesh(
+        &base_body_mesh,
+        0.020,
+        -0.36,
+        0.36,
+        -0.38,
+        0.04,
+        8,
+        5,
+    ));
+
+    let slime_default_mesh = meshes.add(base_body_mesh);
+    let slime_puddle_mesh = meshes.add(load_aligned_body("slime_puddle_lod0"));
+    let slime_gordo_mesh = meshes.add(load_aligned_body("slime_gordo"));
+    let slime_tarr_mesh = meshes.add(load_aligned_body("slime_tarr"));
+    let slime_saber_mesh = meshes.add(load_aligned_body("slime_saber"));
+    let slime_gold_mesh = meshes.add(load_aligned_body("slime_gold"));
+    let slime_quicksilver_mesh = meshes.add(load_aligned_body("slime_quicksilver"));
+
+    // 2. 3-color vertical jelly materials for every slime species
     let mut slime_body_materials = HashMap::new();
     for &id in IdentifiableId::ALL {
         if id.is_slime() {
@@ -474,6 +547,34 @@ pub fn init_slime_shared_assets(
                 ..default()
             });
             slime_body_materials.insert(id, mat);
+        }
+    }
+
+    // 3. Original combined face textures (`face_default_*.png`) if validated transparent, plus fallback split decals
+    let use_full_face_decal = !assets.face_full_textures.is_empty();
+    let mut full_face_materials = HashMap::new();
+    if use_full_face_decal {
+        let happy_fb = assets
+            .face_full_textures
+            .get(&SlimeExpr::Happy)
+            .cloned()
+            .unwrap_or_else(|| assets.face_full_textures.values().next().unwrap().clone());
+        for &expr in SlimeExpr::ALL {
+            let tex = assets
+                .face_full_textures
+                .get(&expr)
+                .cloned()
+                .unwrap_or_else(|| happy_fb.clone());
+            full_face_materials.insert(
+                expr,
+                materials.add(StandardMaterial {
+                    base_color: Color::WHITE,
+                    base_color_texture: Some(tex),
+                    alpha_mode: AlphaMode::Blend,
+                    unlit: true,
+                    ..default()
+                }),
+            );
         }
     }
 
@@ -531,10 +632,40 @@ pub fn init_slime_shared_assets(
         ..default()
     });
 
+    // 4. Compose vivid food textures from `_map` + `_mask` + `_ramp`
+    let mut composed_food_textures = HashMap::new();
+    for spec in &assets.food_composites {
+        if let Some(img) = build_food_composite_image(spec) {
+            composed_food_textures.insert(spec.id, images.add(img));
+        }
+    }
+
     SlimeSharedAssets {
-        slime_sphere_mesh: meshes.add(Sphere::new(1.0).mesh().uv(32, 20)),
-        eyes_patch_mesh: meshes.add(create_spherical_patch_mesh(1.016, -0.52, 0.52, -0.02, 0.44, 10, 6)),
-        mouth_patch_mesh: meshes.add(create_spherical_patch_mesh(1.018, -0.36, 0.36, -0.38, 0.04, 8, 5)),
+        slime_default_mesh,
+        slime_puddle_mesh,
+        slime_gordo_mesh,
+        slime_tarr_mesh,
+        slime_saber_mesh,
+        slime_gold_mesh,
+        slime_quicksilver_mesh,
+
+        use_full_face_decal,
+        full_face_patch_mesh,
+        eyes_patch_mesh,
+        mouth_patch_mesh,
+
+        tabby_ears_mesh: load_aligned_part("ears_n_tail_lod0"),
+        hunter_ears_mesh: load_aligned_part("hunter_ears_n_tail_lod0"),
+        rock_spine_mesh: load_aligned_part("rocks_spine_lod0"),
+        crystal_spine_mesh: load_aligned_part("crystals_spine_lod0"),
+        phosphor_wing_l_mesh: load_aligned_part("wing_l"),
+        phosphor_wing_r_mesh: load_aligned_part("wing_r"),
+        dervish_ring_mesh: load_aligned_part("dervishring_lod0"),
+        tangle_flower_mesh: load_aligned_part("tangleflower_lod0"),
+        lucky_coin_mesh: load_aligned_part("luckycat_coin_lod0"),
+        quicksilver_crest_mesh: load_aligned_part("quicksilvercrest"),
+        mosaic_shell_mesh: load_aligned_part("mosaic_lod0"),
+
         carrot_mesh: meshes.add(Cone::new(0.32, 1.15)),
         leaf_mesh: meshes.add(Cone::new(0.20, 0.45)),
         ear_mesh: meshes.add(Cone::new(0.24, 0.55)),
@@ -546,10 +677,12 @@ pub fn init_slime_shared_assets(
         key_shaft_mesh: meshes.add(Cylinder::new(0.08, 0.65)),
 
         slime_body_materials,
+        full_face_materials,
         eyes_materials,
         mouth_materials,
         tarr_eyes_material,
         tarr_mouth_material,
+        composed_food_textures,
 
         leaf_material: materials.add(StandardMaterial {
             base_color: Color::srgb(0.22, 0.78, 0.28),
@@ -611,6 +744,26 @@ pub fn init_slime_shared_assets(
             perceptual_roughness: 0.3,
             ..default()
         }),
+        dervish_ring_material: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.84, 0.62, 1.0, 0.85),
+            emissive: LinearRgba::rgb(0.22, 0.10, 0.38),
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.2,
+            ..default()
+        }),
+        tangle_flower_material: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.98, 0.48, 0.55),
+            perceptual_roughness: 0.45,
+            ..default()
+        }),
+        mosaic_shell_material: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.75, 0.94, 1.0, 0.45),
+            emissive: LinearRgba::rgb(0.14, 0.20, 0.28),
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.08,
+            metallic: 0.35,
+            ..default()
+        }),
         gold_key_material: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.86, 0.20),
             emissive: LinearRgba::rgb(0.35, 0.25, 0.02),
@@ -628,57 +781,115 @@ fn spawn_slime_species_traits(
     body_mat: Handle<StandardMaterial>,
 ) {
     match ident {
-        IdentifiableId::TabbySlime
-        | IdentifiableId::HunterSlime
-        | IdentifiableId::LuckySlime => {
-            for side in [-0.52_f32, 0.52_f32] {
-                let tilt = if side < 0.0 { 0.35 } else { -0.35 };
+        IdentifiableId::TabbySlime => {
+            if let Some(ref m) = shared.tabby_ears_mesh {
+                parent.spawn((Mesh3d(m.clone()), MeshMaterial3d(body_mat), Transform::IDENTITY));
+            } else {
+                for side in [-0.52_f32, 0.52_f32] {
+                    let tilt = if side < 0.0 { 0.35 } else { -0.35 };
+                    parent.spawn((
+                        Mesh3d(shared.ear_mesh.clone()),
+                        MeshMaterial3d(body_mat.clone()),
+                        Transform::from_xyz(side, 0.88, 0.08)
+                            .with_rotation(Quat::from_rotation_z(tilt)),
+                    ));
+                }
+            }
+        }
+        IdentifiableId::HunterSlime => {
+            if let Some(ref m) = shared.hunter_ears_mesh.as_ref().or(shared.tabby_ears_mesh.as_ref()) {
+                parent.spawn((Mesh3d((*m).clone()), MeshMaterial3d(body_mat), Transform::IDENTITY));
+            } else {
+                for side in [-0.52_f32, 0.52_f32] {
+                    let tilt = if side < 0.0 { 0.35 } else { -0.35 };
+                    parent.spawn((
+                        Mesh3d(shared.ear_mesh.clone()),
+                        MeshMaterial3d(body_mat.clone()),
+                        Transform::from_xyz(side, 0.88, 0.08)
+                            .with_rotation(Quat::from_rotation_z(tilt)),
+                    ));
+                }
+            }
+        }
+        IdentifiableId::LuckySlime => {
+            if let Some(ref m) = shared.tabby_ears_mesh {
+                parent.spawn((Mesh3d(m.clone()), MeshMaterial3d(body_mat), Transform::IDENTITY));
+            }
+            if let Some(ref coin) = shared.lucky_coin_mesh {
                 parent.spawn((
-                    Mesh3d(shared.ear_mesh.clone()),
-                    MeshMaterial3d(body_mat.clone()),
-                    Transform::from_xyz(side, 0.88, 0.08)
-                        .with_rotation(Quat::from_rotation_z(tilt)),
+                    Mesh3d(coin.clone()),
+                    MeshMaterial3d(shared.gold_key_material.clone()),
+                    Transform::IDENTITY,
                 ));
             }
         }
         IdentifiableId::RockSlime => {
-            for (x, y, z, rx, rz) in [
-                (0.0_f32, 1.02_f32, 0.0_f32, 0.0_f32, 0.0_f32),
-                (-0.48, 0.82, -0.15, -0.25, 0.45),
-                (0.48, 0.82, -0.15, -0.25, -0.45),
-                (0.0, 0.68, -0.65, -0.75, 0.0),
-            ] {
+            if let Some(ref m) = shared.rock_spine_mesh {
                 parent.spawn((
-                    Mesh3d(shared.spike_mesh.clone()),
+                    Mesh3d(m.clone()),
                     MeshMaterial3d(shared.rock_spike_material.clone()),
-                    Transform::from_xyz(x, y, z)
-                        .with_rotation(Quat::from_euler(EulerRot::XYZ, rx, 0.0, rz)),
+                    Transform::IDENTITY,
                 ));
+            } else {
+                for (x, y, z, rx, rz) in [
+                    (0.0_f32, 1.02_f32, 0.0_f32, 0.0_f32, 0.0_f32),
+                    (-0.48, 0.82, -0.15, -0.25, 0.45),
+                    (0.48, 0.82, -0.15, -0.25, -0.45),
+                ] {
+                    parent.spawn((
+                        Mesh3d(shared.spike_mesh.clone()),
+                        MeshMaterial3d(shared.rock_spike_material.clone()),
+                        Transform::from_xyz(x, y, z)
+                            .with_rotation(Quat::from_euler(EulerRot::XYZ, rx, 0.0, rz)),
+                    ));
+                }
             }
         }
         IdentifiableId::CrystalSlime => {
-            for (x, y, z, rx, rz) in [
-                (0.0_f32, 1.05_f32, 0.0_f32, 0.0_f32, 0.0_f32),
-                (-0.52, 0.85, 0.0, 0.0, 0.55),
-                (0.52, 0.85, 0.0, 0.0, -0.55),
-                (0.0, 0.72, -0.62, -0.70, 0.0),
-            ] {
+            if let Some(ref m) = shared.crystal_spine_mesh {
                 parent.spawn((
-                    Mesh3d(shared.spike_mesh.clone()),
+                    Mesh3d(m.clone()),
                     MeshMaterial3d(shared.crystal_spike_material.clone()),
-                    Transform::from_xyz(x, y, z)
-                        .with_rotation(Quat::from_euler(EulerRot::XYZ, rx, 0.0, rz)),
+                    Transform::IDENTITY,
                 ));
+            } else {
+                for (x, y, z, rx, rz) in [
+                    (0.0_f32, 1.05_f32, 0.0_f32, 0.0_f32, 0.0_f32),
+                    (-0.52, 0.85, 0.0, 0.0, 0.55),
+                    (0.52, 0.85, 0.0, 0.0, -0.55),
+                ] {
+                    parent.spawn((
+                        Mesh3d(shared.spike_mesh.clone()),
+                        MeshMaterial3d(shared.crystal_spike_material.clone()),
+                        Transform::from_xyz(x, y, z)
+                            .with_rotation(Quat::from_euler(EulerRot::XYZ, rx, 0.0, rz)),
+                    ));
+                }
             }
         }
         IdentifiableId::PhosphorSlime => {
-            for side in [-1.0_f32, 1.0_f32] {
+            if let (Some(ref wl), Some(ref wr)) =
+                (&shared.phosphor_wing_l_mesh, &shared.phosphor_wing_r_mesh)
+            {
                 parent.spawn((
-                    Mesh3d(shared.wing_mesh.clone()),
+                    Mesh3d(wl.clone()),
                     MeshMaterial3d(shared.phosphor_wing_material.clone()),
-                    Transform::from_xyz(side * 0.92, 0.35, -0.20)
-                        .with_rotation(Quat::from_rotation_z(side * 0.35)),
+                    Transform::IDENTITY,
                 ));
+                parent.spawn((
+                    Mesh3d(wr.clone()),
+                    MeshMaterial3d(shared.phosphor_wing_material.clone()),
+                    Transform::IDENTITY,
+                ));
+            } else {
+                for side in [-1.0_f32, 1.0_f32] {
+                    parent.spawn((
+                        Mesh3d(shared.wing_mesh.clone()),
+                        MeshMaterial3d(shared.phosphor_wing_material.clone()),
+                        Transform::from_xyz(side * 0.92, 0.35, -0.20)
+                            .with_rotation(Quat::from_rotation_z(side * 0.35)),
+                    ));
+                }
             }
             parent.spawn((
                 Mesh3d(shared.halo_mesh.clone()),
@@ -686,12 +897,47 @@ fn spawn_slime_species_traits(
                 Transform::from_xyz(0.0, 1.25, 0.0),
             ));
         }
+        IdentifiableId::DervishSlime => {
+            if let Some(ref m) = shared.dervish_ring_mesh {
+                parent.spawn((
+                    Mesh3d(m.clone()),
+                    MeshMaterial3d(shared.dervish_ring_material.clone()),
+                    Transform::IDENTITY,
+                ));
+            }
+        }
+        IdentifiableId::TangleSlime => {
+            if let Some(ref m) = shared.tangle_flower_mesh {
+                parent.spawn((
+                    Mesh3d(m.clone()),
+                    MeshMaterial3d(shared.tangle_flower_material.clone()),
+                    Transform::IDENTITY,
+                ));
+            }
+        }
+        IdentifiableId::MosaicSlime => {
+            if let Some(ref m) = shared.mosaic_shell_mesh {
+                parent.spawn((
+                    Mesh3d(m.clone()),
+                    MeshMaterial3d(shared.mosaic_shell_material.clone()),
+                    Transform::IDENTITY,
+                ));
+            }
+        }
+        IdentifiableId::QuicksilverSlime => {
+            if let Some(ref m) = shared.quicksilver_crest_mesh {
+                parent.spawn((
+                    Mesh3d(m.clone()),
+                    MeshMaterial3d(body_mat),
+                    Transform::IDENTITY,
+                ));
+            }
+        }
         IdentifiableId::HoneySlime => {
             parent.spawn((
                 Mesh3d(shared.leaf_mesh.clone()),
                 MeshMaterial3d(shared.honey_cap_material.clone()),
-                Transform::from_xyz(0.0, 0.95, -0.05)
-                    .with_scale(Vec3::new(1.8, 0.65, 1.8)),
+                Transform::from_xyz(0.0, 0.95, -0.05).with_scale(Vec3::new(1.8, 0.65, 1.8)),
             ));
         }
         IdentifiableId::FireSlime => {
@@ -704,6 +950,40 @@ fn spawn_slime_species_traits(
             }
         }
         _ => {}
+    }
+}
+
+fn spawn_face_decals(parent: &mut ChildBuilder, shared: &SlimeSharedAssets, is_tarr: bool) {
+    if is_tarr || !shared.use_full_face_decal {
+        let eyes_mat = if is_tarr {
+            shared.tarr_eyes_material.clone()
+        } else {
+            shared.eyes_materials[&SlimeExpr::Happy].clone()
+        };
+        let mouth_mat = if is_tarr {
+            shared.tarr_mouth_material.clone()
+        } else {
+            shared.mouth_materials[&SlimeExpr::Happy].clone()
+        };
+        parent.spawn((
+            Mesh3d(shared.eyes_patch_mesh.clone()),
+            MeshMaterial3d(eyes_mat),
+            Transform::IDENTITY,
+            SlimeEyesVisual {
+                actor_id: 0,
+                current: SlimeExpr::Happy,
+                is_tarr,
+            },
+        ));
+        parent.spawn((
+            Mesh3d(shared.mouth_patch_mesh.clone()),
+            MeshMaterial3d(mouth_mat),
+            Transform::IDENTITY,
+            SlimeMouthVisual {
+                actor_id: 0,
+                current: SlimeExpr::Happy,
+            },
+        ));
     }
 }
 
@@ -724,25 +1004,16 @@ pub fn spawn_actor_visual(
 
     if ident.is_slime() {
         let body_mat = shared.body_material_for(ident).unwrap_or(mat_handle);
+        let body_mesh = shared.body_mesh_for(ident);
         let scale = if is_puddle {
-            Vec3::new(radius * 1.15, radius * 0.65, radius * 1.15)
+            Vec3::new(radius * 1.15, radius * 0.72, radius * 1.15)
         } else {
             Vec3::splat(radius)
-        };
-        let eyes_mat = if is_tarr {
-            shared.tarr_eyes_material.clone()
-        } else {
-            shared.eyes_materials[&SlimeExpr::Happy].clone()
-        };
-        let mouth_mat = if is_tarr {
-            shared.tarr_mouth_material.clone()
-        } else {
-            shared.mouth_materials[&SlimeExpr::Happy].clone()
         };
 
         return commands
             .spawn((
-                Mesh3d(shared.slime_sphere_mesh.clone()),
+                Mesh3d(body_mesh),
                 MeshMaterial3d(body_mat.clone()),
                 Transform {
                     translation: pos,
@@ -756,31 +1027,51 @@ pub fn spawn_actor_visual(
                 },
             ))
             .with_children(|parent| {
-                // Curved spherical face decals (Eyes + Mouth) matching SlimeFaceAnimator
-                parent.spawn((
-                    Mesh3d(shared.eyes_patch_mesh.clone()),
-                    MeshMaterial3d(eyes_mat),
-                    Transform::IDENTITY,
-                    SlimeEyesVisual {
-                        actor_id,
-                        current: SlimeExpr::Happy,
-                        is_tarr,
-                    },
-                ));
-                parent.spawn((
-                    Mesh3d(shared.mouth_patch_mesh.clone()),
-                    MeshMaterial3d(mouth_mat),
-                    Transform::IDENTITY,
-                    SlimeMouthVisual {
-                        actor_id,
-                        current: SlimeExpr::Happy,
-                    },
-                ));
+                if !is_tarr && shared.use_full_face_decal {
+                    parent.spawn((
+                        Mesh3d(shared.full_face_patch_mesh.clone()),
+                        MeshMaterial3d(shared.full_face_materials[&SlimeExpr::Happy].clone()),
+                        Transform::IDENTITY,
+                        SlimeFullFaceVisual {
+                            actor_id,
+                            current: SlimeExpr::Happy,
+                            is_tarr,
+                        },
+                    ));
+                } else {
+                    let eyes_mat = if is_tarr {
+                        shared.tarr_eyes_material.clone()
+                    } else {
+                        shared.eyes_materials[&SlimeExpr::Happy].clone()
+                    };
+                    let mouth_mat = if is_tarr {
+                        shared.tarr_mouth_material.clone()
+                    } else {
+                        shared.mouth_materials[&SlimeExpr::Happy].clone()
+                    };
+                    parent.spawn((
+                        Mesh3d(shared.eyes_patch_mesh.clone()),
+                        MeshMaterial3d(eyes_mat),
+                        Transform::IDENTITY,
+                        SlimeEyesVisual {
+                            actor_id,
+                            current: SlimeExpr::Happy,
+                            is_tarr,
+                        },
+                    ));
+                    parent.spawn((
+                        Mesh3d(shared.mouth_patch_mesh.clone()),
+                        MeshMaterial3d(mouth_mat),
+                        Transform::IDENTITY,
+                        SlimeMouthVisual {
+                            actor_id,
+                            current: SlimeExpr::Happy,
+                        },
+                    ));
+                }
 
-                // Species traits (ears, spikes, wings, halos, etc.)
                 spawn_slime_species_traits(parent, ident, shared, body_mat);
 
-                // Rad / Tarr aura
                 if ident == IdentifiableId::RadSlime || is_tarr {
                     let aura_mat = if is_tarr {
                         shared.tarr_aura_material.clone()
@@ -811,7 +1102,7 @@ pub fn spawn_actor_visual(
                 Transform {
                     translation: pos,
                     rotation: rot,
-                    scale: Vec3::new(radius * 0.95, radius * 1.25, radius * 0.95),
+                    scale: Vec3::splat(radius * 1.05),
                 },
             ))
             .id();
@@ -838,7 +1129,7 @@ pub fn spawn_actor_visual(
         let body_mesh = if is_carrot {
             shared.carrot_mesh.clone()
         } else {
-            shared.slime_sphere_mesh.clone()
+            shared.slime_default_mesh.clone()
         };
         let body_scale = if is_carrot {
             Vec3::splat(radius * 1.1)
@@ -878,7 +1169,7 @@ pub fn spawn_actor_visual(
     if ident.is_fruit() {
         return commands
             .spawn((
-                Mesh3d(shared.slime_sphere_mesh.clone()),
+                Mesh3d(shared.slime_default_mesh.clone()),
                 MeshMaterial3d(mat_handle),
                 Transform {
                     translation: pos,
@@ -901,7 +1192,7 @@ pub fn spawn_actor_visual(
     if ident.is_animal() {
         return commands
             .spawn((
-                Mesh3d(shared.slime_sphere_mesh.clone()),
+                Mesh3d(shared.slime_default_mesh.clone()),
                 MeshMaterial3d(mat_handle),
                 Transform {
                     translation: pos,
@@ -941,7 +1232,7 @@ pub fn spawn_actor_visual(
 
     commands
         .spawn((
-            Mesh3d(shared.slime_sphere_mesh.clone()),
+            Mesh3d(shared.slime_default_mesh.clone()),
             MeshMaterial3d(mat_handle),
             Transform {
                 translation: pos,
@@ -964,25 +1255,23 @@ pub fn spawn_gordo_visual(
     let body_mat = shared.body_material_for(slime_ident).unwrap_or(fallback_mat);
     commands
         .spawn((
-            Mesh3d(shared.slime_sphere_mesh.clone()),
+            Mesh3d(shared.slime_gordo_mesh.clone()),
             MeshMaterial3d(body_mat.clone()),
             Transform::from_translation(base_pos).with_scale(Vec3::splat(2.15)),
             GordoBodyVisual { gordo_id, base_pos },
         ))
         .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(shared.eyes_patch_mesh.clone()),
-                MeshMaterial3d(shared.eyes_materials[&SlimeExpr::Happy].clone()),
-                Transform::IDENTITY,
-            ));
-            parent.spawn((
-                Mesh3d(shared.mouth_patch_mesh.clone()),
-                MeshMaterial3d(shared.mouth_materials[&SlimeExpr::Elated].clone()),
-                Transform::IDENTITY,
-            ));
+            if shared.use_full_face_decal {
+                parent.spawn((
+                    Mesh3d(shared.full_face_patch_mesh.clone()),
+                    MeshMaterial3d(shared.full_face_materials[&SlimeExpr::Elated].clone()),
+                    Transform::IDENTITY,
+                ));
+            } else {
+                spawn_face_decals(parent, shared, false);
+            }
             spawn_slime_species_traits(parent, slime_ident, shared, body_mat);
 
-            // Floating SlimeKey indicator above the Gordo
             parent
                 .spawn((
                     Transform::from_xyz(0.0, 1.45, 0.0),
@@ -1005,7 +1294,11 @@ pub fn spawn_gordo_visual(
         .id()
 }
 
-fn evaluate_slime_expression(sim: &sr_sim::Simulation, actor_id: i64, elapsed: f32) -> (SlimeExpr, SlimeExpr) {
+fn evaluate_slime_expression(
+    sim: &sr_sim::Simulation,
+    actor_id: i64,
+    elapsed: f32,
+) -> (SlimeExpr, SlimeExpr) {
     let Some(actor) = sim.model.actors.get(&actor_id) else {
         return (SlimeExpr::Happy, SlimeExpr::Happy);
     };
@@ -1035,7 +1328,6 @@ fn evaluate_slime_expression(sim: &sr_sim::Simulation, actor_id: i64, elapsed: f
         SlimeExpr::Happy
     };
 
-    // Natural blinking every ~3.4s with per-actor phase offset
     let blink_cycle = (elapsed + (actor_id as f32 * 0.67).abs()) % 3.4;
     let eyes_expr = if matches!(base_expr, SlimeExpr::Happy | SlimeExpr::Elated | SlimeExpr::Feral)
         && blink_cycle < 0.14
@@ -1056,13 +1348,17 @@ pub fn update_slime_animations_system(
         (&SlimeBodyVisual, &mut Transform),
         (Without<GordoBodyVisual>, Without<SlimeAuraVisual>, Without<GordoKeyVisual>),
     >,
+    mut full_faces_q: Query<
+        (&mut SlimeFullFaceVisual, &mut MeshMaterial3d<StandardMaterial>),
+        (Without<SlimeEyesVisual>, Without<SlimeMouthVisual>),
+    >,
     mut eyes_q: Query<
         (&mut SlimeEyesVisual, &mut MeshMaterial3d<StandardMaterial>),
-        Without<SlimeMouthVisual>,
+        (Without<SlimeMouthVisual>, Without<SlimeFullFaceVisual>),
     >,
     mut mouths_q: Query<
         (&mut SlimeMouthVisual, &mut MeshMaterial3d<StandardMaterial>),
-        Without<SlimeEyesVisual>,
+        (Without<SlimeEyesVisual>, Without<SlimeFullFaceVisual>),
     >,
     mut auras: Query<
         (&SlimeAuraVisual, &mut Transform),
@@ -1085,7 +1381,6 @@ pub fn update_slime_animations_system(
     let t = time.elapsed_secs();
     let sim = &sim_res.sim;
 
-    // 1. Squash & stretch on slime bodies from vertical velocity + subtle idle jiggle
     for (sb, mut tf) in &mut bodies {
         let vy = sim
             .physics
@@ -1095,7 +1390,7 @@ pub fn update_slime_animations_system(
             .unwrap_or(0.0);
         let stretch = (vy * 0.035).clamp(-0.22, 0.28);
         let idle = (t * 4.5 + sb.actor_id as f32 * 0.7).sin() * 0.035;
-        let y_factor = (if sb.is_puddle { 0.65 } else { 1.0 }) + stretch + idle;
+        let y_factor = (if sb.is_puddle { 0.72 } else { 1.0 }) + stretch + idle;
         let xz_factor = (if sb.is_puddle { 1.15 } else { 1.0 }) - (stretch + idle) * 0.45;
         tf.scale = Vec3::new(
             sb.base_scale * xz_factor.max(0.65),
@@ -1104,7 +1399,19 @@ pub fn update_slime_animations_system(
         );
     }
 
-    // 2. Texture-swapped SlimeFace expressions (eyes + mouth) without mutating unchanged handles
+    for (mut ff, mut mat) in &mut full_faces_q {
+        if ff.is_tarr {
+            continue;
+        }
+        let (expr, _) = evaluate_slime_expression(sim, ff.actor_id, t);
+        if ff.current != expr {
+            ff.current = expr;
+            if let Some(h) = shared.full_face_materials.get(&expr) {
+                mat.0 = h.clone();
+            }
+        }
+    }
+
     for (mut se, mut mat) in &mut eyes_q {
         if se.is_tarr {
             continue;
@@ -1128,14 +1435,12 @@ pub fn update_slime_animations_system(
         }
     }
 
-    // 3. Pulsing Rad / Tarr auras
     for (aura, mut tf) in &mut auras {
         let speed = if aura.is_tarr { 6.0 } else { 3.2 };
         let pulse = 1.0 + 0.08 * (t * speed + aura.actor_id as f32).sin();
         tf.scale = Vec3::splat(pulse);
     }
 
-    // 4. Gordo breathing animation
     for (g, mut tf) in &mut gordos {
         let pulse = (t * 2.1).sin();
         let y_scale = 2.15 + 0.06 * pulse;
@@ -1144,7 +1449,6 @@ pub fn update_slime_animations_system(
         tf.translation = g.base_pos + Vec3::Y * (0.04 * pulse);
     }
 
-    // 5. Rotating floating SlimeKey preview above Gordo
     for mut tf in &mut keys {
         tf.rotation = Quat::from_rotation_y(t * 1.8);
         tf.translation.y = 1.45 + 0.08 * (t * 2.5).sin();
