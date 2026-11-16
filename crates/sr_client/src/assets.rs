@@ -238,19 +238,31 @@ pub fn load_client_assets(
     let local_root = find_local_assets_dir();
     let manifest = if let Some(ref root) = local_root {
         let m_path = root.join("manifest.json");
-        if m_path.is_file() {
-            AssetManifest::load_json(&m_path).unwrap_or_default()
+        let loaded_explicit = if m_path.is_file() {
+            AssetManifest::load_json(&m_path).ok().filter(|m| {
+                !m.textures.is_empty() || !m.audio.is_empty() || !m.models.is_empty()
+            })
         } else {
-            let scanned = AssetManifest::scan_cached(root).unwrap_or_default();
+            None
+        };
+        let m = loaded_explicit.unwrap_or_else(|| AssetManifest::scan_cached(root).unwrap_or_default());
+        info!(
+            "AssetManifest ({}): {} textures, {} audio clips, {} models",
+            root.display(),
+            m.textures.len(),
+            m.audio.len(),
+            m.models.len()
+        );
+        if !m.textures.is_empty() || !m.audio.is_empty() || !m.models.is_empty() {
+            let sample_tex: Vec<&str> = m.textures.keys().take(6).map(String::as_str).collect();
+            let sample_aud: Vec<&str> = m.audio.keys().take(6).map(String::as_str).collect();
+            let sample_mod: Vec<&str> = m.models.keys().take(6).map(String::as_str).collect();
             info!(
-                "AssetManifest ({}): {} textures, {} audio clips, {} models",
-                root.display(),
-                scanned.textures.len(),
-                scanned.audio.len(),
-                scanned.models.len()
+                "Sample keys -> tex: {:?} | audio: {:?} | models: {:?}",
+                sample_tex, sample_aud, sample_mod
             );
-            scanned
         }
+        m
     } else {
         info!("No local_assets/ directory found; using procedural visuals & built-in localization.");
         AssetManifest::default()
