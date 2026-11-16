@@ -132,7 +132,7 @@ impl ClientAssets {
         id.as_csharp_name().replace('_', " ")
     }
 
-    pub fn ui_text<'a>(&'a self, key: &'a str, fallback: &'a str) -> &'a str {
+    pub fn ui_text<'a>(&'a self, key: &str, fallback: &'a str) -> &'a str {
         self.active_loc().get(key).unwrap_or(fallback)
     }
 
