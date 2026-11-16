@@ -64,9 +64,6 @@ pub struct VisualRegistry {
     pub sphere_mesh: Handle<Mesh>,
     pub plort_mesh: Handle<Mesh>,
     pub crate_mesh: Handle<Mesh>,
-    pub eye_mesh: Handle<Mesh>,
-    pub eye_material: Handle<StandardMaterial>,
-    pub pupil_material: Handle<StandardMaterial>,
     pub vac_core_material: Handle<StandardMaterial>,
     pub materials: HashMap<IdentifiableId, Handle<StandardMaterial>>,
 }
@@ -213,6 +210,7 @@ pub fn setup_world_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     mut registry: ResMut<VisualRegistry>,
     assets: Res<ClientAssets>,
     sim_res: Res<SimResource>,
@@ -220,17 +218,6 @@ pub fn setup_world_scene(
     registry.sphere_mesh = meshes.add(Sphere::new(1.0).mesh().ico(4).unwrap());
     registry.plort_mesh = meshes.add(Sphere::new(0.65).mesh().ico(0).unwrap());
     registry.crate_mesh = meshes.add(Cuboid::new(1.3, 1.3, 1.3));
-    registry.eye_mesh = meshes.add(Sphere::new(0.14).mesh().uv(12, 8));
-    registry.eye_material = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        unlit: true,
-        ..default()
-    });
-    registry.pupil_material = materials.add(StandardMaterial {
-        base_color: Color::BLACK,
-        unlit: true,
-        ..default()
-    });
     registry.vac_core_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.32, 0.85, 1.0),
         emissive: LinearRgba::rgb(0.18, 0.55, 0.85),
@@ -238,7 +225,7 @@ pub fn setup_world_scene(
         ..default()
     });
 
-    let shared = init_slime_shared_assets(&mut meshes, &mut materials);
+    let shared = init_slime_shared_assets(&mut meshes, &mut materials, &mut images, &assets);
     commands.insert_resource(shared);
 
     // Ground floor (100x100) with crisp tiled UV repeat
@@ -546,9 +533,7 @@ pub fn sync_actors_and_gordos_system(
                 .clone();
             let ent = spawn_gordo_visual(
                 &mut commands,
-                &registry,
                 &shared,
-                &assets,
                 gordo.gordo_id.clone(),
                 gordo.slime_ident,
                 gordo.pos,

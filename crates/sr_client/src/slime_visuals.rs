@@ -1,11 +1,20 @@
-//! Procedural species silhouettes, expressive slime faces, squash-and-stretch animation,
-//! and distinct food/plort/crate/gordo visuals.
+//! Original-style Slime Rancher visuals:
+//! - 3-color vertical jelly palette gradients (`Top` / `Middle` / `Bottom`)
+//! - Curved spherical face decals (eyes + mouth) using original `Texture2D` face sprites when available
+//!   or crisp anti-aliased RGBA sprites matching `SlimeFaceAnimator` states (`Happy`, `Blink`, `Elated`,
+//!   `Hungry`, `Starving`, `Angry`, `Feral`, `Scared`, `ChompOpen`)
+//! - Squash-and-stretch physics jiggle, Rad/Tarr pulsing auras, food/plort/crate/Gordo meshes.
 
+use std::collections::HashMap;
+
+use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
+use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sr_ids::IdentifiableId;
 use sr_model::ActorKind;
 
-use crate::assets::ClientAssets;
+use crate::assets::{ClientAssets, SlimeExpr};
 use crate::world_sync::{SimResource, VisualRegistry};
 
 #[derive(Component)]
@@ -16,13 +25,16 @@ pub struct SlimeBodyVisual {
 }
 
 #[derive(Component)]
-pub struct SlimeMouthVisual {
+pub struct SlimeEyesVisual {
     pub actor_id: i64,
+    pub current: SlimeExpr,
+    pub is_tarr: bool,
 }
 
 #[derive(Component)]
-pub struct SlimeBrowsVisual {
+pub struct SlimeMouthVisual {
     pub actor_id: i64,
+    pub current: SlimeExpr,
 }
 
 #[derive(Component)]
@@ -43,20 +55,25 @@ pub struct GordoKeyVisual;
 
 #[derive(Resource, Default)]
 pub struct SlimeSharedAssets {
+    pub slime_sphere_mesh: Handle<Mesh>,
+    pub eyes_patch_mesh: Handle<Mesh>,
+    pub mouth_patch_mesh: Handle<Mesh>,
     pub carrot_mesh: Handle<Mesh>,
     pub leaf_mesh: Handle<Mesh>,
     pub ear_mesh: Handle<Mesh>,
     pub spike_mesh: Handle<Mesh>,
     pub wing_mesh: Handle<Mesh>,
     pub halo_mesh: Handle<Mesh>,
-    pub mouth_mesh: Handle<Mesh>,
-    pub brow_mesh: Handle<Mesh>,
     pub aura_mesh: Handle<Mesh>,
     pub beak_mesh: Handle<Mesh>,
     pub key_shaft_mesh: Handle<Mesh>,
 
-    pub mouth_dark_material: Handle<StandardMaterial>,
-    pub mouth_angry_material: Handle<StandardMaterial>,
+    pub slime_body_materials: HashMap<IdentifiableId, Handle<StandardMaterial>>,
+    pub eyes_materials: HashMap<SlimeExpr, Handle<StandardMaterial>>,
+    pub mouth_materials: HashMap<SlimeExpr, Handle<StandardMaterial>>,
+    pub tarr_eyes_material: Handle<StandardMaterial>,
+    pub tarr_mouth_material: Handle<StandardMaterial>,
+
     pub leaf_material: Handle<StandardMaterial>,
     pub beak_material: Handle<StandardMaterial>,
     pub comb_material: Handle<StandardMaterial>,
@@ -70,34 +87,470 @@ pub struct SlimeSharedAssets {
     pub gold_key_material: Handle<StandardMaterial>,
 }
 
+impl SlimeSharedAssets {
+    pub fn body_material_for(&self, ident: IdentifiableId) -> Option<Handle<StandardMaterial>> {
+        self.slime_body_materials.get(&ident).cloned()
+    }
+}
+
+/// Top, Middle, Bottom colors matching Slime Rancher `SlimeAppearance.Palette`.
+pub fn slime_palette(ident: IdentifiableId) -> ([u8; 3], [u8; 3], [u8; 3], Option<[f32; 3]>) {
+    match ident {
+        IdentifiableId::PinkSlime => ([255, 118, 178], [244, 62, 142], [206, 28, 102], None),
+        IdentifiableId::TabbySlime => ([188, 194, 206], [142, 148, 162], [96, 102, 116], None),
+        IdentifiableId::RockSlime => ([92, 152, 236], [56, 106, 198], [34, 68, 142], None),
+        IdentifiableId::PhosphorSlime => (
+            [170, 208, 255],
+            [122, 146, 245],
+            [86, 98, 212],
+            Some([0.16, 0.22, 0.45]),
+        ),
+        IdentifiableId::HoneySlime => ([255, 208, 56], [244, 156, 22], [198, 104, 10], None),
+        IdentifiableId::BoomSlime => (
+            [252, 98, 52],
+            [212, 46, 24],
+            [132, 22, 16],
+            Some([0.22, 0.04, 0.01]),
+        ),
+        IdentifiableId::RadSlime => (
+            [152, 255, 92],
+            [68, 224, 62],
+            [26, 158, 42],
+            Some([0.08, 0.34, 0.08]),
+        ),
+        IdentifiableId::CrystalSlime => (
+            [252, 96, 196],
+            [210, 46, 152],
+            [144, 22, 108],
+            Some([0.18, 0.04, 0.14]),
+        ),
+        IdentifiableId::HunterSlime => ([184, 122, 86], [134, 78, 52], [86, 46, 30], None),
+        IdentifiableId::QuantumSlime => (
+            [255, 232, 116],
+            [236, 192, 48],
+            [184, 134, 22],
+            Some([0.20, 0.16, 0.02]),
+        ),
+        IdentifiableId::DervishSlime => ([198, 152, 246], [150, 96, 214], [104, 56, 168], None),
+        IdentifiableId::TangleSlime => ([158, 226, 104], [108, 184, 68], [68, 132, 42], None),
+        IdentifiableId::MosaicSlime => (
+            [140, 224, 248],
+            [184, 162, 238],
+            [128, 198, 196],
+            Some([0.10, 0.16, 0.22]),
+        ),
+        IdentifiableId::SaberSlime => ([224, 192, 128], [186, 146, 86], [138, 102, 56], None),
+        IdentifiableId::PuddleSlime => ([122, 224, 255], [76, 188, 242], [44, 142, 208], None),
+        IdentifiableId::FireSlime => (
+            [255, 196, 56],
+            [248, 112, 22],
+            [196, 42, 10],
+            Some([0.38, 0.12, 0.02]),
+        ),
+        IdentifiableId::GoldSlime => (
+            [255, 236, 98],
+            [244, 192, 28],
+            [194, 138, 12],
+            Some([0.24, 0.18, 0.02]),
+        ),
+        IdentifiableId::LuckySlime => ([238, 234, 216], [204, 198, 178], [164, 158, 140], None),
+        IdentifiableId::QuicksilverSlime => ([218, 228, 244], [168, 182, 206], [116, 132, 158], None),
+        IdentifiableId::GlitchSlime => (
+            [248, 86, 212],
+            [116, 216, 248],
+            [168, 62, 224],
+            Some([0.22, 0.08, 0.24]),
+        ),
+        IdentifiableId::TarrSlime => (
+            [56, 26, 74],
+            [26, 28, 42],
+            [12, 12, 18],
+            Some([0.12, 0.04, 0.16]),
+        ),
+        _ => ([228, 150, 212], [200, 118, 184], [156, 84, 142], None),
+    }
+}
+
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t).round().clamp(0.0, 255.0) as u8
+}
+
+fn create_gradient_texture(
+    images: &mut Assets<Image>,
+    top: [u8; 3],
+    mid: [u8; 3],
+    bot: [u8; 3],
+) -> Handle<Image> {
+    let h = 64_usize;
+    let mut data = Vec::with_capacity(h * 4);
+    for y in 0..h {
+        let v = y as f32 / (h - 1) as f32;
+        let (r, g, b) = if v < 0.5 {
+            let t = v * 2.0;
+            (lerp_u8(top[0], mid[0], t), lerp_u8(top[1], mid[1], t), lerp_u8(top[2], mid[2], t))
+        } else {
+            let t = (v - 0.5) * 2.0;
+            (lerp_u8(mid[0], bot[0], t), lerp_u8(mid[1], bot[1], t), lerp_u8(mid[2], bot[2], t))
+        };
+        data.extend_from_slice(&[r, g, b, 255]);
+    }
+    images.add(Image::new(
+        Extent3d {
+            width: 1,
+            height: h as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    ))
+}
+
+/// Builds a smooth curved spherical patch so face sprites wrap seamlessly onto the slime body
+/// with zero Z-fighting and zero flat-card corners sticking out.
+fn create_spherical_patch_mesh(
+    radius: f32,
+    yaw_min: f32,
+    yaw_max: f32,
+    elev_min: f32,
+    elev_max: f32,
+    cols: usize,
+    rows: usize,
+) -> Mesh {
+    let mut positions = Vec::with_capacity((cols + 1) * (rows + 1));
+    let mut normals = Vec::with_capacity((cols + 1) * (rows + 1));
+    let mut uvs = Vec::with_capacity((cols + 1) * (rows + 1));
+    let mut indices = Vec::with_capacity(cols * rows * 6);
+
+    for r in 0..=rows {
+        let vt = r as f32 / rows as f32;
+        // top row = elev_max (v = 0), bottom row = elev_min (v = 1)
+        let elev = elev_max + (elev_min - elev_max) * vt;
+        let ce = elev.cos();
+        let se = elev.sin();
+        for c in 0..=cols {
+            let ut = c as f32 / cols as f32;
+            // Looking at +Z face from outside: left edge = +yaw, right edge = -yaw
+            let yaw = yaw_max + (yaw_min - yaw_max) * ut;
+            let nx = ce * yaw.sin();
+            let ny = se;
+            let nz = ce * yaw.cos();
+            positions.push([nx * radius, ny * radius, nz * radius]);
+            normals.push([nx, ny, nz]);
+            uvs.push([ut, vt]);
+        }
+    }
+
+    let stride = cols + 1;
+    for r in 0..rows {
+        for c in 0..cols {
+            let i0 = (r * stride + c) as u32;
+            let i1 = i0 + 1;
+            let i2 = ((r + 1) * stride + c) as u32;
+            let i3 = i2 + 1;
+            indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
+        }
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+fn blend_px(buf: &mut [u8], w: usize, x: i32, y: i32, rgba: [u8; 4]) {
+    if x < 0 || y < 0 || x >= w as i32 {
+        return;
+    }
+    let idx = (y as usize * w + x as usize) * 4;
+    if idx + 3 >= buf.len() {
+        return;
+    }
+    let a = rgba[3] as f32 / 255.0;
+    let inv = 1.0 - a;
+    buf[idx] = (buf[idx] as f32 * inv + rgba[0] as f32 * a).round() as u8;
+    buf[idx + 1] = (buf[idx + 1] as f32 * inv + rgba[1] as f32 * a).round() as u8;
+    buf[idx + 2] = (buf[idx + 2] as f32 * inv + rgba[2] as f32 * a).round() as u8;
+    buf[idx + 3] = (buf[idx + 3].max(rgba[3]))
+        .max(((buf[idx + 3] as f32) + (255.0 - buf[idx + 3] as f32) * a).round() as u8);
+}
+
+fn draw_filled_ellipse(
+    buf: &mut [u8],
+    w: usize,
+    h: usize,
+    cx: f32,
+    cy: f32,
+    rx: f32,
+    ry: f32,
+    rgb: [u8; 3],
+) {
+    for y in 0..h {
+        for x in 0..w {
+            let dx = (x as f32 + 0.5 - cx) / rx;
+            let dy = (y as f32 + 0.5 - cy) / ry;
+            let d = (dx * dx + dy * dy).sqrt();
+            if d < 1.08 {
+                let alpha = ((1.08 - d) / 0.14).clamp(0.0, 1.0);
+                blend_px(buf, w, x as i32, y as i32, [rgb[0], rgb[1], rgb[2], (alpha * 255.0) as u8]);
+            }
+        }
+    }
+}
+
+fn draw_arc_stroke(
+    buf: &mut [u8],
+    w: usize,
+    h: usize,
+    cx: f32,
+    cy: f32,
+    rx: f32,
+    ry: f32,
+    upward_curve: bool,
+    thickness: f32,
+    rgb: [u8; 3],
+) {
+    for y in 0..h {
+        for x in 0..w {
+            let nx = (x as f32 + 0.5 - cx) / rx;
+            if nx.abs() > 1.05 {
+                continue;
+            }
+            let curve = (1.0 - nx.clamp(-1.0, 1.0).powi(2)).max(0.0).sqrt();
+            let target_y = if upward_curve {
+                cy - curve * ry
+            } else {
+                cy + curve * ry
+            };
+            let dist = ((y as f32 + 0.5) - target_y).abs();
+            if dist < thickness + 1.2 {
+                let alpha = ((thickness + 1.2 - dist) / 1.4).clamp(0.0, 1.0);
+                blend_px(buf, w, x as i32, y as i32, [rgb[0], rgb[1], rgb[2], (alpha * 255.0) as u8]);
+            }
+        }
+    }
+}
+
+fn create_procedural_eyes_image(images: &mut Assets<Image>, expr: SlimeExpr, is_tarr: bool) -> Handle<Image> {
+    let (w, h) = (128_usize, 64_usize);
+    let mut buf = vec![0_u8; w * h * 4];
+    let eye_dark = if is_tarr { [255, 255, 255] } else { [34, 14, 24] };
+    let left_cx = 34.0_f32;
+    let right_cx = 94.0_f32;
+    let cy = 34.0_f32;
+
+    match expr {
+        SlimeExpr::Blink => {
+            for cx in [left_cx, right_cx] {
+                draw_arc_stroke(&mut buf, w, h, cx, cy + 4.0, 13.0, 6.0, false, 2.8, eye_dark);
+            }
+        }
+        SlimeExpr::Elated => {
+            for cx in [left_cx, right_cx] {
+                draw_arc_stroke(&mut buf, w, h, cx, cy + 5.0, 13.0, 10.0, true, 3.0, eye_dark);
+            }
+        }
+        SlimeExpr::Angry | SlimeExpr::Feral => {
+            for (idx, cx) in [left_cx, right_cx].iter().enumerate() {
+                draw_filled_ellipse(&mut buf, w, h, *cx, cy + 3.0, 10.0, 11.5, eye_dark);
+                if !is_tarr {
+                    draw_filled_ellipse(&mut buf, w, h, *cx - 2.8, cy - 1.5, 3.6, 4.0, [255, 255, 255]);
+                }
+                // Slanted angry brow cut above each eye
+                let dir = if idx == 0 { 1.0 } else { -1.0 };
+                for step in -12..=12 {
+                    let px = *cx + step as f32;
+                    let py = cy - 9.0 + dir * (step as f32 * 0.42);
+                    draw_filled_ellipse(&mut buf, w, h, px, py, 2.5, 2.5, eye_dark);
+                }
+            }
+        }
+        SlimeExpr::Scared => {
+            for cx in [left_cx, right_cx] {
+                draw_filled_ellipse(&mut buf, w, h, cx, cy, 13.0, 14.5, [255, 255, 255]);
+                draw_filled_ellipse(&mut buf, w, h, cx, cy + 1.0, 5.2, 5.8, eye_dark);
+            }
+        }
+        _ => {
+            // Happy / Hungry / Starving / ChompOpen: signature SR big glossy eyes with bright specular dot
+            for cx in [left_cx, right_cx] {
+                draw_filled_ellipse(&mut buf, w, h, cx, cy + 2.0, 10.5, 13.0, eye_dark);
+                if !is_tarr {
+                    draw_filled_ellipse(&mut buf, w, h, cx - 3.2, cy - 3.0, 4.0, 4.6, [255, 255, 255]);
+                    draw_filled_ellipse(&mut buf, w, h, cx + 3.4, cy + 4.5, 1.8, 2.0, [255, 255, 255]);
+                }
+            }
+        }
+    }
+
+    images.add(Image::new(
+        Extent3d {
+            width: w as u32,
+            height: h as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        buf,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    ))
+}
+
+fn create_procedural_mouth_image(images: &mut Assets<Image>, expr: SlimeExpr, is_tarr: bool) -> Handle<Image> {
+    let (w, h) = (128_usize, 64_usize);
+    let mut buf = vec![0_u8; w * h * 4];
+    let mouth_dark = if is_tarr { [255, 255, 255] } else { [92, 18, 42] };
+    let tongue = [232, 92, 128];
+    let cx = 64.0_f32;
+    let cy = 28.0_f32;
+
+    match expr {
+        SlimeExpr::Happy | SlimeExpr::Blink => {
+            draw_arc_stroke(&mut buf, w, h, cx, cy - 4.0, 19.0, 11.0, false, 3.0, mouth_dark);
+        }
+        SlimeExpr::Elated | SlimeExpr::Hungry | SlimeExpr::Starving | SlimeExpr::ChompOpen => {
+            // Open D-shaped happy/hungry mouth with subtle tongue (just like image-4.png!)
+            for y in 0..h {
+                for x in 0..w {
+                    let dx = (x as f32 + 0.5 - cx) / 22.0;
+                    let dy = (y as f32 + 0.5 - (cy - 4.0)) / 20.0;
+                    if dy >= -0.08 && (dx * dx + dy * dy) <= 1.0 {
+                        let is_tongue = dy > 0.42 && dx.abs() < 0.68;
+                        let c = if is_tongue && !is_tarr { tongue } else { mouth_dark };
+                        blend_px(&mut buf, w, x as i32, y as i32, [c[0], c[1], c[2], 255]);
+                    }
+                }
+            }
+        }
+        SlimeExpr::Angry | SlimeExpr::Feral => {
+            draw_arc_stroke(&mut buf, w, h, cx, cy + 10.0, 18.0, 10.0, true, 3.0, mouth_dark);
+        }
+        SlimeExpr::Scared => {
+            draw_filled_ellipse(&mut buf, w, h, cx, cy + 4.0, 9.0, 11.0, mouth_dark);
+        }
+    }
+
+    images.add(Image::new(
+        Extent3d {
+            width: w as u32,
+            height: h as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        buf,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    ))
+}
+
 pub fn init_slime_shared_assets(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    assets: &ClientAssets,
 ) -> SlimeSharedAssets {
+    let mut slime_body_materials = HashMap::new();
+    for &id in IdentifiableId::ALL {
+        if id.is_slime() {
+            let (top, mid, bot, emissive) = slime_palette(id);
+            let grad = create_gradient_texture(images, top, mid, bot);
+            let is_puddle = id == IdentifiableId::PuddleSlime;
+            let mat = materials.add(StandardMaterial {
+                base_color: if is_puddle {
+                    Color::srgba(1.0, 1.0, 1.0, 0.85)
+                } else {
+                    Color::WHITE
+                },
+                base_color_texture: Some(grad),
+                emissive: emissive
+                    .map(|e| LinearRgba::rgb(e[0], e[1], e[2]))
+                    .unwrap_or(LinearRgba::BLACK),
+                alpha_mode: if is_puddle { AlphaMode::Blend } else { AlphaMode::Opaque },
+                perceptual_roughness: 0.14,
+                metallic: 0.04,
+                ..default()
+            });
+            slime_body_materials.insert(id, mat);
+        }
+    }
+
+    let mut eyes_materials = HashMap::new();
+    let mut mouth_materials = HashMap::new();
+    for &expr in SlimeExpr::ALL {
+        let eyes_tex = assets
+            .face_eyes_textures
+            .get(&expr)
+            .cloned()
+            .unwrap_or_else(|| create_procedural_eyes_image(images, expr, false));
+        let mouth_tex = assets
+            .face_mouth_textures
+            .get(&expr)
+            .cloned()
+            .unwrap_or_else(|| create_procedural_mouth_image(images, expr, false));
+        eyes_materials.insert(
+            expr,
+            materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                base_color_texture: Some(eyes_tex),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            }),
+        );
+        mouth_materials.insert(
+            expr,
+            materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                base_color_texture: Some(mouth_tex),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            }),
+        );
+    }
+
+    let tarr_eyes_tex = create_procedural_eyes_image(images, SlimeExpr::Angry, true);
+    let tarr_mouth_tex = create_procedural_mouth_image(images, SlimeExpr::Feral, true);
+    let tarr_eyes_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.95, 0.90, 1.0),
+        base_color_texture: Some(tarr_eyes_tex),
+        emissive: LinearRgba::rgb(0.65, 0.25, 0.85),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+    let tarr_mouth_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.95, 0.90, 1.0),
+        base_color_texture: Some(tarr_mouth_tex),
+        emissive: LinearRgba::rgb(0.65, 0.25, 0.85),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+
     SlimeSharedAssets {
+        slime_sphere_mesh: meshes.add(Sphere::new(1.0).mesh().uv(32, 20)),
+        eyes_patch_mesh: meshes.add(create_spherical_patch_mesh(1.016, -0.52, 0.52, -0.02, 0.44, 10, 6)),
+        mouth_patch_mesh: meshes.add(create_spherical_patch_mesh(1.018, -0.36, 0.36, -0.38, 0.04, 8, 5)),
         carrot_mesh: meshes.add(Cone::new(0.32, 1.15)),
         leaf_mesh: meshes.add(Cone::new(0.20, 0.45)),
         ear_mesh: meshes.add(Cone::new(0.24, 0.55)),
         spike_mesh: meshes.add(Cone::new(0.22, 0.62)),
         wing_mesh: meshes.add(Cuboid::new(0.65, 0.08, 0.34)),
         halo_mesh: meshes.add(Torus::new(0.26, 0.36)),
-        mouth_mesh: meshes.add(Sphere::new(0.14).mesh().uv(10, 6)),
-        brow_mesh: meshes.add(Cuboid::new(0.24, 0.06, 0.08)),
         aura_mesh: meshes.add(Sphere::new(1.55).mesh().ico(2).unwrap()),
         beak_mesh: meshes.add(Cone::new(0.16, 0.36)),
         key_shaft_mesh: meshes.add(Cylinder::new(0.08, 0.65)),
 
-        mouth_dark_material: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.18, 0.06, 0.10),
-            unlit: true,
-            ..default()
-        }),
-        mouth_angry_material: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.95, 0.18, 0.22),
-            emissive: LinearRgba::rgb(0.35, 0.04, 0.06),
-            unlit: true,
-            ..default()
-        }),
+        slime_body_materials,
+        eyes_materials,
+        mouth_materials,
+        tarr_eyes_material,
+        tarr_mouth_material,
+
         leaf_material: materials.add(StandardMaterial {
             base_color: Color::srgb(0.22, 0.78, 0.28),
             perceptual_roughness: 0.6,
@@ -267,22 +720,30 @@ pub fn spawn_actor_visual(
     mat_handle: Handle<StandardMaterial>,
 ) -> Entity {
     let is_puddle = ident == IdentifiableId::PuddleSlime;
-    let species_mesh = assets.item_meshes.get(&ident).cloned();
+    let is_tarr = ident == IdentifiableId::TarrSlime;
 
     if ident.is_slime() {
-        let has_species_mesh = species_mesh.is_some();
-        let body_mesh = species_mesh
-            .or_else(|| assets.slime_base_mesh.clone())
-            .unwrap_or_else(|| registry.sphere_mesh.clone());
+        let body_mat = shared.body_material_for(ident).unwrap_or(mat_handle);
         let scale = if is_puddle {
             Vec3::new(radius * 1.15, radius * 0.65, radius * 1.15)
         } else {
             Vec3::splat(radius)
         };
+        let eyes_mat = if is_tarr {
+            shared.tarr_eyes_material.clone()
+        } else {
+            shared.eyes_materials[&SlimeExpr::Happy].clone()
+        };
+        let mouth_mat = if is_tarr {
+            shared.tarr_mouth_material.clone()
+        } else {
+            shared.mouth_materials[&SlimeExpr::Happy].clone()
+        };
+
         return commands
             .spawn((
-                Mesh3d(body_mesh),
-                MeshMaterial3d(mat_handle.clone()),
+                Mesh3d(shared.slime_sphere_mesh.clone()),
+                MeshMaterial3d(body_mat.clone()),
                 Transform {
                     translation: pos,
                     rotation: rot,
@@ -295,56 +756,32 @@ pub fn spawn_actor_visual(
                 },
             ))
             .with_children(|parent| {
-                // Eyes + pupils + dynamic mouth/brows (always attached unless species mesh replaces full rig)
-                if !has_species_mesh {
-                    for side in [-0.32_f32, 0.32_f32] {
-                        parent.spawn((
-                            Mesh3d(registry.eye_mesh.clone()),
-                            MeshMaterial3d(registry.eye_material.clone()),
-                            Transform::from_xyz(side, 0.22, 0.90),
-                        ));
-                        parent.spawn((
-                            Mesh3d(registry.eye_mesh.clone()),
-                            MeshMaterial3d(registry.pupil_material.clone()),
-                            Transform::from_xyz(side, 0.22, 0.98).with_scale(Vec3::splat(0.55)),
-                        ));
-                    }
+                // Curved spherical face decals (Eyes + Mouth) matching SlimeFaceAnimator
+                parent.spawn((
+                    Mesh3d(shared.eyes_patch_mesh.clone()),
+                    MeshMaterial3d(eyes_mat),
+                    Transform::IDENTITY,
+                    SlimeEyesVisual {
+                        actor_id,
+                        current: SlimeExpr::Happy,
+                        is_tarr,
+                    },
+                ));
+                parent.spawn((
+                    Mesh3d(shared.mouth_patch_mesh.clone()),
+                    MeshMaterial3d(mouth_mat),
+                    Transform::IDENTITY,
+                    SlimeMouthVisual {
+                        actor_id,
+                        current: SlimeExpr::Happy,
+                    },
+                ));
 
-                    // Dynamic mouth
-                    parent.spawn((
-                        Mesh3d(shared.mouth_mesh.clone()),
-                        MeshMaterial3d(shared.mouth_dark_material.clone()),
-                        Transform::from_xyz(0.0, -0.10, 0.95)
-                            .with_scale(Vec3::new(1.3, 0.55, 0.4)),
-                        SlimeMouthVisual { actor_id },
-                    ));
-
-                    // Dynamic angry brows (hidden unless agitated / feral / tarr)
-                    parent
-                        .spawn((
-                            Transform::from_xyz(0.0, 0.42, 0.92),
-                            Visibility::Hidden,
-                            SlimeBrowsVisual { actor_id },
-                        ))
-                        .with_children(|brows| {
-                            for side in [-0.32_f32, 0.32_f32] {
-                                let tilt = if side < 0.0 { -0.35 } else { 0.35 };
-                                brows.spawn((
-                                    Mesh3d(shared.brow_mesh.clone()),
-                                    MeshMaterial3d(shared.mouth_angry_material.clone()),
-                                    Transform::from_xyz(side, 0.0, 0.0)
-                                        .with_rotation(Quat::from_rotation_z(tilt)),
-                                ));
-                            }
-                        });
-
-                    // Species traits
-                    spawn_slime_species_traits(parent, ident, shared, mat_handle.clone());
-                }
+                // Species traits (ears, spikes, wings, halos, etc.)
+                spawn_slime_species_traits(parent, ident, shared, body_mat);
 
                 // Rad / Tarr aura
-                if ident == IdentifiableId::RadSlime || ident == IdentifiableId::TarrSlime {
-                    let is_tarr = ident == IdentifiableId::TarrSlime;
+                if ident == IdentifiableId::RadSlime || is_tarr {
                     let aura_mat = if is_tarr {
                         shared.tarr_aura_material.clone()
                     } else {
@@ -360,6 +797,8 @@ pub fn spawn_actor_visual(
             })
             .id();
     }
+
+    let species_mesh = assets.item_meshes.get(&ident).cloned();
 
     if ident.is_plort() {
         let plort_mesh = species_mesh
@@ -399,7 +838,7 @@ pub fn spawn_actor_visual(
         let body_mesh = if is_carrot {
             shared.carrot_mesh.clone()
         } else {
-            registry.sphere_mesh.clone()
+            shared.slime_sphere_mesh.clone()
         };
         let body_scale = if is_carrot {
             Vec3::splat(radius * 1.1)
@@ -439,7 +878,7 @@ pub fn spawn_actor_visual(
     if ident.is_fruit() {
         return commands
             .spawn((
-                Mesh3d(registry.sphere_mesh.clone()),
+                Mesh3d(shared.slime_sphere_mesh.clone()),
                 MeshMaterial3d(mat_handle),
                 Transform {
                     translation: pos,
@@ -462,7 +901,7 @@ pub fn spawn_actor_visual(
     if ident.is_animal() {
         return commands
             .spawn((
-                Mesh3d(registry.sphere_mesh.clone()),
+                Mesh3d(shared.slime_sphere_mesh.clone()),
                 MeshMaterial3d(mat_handle),
                 Transform {
                     translation: pos,
@@ -471,14 +910,12 @@ pub fn spawn_actor_visual(
                 },
             ))
             .with_children(|parent| {
-                // Beak
                 parent.spawn((
                     Mesh3d(shared.beak_mesh.clone()),
                     MeshMaterial3d(shared.beak_material.clone()),
                     Transform::from_xyz(0.0, 0.10, 1.05)
                         .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                 ));
-                // Red comb
                 parent.spawn((
                     Mesh3d(shared.spike_mesh.clone()),
                     MeshMaterial3d(shared.comb_material.clone()),
@@ -502,10 +939,9 @@ pub fn spawn_actor_visual(
             .id();
     }
 
-    // Fallback generic object
     commands
         .spawn((
-            Mesh3d(registry.sphere_mesh.clone()),
+            Mesh3d(shared.slime_sphere_mesh.clone()),
             MeshMaterial3d(mat_handle),
             Transform {
                 translation: pos,
@@ -518,49 +954,33 @@ pub fn spawn_actor_visual(
 
 pub fn spawn_gordo_visual(
     commands: &mut Commands,
-    registry: &VisualRegistry,
     shared: &SlimeSharedAssets,
-    assets: &ClientAssets,
     gordo_id: String,
     slime_ident: IdentifiableId,
     pos: Vec3,
-    mat: Handle<StandardMaterial>,
+    fallback_mat: Handle<StandardMaterial>,
 ) -> Entity {
     let base_pos = pos + Vec3::Y * 2.05;
-    let species_mesh = assets.item_meshes.get(&slime_ident).cloned();
-    let has_species_mesh = species_mesh.is_some();
-    let body_mesh = species_mesh
-        .or_else(|| assets.slime_base_mesh.clone())
-        .unwrap_or_else(|| registry.sphere_mesh.clone());
+    let body_mat = shared.body_material_for(slime_ident).unwrap_or(fallback_mat);
     commands
         .spawn((
-            Mesh3d(body_mesh),
-            MeshMaterial3d(mat.clone()),
+            Mesh3d(shared.slime_sphere_mesh.clone()),
+            MeshMaterial3d(body_mat.clone()),
             Transform::from_translation(base_pos).with_scale(Vec3::splat(2.15)),
             GordoBodyVisual { gordo_id, base_pos },
         ))
         .with_children(|parent| {
-            if !has_species_mesh {
-                for side in [-0.32_f32, 0.32_f32] {
-                    parent.spawn((
-                        Mesh3d(registry.eye_mesh.clone()),
-                        MeshMaterial3d(registry.eye_material.clone()),
-                        Transform::from_xyz(side, 0.22, 0.90),
-                    ));
-                    parent.spawn((
-                        Mesh3d(registry.eye_mesh.clone()),
-                        MeshMaterial3d(registry.pupil_material.clone()),
-                        Transform::from_xyz(side, 0.22, 0.98).with_scale(Vec3::splat(0.55)),
-                    ));
-                }
-                parent.spawn((
-                    Mesh3d(shared.mouth_mesh.clone()),
-                    MeshMaterial3d(shared.mouth_dark_material.clone()),
-                    Transform::from_xyz(0.0, -0.10, 0.94)
-                        .with_scale(Vec3::new(1.6, 0.75, 0.45)),
-                ));
-                spawn_slime_species_traits(parent, slime_ident, shared, mat);
-            }
+            parent.spawn((
+                Mesh3d(shared.eyes_patch_mesh.clone()),
+                MeshMaterial3d(shared.eyes_materials[&SlimeExpr::Happy].clone()),
+                Transform::IDENTITY,
+            ));
+            parent.spawn((
+                Mesh3d(shared.mouth_patch_mesh.clone()),
+                MeshMaterial3d(shared.mouth_materials[&SlimeExpr::Elated].clone()),
+                Transform::IDENTITY,
+            ));
+            spawn_slime_species_traits(parent, slime_ident, shared, body_mat);
 
             // Floating SlimeKey indicator above the Gordo
             parent
@@ -585,22 +1005,59 @@ pub fn spawn_gordo_visual(
         .id()
 }
 
+fn evaluate_slime_expression(sim: &sr_sim::Simulation, actor_id: i64, elapsed: f32) -> (SlimeExpr, SlimeExpr) {
+    let Some(actor) = sim.model.actors.get(&actor_id) else {
+        return (SlimeExpr::Happy, SlimeExpr::Happy);
+    };
+    if actor.ident == IdentifiableId::TarrSlime {
+        return (SlimeExpr::Angry, SlimeExpr::Feral);
+    }
+    let ActorKind::Slime(ref s) = actor.kind else {
+        return (SlimeExpr::Happy, SlimeExpr::Happy);
+    };
+    let agi = s.agitation.curr_val;
+    let hunger = s.hunger.curr_val;
+    let fear = s.fear.curr_val;
+
+    let base_expr = if s.is_feral {
+        SlimeExpr::Feral
+    } else if agi > 0.78 {
+        SlimeExpr::Angry
+    } else if fear > 0.55 {
+        SlimeExpr::Scared
+    } else if hunger > 0.85 {
+        SlimeExpr::Starving
+    } else if hunger > 0.60 {
+        SlimeExpr::Hungry
+    } else if agi < 0.15 && hunger < 0.35 && fear < 0.10 {
+        SlimeExpr::Elated
+    } else {
+        SlimeExpr::Happy
+    };
+
+    // Natural blinking every ~3.4s with per-actor phase offset
+    let blink_cycle = (elapsed + (actor_id as f32 * 0.67).abs()) % 3.4;
+    let eyes_expr = if matches!(base_expr, SlimeExpr::Happy | SlimeExpr::Elated | SlimeExpr::Feral)
+        && blink_cycle < 0.14
+    {
+        SlimeExpr::Blink
+    } else {
+        base_expr
+    };
+    (eyes_expr, base_expr)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn update_slime_animations_system(
     time: Res<Time>,
     sim_res: Res<SimResource>,
+    shared: Res<SlimeSharedAssets>,
     mut bodies: Query<(&SlimeBodyVisual, &mut Transform), Without<GordoBodyVisual>>,
-    mut mouths: Query<
-        (&SlimeMouthVisual, &mut Transform),
-        (Without<SlimeBodyVisual>, Without<GordoBodyVisual>),
-    >,
-    mut brows: Query<(&SlimeBrowsVisual, &mut Visibility)>,
+    mut eyes_q: Query<(&mut SlimeEyesVisual, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut mouths_q: Query<(&mut SlimeMouthVisual, &mut MeshMaterial3d<StandardMaterial>)>,
     mut auras: Query<
         (&SlimeAuraVisual, &mut Transform),
-        (
-            Without<SlimeBodyVisual>,
-            Without<SlimeMouthVisual>,
-            Without<GordoBodyVisual>,
-        ),
+        (Without<SlimeBodyVisual>, Without<GordoBodyVisual>),
     >,
     mut gordos: Query<(&GordoBodyVisual, &mut Transform), Without<SlimeBodyVisual>>,
     mut keys: Query<
@@ -608,7 +1065,6 @@ pub fn update_slime_animations_system(
         (
             With<GordoKeyVisual>,
             Without<SlimeBodyVisual>,
-            Without<SlimeMouthVisual>,
             Without<SlimeAuraVisual>,
             Without<GordoBodyVisual>,
         ),
@@ -636,46 +1092,27 @@ pub fn update_slime_animations_system(
         );
     }
 
-    // 2. Dynamic mouth & angry brows from SlimeModel emotions
-    for (sm, mut tf) in &mut mouths {
-        if let Some(actor) = sim.model.actors.get(&sm.actor_id) {
-            if let ActorKind::Slime(ref s) = actor.kind {
-                let hunger = s.hunger.curr_val;
-                let fear = s.fear.curr_val;
-                let agi = s.agitation.curr_val;
-                if fear > 0.45 {
-                    // Wide surprised 'O'
-                    tf.scale = Vec3::new(1.0, 1.35, 0.5);
-                } else if hunger > 0.65 {
-                    // Hungry open mouth
-                    tf.scale = Vec3::new(1.45, 1.15, 0.5);
-                } else if agi > 0.55 || s.is_feral || actor.ident == IdentifiableId::TarrSlime {
-                    // Snarl
-                    tf.scale = Vec3::new(1.6, 0.45, 0.45);
-                } else {
-                    // Happy smile
-                    tf.scale = Vec3::new(1.25, 0.55, 0.4);
-                }
+    // 2. Texture-swapped SlimeFace expressions (eyes + mouth) without mutating unchanged handles
+    for (mut se, mut mat) in &mut eyes_q {
+        if se.is_tarr {
+            continue;
+        }
+        let (eyes_expr, _) = evaluate_slime_expression(sim, se.actor_id, t);
+        if se.current != eyes_expr {
+            se.current = eyes_expr;
+            if let Some(h) = shared.eyes_materials.get(&eyes_expr) {
+                mat.0 = h.clone();
             }
         }
     }
 
-    for (sb, mut vis) in &mut brows {
-        let mut angry = false;
-        if let Some(actor) = sim.model.actors.get(&sb.actor_id) {
-            if actor.ident == IdentifiableId::TarrSlime {
-                angry = true;
-            } else if let ActorKind::Slime(ref s) = actor.kind {
-                angry = s.is_feral || s.agitation.curr_val > 0.55;
+    for (mut sm, mut mat) in &mut mouths_q {
+        let (_, mouth_expr) = evaluate_slime_expression(sim, sm.actor_id, t);
+        if sm.current != mouth_expr {
+            sm.current = mouth_expr;
+            if let Some(h) = shared.mouth_materials.get(&mouth_expr) {
+                mat.0 = h.clone();
             }
-        }
-        let target_vis = if angry {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-        if *vis != target_vis {
-            *vis = target_vis;
         }
     }
 
