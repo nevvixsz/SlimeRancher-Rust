@@ -58,6 +58,47 @@ pub struct AudioState {
     pub voice_cursor: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SlimeExpr {
+    Happy,
+    Blink,
+    Elated,
+    Hungry,
+    Starving,
+    Angry,
+    Feral,
+    Scared,
+    ChompOpen,
+}
+
+impl SlimeExpr {
+    pub const ALL: &'static [Self] = &[
+        Self::Happy,
+        Self::Blink,
+        Self::Elated,
+        Self::Hungry,
+        Self::Starving,
+        Self::Angry,
+        Self::Feral,
+        Self::Scared,
+        Self::ChompOpen,
+    ];
+
+    pub fn tokens(self) -> &'static [&'static str] {
+        match self {
+            Self::Happy => &["happy", "smile", "default"],
+            Self::Blink => &["blink", "closed"],
+            Self::Elated => &["elated", "joy", "blush"],
+            Self::Hungry => &["hungry"],
+            Self::Starving => &["starving", "grimace"],
+            Self::Angry => &["angry", "mad"],
+            Self::Feral => &["feral"],
+            Self::Scared => &["scared", "alarm", "fear"],
+            Self::ChompOpen => &["chomp", "open"],
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct ClientAssets {
     pub local_root: Option<PathBuf>,
@@ -70,6 +111,8 @@ pub struct ClientAssets {
     // Original UI icons & 3D diffuse textures
     pub item_icons: HashMap<IdentifiableId, Handle<Image>>,
     pub item_textures: HashMap<IdentifiableId, Handle<Image>>,
+    pub face_eyes_textures: HashMap<SlimeExpr, Handle<Image>>,
+    pub face_mouth_textures: HashMap<SlimeExpr, Handle<Image>>,
     pub ground_texture: Option<Handle<Image>>,
     pub water_texture: Option<Handle<Image>>,
     pub wall_texture: Option<Handle<Image>>,
@@ -85,7 +128,6 @@ pub struct ClientAssets {
 
     // Original 3D meshes (.obj normalized for actors/items, or .glb/.gltf scene)
     pub item_meshes: HashMap<IdentifiableId, Handle<Mesh>>,
-    pub slime_base_mesh: Option<Handle<Mesh>>,
     pub plort_base_mesh: Option<Handle<Mesh>>,
     pub vacpack_mesh: Option<Handle<Mesh>>,
     pub world_scene_model: Option<Handle<Scene>>,
@@ -289,8 +331,9 @@ pub fn load_client_assets(
     let mut icon_moon = None;
     let mut item_icons = HashMap::new();
     let mut item_textures = HashMap::new();
+    let mut face_eyes_textures = HashMap::new();
+    let mut face_mouth_textures = HashMap::new();
     let mut item_meshes = HashMap::new();
-    let mut slime_base_mesh = None;
     let mut plort_base_mesh = None;
     let mut vacpack_mesh = None;
     let mut world_scene_model = None;
@@ -378,7 +421,17 @@ pub fn load_client_assets(
         icon_sun = load_icon(&["iconsun", "sun", "dayicon"]);
         icon_moon = load_icon(&["iconmoon", "moon", "nighticon"]);
 
-        // Per-item UI icons, 3D diffuse textures, and 3D `.obj` meshes
+        // Slime face expressions (`eyes_*` & `mouth_*`)
+        for &expr in SlimeExpr::ALL {
+            if let Some(rel) = manifest.find_face_texture(true, expr.tokens()) {
+                face_eyes_textures.insert(expr, asset_server.load(asset_rel_path(rel)));
+            }
+            if let Some(rel) = manifest.find_face_texture(false, expr.tokens()) {
+                face_mouth_textures.insert(expr, asset_server.load(asset_rel_path(rel)));
+            }
+        }
+
+        // Per-item UI icons, 3D diffuse textures (never for slime jelly bodies!), and 3D `.obj` meshes
         for &id in IdentifiableId::ALL {
             if id == IdentifiableId::None {
                 continue;
@@ -396,19 +449,40 @@ pub fn load_client_assets(
                 item_icons.insert(id, asset_server.load(asset_rel_path(rel)));
             }
 
-            let tex_refs: Vec<&str> = base_keys.iter().map(String::as_str).collect();
-            if let Some(rel) = manifest.find_diffuse_texture(&tex_refs) {
-                item_textures.insert(id, asset_server.load(asset_rel_path(rel)));
-            }
-
-            if let Some(mesh_h) = load_obj_unit(&tex_refs) {
-                item_meshes.insert(id, mesh_h);
+            // Slime bodies in SR use palette gradient shaders, not 2D sprites/icons!
+            // Only load 3D diffuse textures for non-slime items (foods, plorts, crates, etc.).
+            if !id.is_slime() {
+                let tex_refs: Vec<&str> = base_keys.iter().map(String::as_str).collect();
+                if let Some(rel) = manifest.find_diffuse_texture(&tex_refs) {
+                    item_textures.insert(id, asset_server.load(asset_rel_path(rel)));
+                }
+                if let Some(mesh_h) = load_obj_unit(&tex_refs) {
+                    item_meshes.insert(id, mesh_h);
+                }
             }
         }
 
-        slime_base_mesh = load_obj_unit(&["slime_body", "slimebody", "slime_base", "slime_pink"]);
-        plort_base_mesh = load_obj_unit(&["plort", "plort_base", "pink_plort"]);
+        plort_base_mesh = load_obj_unit(&["plort", "plort_base"]);
         vacpack_mesh = load_obj_unit(&["vacpack", "vac_gun", "vac_nozzle", "vacgun"]);
+
+        let face_samples: Vec<&str> = manifest
+            .textures
+            .keys()
+            .filter(|k| k.contains("eye") || k.contains("mouth") || k.contains("slime"))
+            .take(15)
+            .map(String::as_str)
+            .collect();
+        let slime_mesh_samples: Vec<&str> = manifest
+            .models
+            .keys()
+            .filter(|k| k.contains("slime") || k.contains("plort") || k.contains("vac"))
+            .take(15)
+            .map(String::as_str)
+            .collect();
+        info!(
+            "Face/slime tex samples: {:?} | mesh samples: {:?}",
+            face_samples, slime_mesh_samples
+        );
 
         // Original world scene (.glb/.gltf or raw .obj)
         if let Some(rel) =
@@ -453,9 +527,11 @@ pub fn load_client_assets(
         bgm_tarr = load_aud(&["tarr_music", "tarr_theme", "tarr", "danger"]);
 
         info!(
-            "Matched original assets -> icons: {}, 3D textures: {}, 3D meshes: {}, slime voices: {}, BGM: {}/{}/{}",
+            "Matched original assets -> icons: {}, 3D textures: {}, face eyes/mouth: {}/{}, 3D meshes: {}, slime voices: {}, BGM: {}/{}/{}",
             item_icons.len(),
             item_textures.len(),
+            face_eyes_textures.len(),
+            face_mouth_textures.len(),
             item_meshes.len(),
             sfx_slime_voices.len(),
             bgm_ranch_day.is_some(),
@@ -473,6 +549,8 @@ pub fn load_client_assets(
         ui_font,
         item_icons,
         item_textures,
+        face_eyes_textures,
+        face_mouth_textures,
         ground_texture,
         water_texture,
         wall_texture,
@@ -486,7 +564,6 @@ pub fn load_client_assets(
         icon_sun,
         icon_moon,
         item_meshes,
-        slime_base_mesh,
         plort_base_mesh,
         vacpack_mesh,
         world_scene_model,

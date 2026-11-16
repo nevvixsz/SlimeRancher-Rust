@@ -239,19 +239,53 @@ impl AssetManifest {
     }
 
     /// Prefers 3D albedo/diffuse textures (`_diffuse`, `_albedo`, `_color`, bare stem)
-    /// and avoids UI icons and normal/mask maps.
+    /// and strictly excludes UI icons, sprites, face decals, and PBR maps.
     pub fn find_diffuse_texture(&self, candidates: &[&str]) -> Option<&str> {
-        find_in_map_scored(
+        find_in_map_scored_ex(
             &self.textures,
             &self.texture_tokens,
             candidates,
             &[
-                "icon", "_normal", "_nrm", "_bump", "_mask", "_rough", "_spec", "_ao",
-                "_emissive", "_lut", "_ramp", "_shadow",
+                "icon", "pedia", "sprite", "hud_", "ui_", "_normal", "_nrm", "_bump",
+                "_mask", "_rough", "_spec", "_ao", "_lut", "_ramp", "_emissive", "_shadow",
+                "eyes", "mouth", "face",
             ],
+            &[],
             &["diffuse", "albedo", "color", "tex"],
             false,
         )
+    }
+
+    /// Finds original slime face textures (`eyes_happy`, `mouth_happy`, `slime_eyes_*`, etc.).
+    pub fn find_face_texture(&self, is_eyes: bool, expr_tokens: &[&str]) -> Option<&str> {
+        let part_tokens: &[&str] = if is_eyes {
+            &["eye"]
+        } else {
+            &["mouth"]
+        };
+        let mut best: Option<(i32, &str)> = None;
+        for (key, rel) in &self.textures {
+            let clean = strip_asset_studio_suffix(key).trim();
+            if clean.contains("icon") || clean.contains("normal") || clean.contains("mask") {
+                continue;
+            }
+            if !part_tokens.iter().any(|p| clean.contains(p)) {
+                continue;
+            }
+            for (idx, &expr) in expr_tokens.iter().enumerate() {
+                let e = expr.to_ascii_lowercase();
+                if clean.contains(&e) {
+                    let mut score = 500 - (idx as i32) * 30 - (clean.len() as i32);
+                    if clean.contains("slime") {
+                        score += 80;
+                    }
+                    if best.map_or(true, |(bs, _)| score > bs) {
+                        best = Some((score, rel.as_str()));
+                    }
+                }
+            }
+        }
+        best.map(|(_, r)| r)
     }
 
     pub fn find_audio(&self, candidates: &[&str]) -> Option<&str> {
@@ -271,13 +305,17 @@ impl AssetManifest {
     }
 
     /// Finds a loadable 3D model (`.glb`, `.gltf`, `.obj`, `.fbx`), preferring `.glb`/`.gltf`/`.obj`
-    /// over `.fbx` and avoiding `_lod` / `_collider` / `_shadow` meshes.
+    /// over `.fbx` and excluding `_lod` / `_collider` / `_shadow` / sub-part meshes.
     pub fn find_model(&self, candidates: &[&str]) -> Option<&str> {
-        find_in_map_scored(
+        find_in_map_scored_ex(
             &self.models,
             &self.model_tokens,
             candidates,
-            &["_lod", "lod1", "lod2", "collider", "_shadow", "collision"],
+            &[
+                "_lod", "lod1", "lod2", "collider", "_shadow", "collision", "petal",
+                "gordo", "fashion", "ornament",
+            ],
+            &[],
             &[],
             true,
         )
@@ -383,15 +421,44 @@ fn find_in_map_scored<'a>(
     boost: &[&str],
     prefer_bevy_mesh_ext: bool,
 ) -> Option<&'a str> {
+    find_in_map_scored_ex(
+        map,
+        token_index,
+        candidates,
+        &[],
+        penalize,
+        boost,
+        prefer_bevy_mesh_ext,
+    )
+}
+
+fn find_in_map_scored_ex<'a>(
+    map: &'a BTreeMap<String, String>,
+    token_index: &HashMap<String, Vec<String>>,
+    candidates: &[&str],
+    exclude: &[&str],
+    penalize: &[&str],
+    boost: &[&str],
+    prefer_bevy_mesh_ext: bool,
+) -> Option<&'a str> {
     if map.is_empty() || candidates.is_empty() {
         return None;
     }
+
+    let is_excluded = |key: &str, cand_lower: &str| -> bool {
+        let clean = strip_asset_studio_suffix(key).trim();
+        exclude
+            .iter()
+            .any(|&ex| clean.contains(ex) && !cand_lower.contains(ex))
+    };
 
     // Fast exact lookup first
     for &cand in candidates {
         let key = cand.to_ascii_lowercase();
         if let Some(v) = map.get(&key) {
-            if !prefer_bevy_mesh_ext || !v.to_ascii_lowercase().ends_with(".fbx") {
+            if !is_excluded(&key, &key)
+                && (!prefer_bevy_mesh_ext || !v.to_ascii_lowercase().ends_with(".fbx"))
+            {
                 return Some(v.as_str());
             }
         }
@@ -404,6 +471,9 @@ fn find_in_map_scored<'a>(
         let cand_lower = cand.to_ascii_lowercase();
         let priority_bonus = ((candidates.len() - priority_idx) as i32) * 20;
         for &key in &pool {
+            if is_excluded(key, &cand_lower) {
+                continue;
+            }
             if let Some(rel) = map.get(key) {
                 if let Some(mut s) = score_key_match(
                     key,
@@ -429,6 +499,9 @@ fn find_in_map_scored<'a>(
             let cand_lower = cand.to_ascii_lowercase();
             let priority_bonus = ((candidates.len() - priority_idx) as i32) * 20;
             for (key, rel) in map {
+                if is_excluded(key, &cand_lower) {
+                    continue;
+                }
                 if let Some(mut s) = score_key_match(
                     key,
                     rel,
