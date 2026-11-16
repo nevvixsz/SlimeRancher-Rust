@@ -943,7 +943,7 @@ pub fn update_bgm_and_world_sfx_system(
     let desired = if has_tarr && assets.bgm_tarr.is_some() {
         ActiveBgmTrack::Tarr
     } else {
-        let hour = TimeDirector::hour_of_day(model.world.world_time);
+        let hour = TimeDirector::curr_day_fraction(&model.world) * 24.0;
         if !(6.0..19.5).contains(&hour) && assets.bgm_ranch_night.is_some() {
             ActiveBgmTrack::Night
         } else if assets.bgm_ranch_day.is_some() {
@@ -984,11 +984,17 @@ pub fn update_bgm_and_world_sfx_system(
         audio_state.last_slime_plort_t = t;
         play_sfx(&mut commands, assets.sfx_slime_plort.as_ref(), 0.40);
     }
-    if !ev.ai.slime_jumps.is_empty() && (t - audio_state.last_slime_jump_t) > 0.20 {
+    let any_slime_jump = sim_res
+        .sim
+        .physics
+        .bodies
+        .values()
+        .any(|b| b.vel.y > 4.2);
+    if any_slime_jump && (t - audio_state.last_slime_jump_t) > 0.65 {
         audio_state.last_slime_jump_t = t;
-        play_sfx(&mut commands, assets.sfx_slime_jump.as_ref(), 0.30);
+        play_sfx(&mut commands, assets.sfx_slime_jump.as_ref(), 0.28);
     }
-    if (ev.ai.player_damage > 0 || ev.ai.player_fire_damage > 0)
+    if (ev.ai.player_damage > 0.0 || ev.ai.player_fire_damage > 0.0)
         && (t - audio_state.last_damage_t) > 0.45
     {
         audio_state.last_damage_t = t;
