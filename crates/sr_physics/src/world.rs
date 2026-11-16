@@ -281,11 +281,36 @@ impl PhysicsWorld {
             }
         }
 
-        // 2. Pairwise dynamic sphere-sphere resolution
-        for i in 0..ids.len() {
-            for j in (i + 1)..ids.len() {
-                let id_a = ids[i];
-                let id_b = ids[j];
+        // 2. X-axis Sweep-and-Prune broadphase + deterministic sphere-sphere resolution
+        // Reduces O(N^2) HashMap lookups to O(N log N) while preserving sorted (id_a, id_b) order.
+        if ids.len() > 1 {
+            let mut sap: Vec<(f32, f32, i64)> = Vec::with_capacity(ids.len());
+            for &id in &ids {
+                if let Some(b) = self.bodies.get(&id) {
+                    sap.push((b.pos.x - b.radius, b.pos.x + b.radius, id));
+                }
+            }
+            sap.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
+
+            let mut candidate_pairs: Vec<(i64, i64)> = Vec::new();
+            for i in 0..sap.len() {
+                let (_, max_x_i, id_i) = sap[i];
+                let limit_x = max_x_i + 0.5;
+                for j in (i + 1)..sap.len() {
+                    let (min_x_j, _, id_j) = sap[j];
+                    if min_x_j > limit_x {
+                        break;
+                    }
+                    if id_i < id_j {
+                        candidate_pairs.push((id_i, id_j));
+                    } else {
+                        candidate_pairs.push((id_j, id_i));
+                    }
+                }
+            }
+            candidate_pairs.sort_unstable();
+
+            for (id_a, id_b) in candidate_pairs {
                 let (pos_a, rad_a, vel_a, kin_a, mass_a, rest_a) = {
                     let b = &self.bodies[&id_a];
                     (b.pos, b.radius, b.vel, b.is_kinematic, b.mass, b.restitution)

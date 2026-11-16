@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use sr_ids::IdentifiableId;
 use sr_model::ActorKind;
 
+use crate::assets::ClientAssets;
 use crate::world_sync::{SimResource, VisualRegistry};
 
 #[derive(Component)]
@@ -256,6 +257,7 @@ pub fn spawn_actor_visual(
     commands: &mut Commands,
     registry: &VisualRegistry,
     shared: &SlimeSharedAssets,
+    assets: &ClientAssets,
     actor_id: i64,
     ident: IdentifiableId,
     pos: Vec3,
@@ -264,8 +266,13 @@ pub fn spawn_actor_visual(
     mat_handle: Handle<StandardMaterial>,
 ) -> Entity {
     let is_puddle = ident == IdentifiableId::PuddleSlime;
+    let species_mesh = assets.item_meshes.get(&ident).cloned();
 
     if ident.is_slime() {
+        let has_species_mesh = species_mesh.is_some();
+        let body_mesh = species_mesh
+            .or_else(|| assets.slime_base_mesh.clone())
+            .unwrap_or_else(|| registry.sphere_mesh.clone());
         let scale = if is_puddle {
             Vec3::new(radius * 1.15, radius * 0.65, radius * 1.15)
         } else {
@@ -273,7 +280,7 @@ pub fn spawn_actor_visual(
         };
         return commands
             .spawn((
-                Mesh3d(registry.sphere_mesh.clone()),
+                Mesh3d(body_mesh),
                 MeshMaterial3d(mat_handle.clone()),
                 Transform {
                     translation: pos,
@@ -287,49 +294,52 @@ pub fn spawn_actor_visual(
                 },
             ))
             .with_children(|parent| {
-                // Eyes + pupils
-                for side in [-0.32_f32, 0.32_f32] {
-                    parent.spawn((
-                        Mesh3d(registry.eye_mesh.clone()),
-                        MeshMaterial3d(registry.eye_material.clone()),
-                        Transform::from_xyz(side, 0.22, 0.90),
-                    ));
-                    parent.spawn((
-                        Mesh3d(registry.eye_mesh.clone()),
-                        MeshMaterial3d(registry.pupil_material.clone()),
-                        Transform::from_xyz(side, 0.22, 0.98).with_scale(Vec3::splat(0.55)),
-                    ));
-                }
-
-                // Dynamic mouth
-                parent.spawn((
-                    Mesh3d(shared.mouth_mesh.clone()),
-                    MeshMaterial3d(shared.mouth_dark_material.clone()),
-                    Transform::from_xyz(0.0, -0.10, 0.95)
-                        .with_scale(Vec3::new(1.3, 0.55, 0.4)),
-                    SlimeMouthVisual { actor_id },
-                ));
-
-                // Dynamic angry brows (hidden unless agitated / feral / tarr)
-                parent.spawn((
-                    Transform::from_xyz(0.0, 0.42, 0.92),
-                    Visibility::Hidden,
-                    SlimeBrowsVisual { actor_id },
-                ))
-                .with_children(|brows| {
+                // Eyes + pupils + dynamic mouth/brows (always attached unless species mesh replaces full rig)
+                if !has_species_mesh {
                     for side in [-0.32_f32, 0.32_f32] {
-                        let tilt = if side < 0.0 { -0.35 } else { 0.35 };
-                        brows.spawn((
-                            Mesh3d(shared.brow_mesh.clone()),
-                            MeshMaterial3d(shared.mouth_angry_material.clone()),
-                            Transform::from_xyz(side, 0.0, 0.0)
-                                .with_rotation(Quat::from_rotation_z(tilt)),
+                        parent.spawn((
+                            Mesh3d(registry.eye_mesh.clone()),
+                            MeshMaterial3d(registry.eye_material.clone()),
+                            Transform::from_xyz(side, 0.22, 0.90),
+                        ));
+                        parent.spawn((
+                            Mesh3d(registry.eye_mesh.clone()),
+                            MeshMaterial3d(registry.pupil_material.clone()),
+                            Transform::from_xyz(side, 0.22, 0.98).with_scale(Vec3::splat(0.55)),
                         ));
                     }
-                });
 
-                // Species traits
-                spawn_slime_species_traits(parent, ident, shared, mat_handle.clone());
+                    // Dynamic mouth
+                    parent.spawn((
+                        Mesh3d(shared.mouth_mesh.clone()),
+                        MeshMaterial3d(shared.mouth_dark_material.clone()),
+                        Transform::from_xyz(0.0, -0.10, 0.95)
+                            .with_scale(Vec3::new(1.3, 0.55, 0.4)),
+                        SlimeMouthVisual { actor_id },
+                    ));
+
+                    // Dynamic angry brows (hidden unless agitated / feral / tarr)
+                    parent
+                        .spawn((
+                            Transform::from_xyz(0.0, 0.42, 0.92),
+                            Visibility::Hidden,
+                            SlimeBrowsVisual { actor_id },
+                        ))
+                        .with_children(|brows| {
+                            for side in [-0.32_f32, 0.32_f32] {
+                                let tilt = if side < 0.0 { -0.35 } else { 0.35 };
+                                brows.spawn((
+                                    Mesh3d(shared.brow_mesh.clone()),
+                                    MeshMaterial3d(shared.mouth_angry_material.clone()),
+                                    Transform::from_xyz(side, 0.0, 0.0)
+                                        .with_rotation(Quat::from_rotation_z(tilt)),
+                                ));
+                            }
+                        });
+
+                    // Species traits
+                    spawn_slime_species_traits(parent, ident, shared, mat_handle.clone());
+                }
 
                 // Rad / Tarr aura
                 if ident == IdentifiableId::RadSlime || ident == IdentifiableId::TarrSlime {
@@ -351,14 +361,31 @@ pub fn spawn_actor_visual(
     }
 
     if ident.is_plort() {
+        let plort_mesh = species_mesh
+            .or_else(|| assets.plort_base_mesh.clone())
+            .unwrap_or_else(|| registry.plort_mesh.clone());
         return commands
             .spawn((
-                Mesh3d(registry.plort_mesh.clone()),
+                Mesh3d(plort_mesh),
                 MeshMaterial3d(mat_handle),
                 Transform {
                     translation: pos,
                     rotation: rot,
                     scale: Vec3::new(radius * 0.95, radius * 1.25, radius * 0.95),
+                },
+            ))
+            .id();
+    }
+
+    if let Some(orig_mesh) = species_mesh {
+        return commands
+            .spawn((
+                Mesh3d(orig_mesh),
+                MeshMaterial3d(mat_handle),
+                Transform {
+                    translation: pos,
+                    rotation: rot,
+                    scale: Vec3::splat(radius),
                 },
             ))
             .id();
@@ -492,39 +519,47 @@ pub fn spawn_gordo_visual(
     commands: &mut Commands,
     registry: &VisualRegistry,
     shared: &SlimeSharedAssets,
+    assets: &ClientAssets,
     gordo_id: String,
     slime_ident: IdentifiableId,
     pos: Vec3,
     mat: Handle<StandardMaterial>,
 ) -> Entity {
     let base_pos = pos + Vec3::Y * 2.05;
+    let species_mesh = assets.item_meshes.get(&slime_ident).cloned();
+    let has_species_mesh = species_mesh.is_some();
+    let body_mesh = species_mesh
+        .or_else(|| assets.slime_base_mesh.clone())
+        .unwrap_or_else(|| registry.sphere_mesh.clone());
     commands
         .spawn((
-            Mesh3d(registry.sphere_mesh.clone()),
+            Mesh3d(body_mesh),
             MeshMaterial3d(mat.clone()),
             Transform::from_translation(base_pos).with_scale(Vec3::splat(2.15)),
             GordoBodyVisual { gordo_id, base_pos },
         ))
         .with_children(|parent| {
-            for side in [-0.32_f32, 0.32_f32] {
+            if !has_species_mesh {
+                for side in [-0.32_f32, 0.32_f32] {
+                    parent.spawn((
+                        Mesh3d(registry.eye_mesh.clone()),
+                        MeshMaterial3d(registry.eye_material.clone()),
+                        Transform::from_xyz(side, 0.22, 0.90),
+                    ));
+                    parent.spawn((
+                        Mesh3d(registry.eye_mesh.clone()),
+                        MeshMaterial3d(registry.pupil_material.clone()),
+                        Transform::from_xyz(side, 0.22, 0.98).with_scale(Vec3::splat(0.55)),
+                    ));
+                }
                 parent.spawn((
-                    Mesh3d(registry.eye_mesh.clone()),
-                    MeshMaterial3d(registry.eye_material.clone()),
-                    Transform::from_xyz(side, 0.22, 0.90),
+                    Mesh3d(shared.mouth_mesh.clone()),
+                    MeshMaterial3d(shared.mouth_dark_material.clone()),
+                    Transform::from_xyz(0.0, -0.10, 0.94)
+                        .with_scale(Vec3::new(1.6, 0.75, 0.45)),
                 ));
-                parent.spawn((
-                    Mesh3d(registry.eye_mesh.clone()),
-                    MeshMaterial3d(registry.pupil_material.clone()),
-                    Transform::from_xyz(side, 0.22, 0.98).with_scale(Vec3::splat(0.55)),
-                ));
+                spawn_slime_species_traits(parent, slime_ident, shared, mat);
             }
-            parent.spawn((
-                Mesh3d(shared.mouth_mesh.clone()),
-                MeshMaterial3d(shared.mouth_dark_material.clone()),
-                Transform::from_xyz(0.0, -0.10, 0.94)
-                    .with_scale(Vec3::new(1.6, 0.75, 0.45)),
-            ));
-            spawn_slime_species_traits(parent, slime_ident, shared, mat);
 
             // Floating SlimeKey indicator above the Gordo
             parent
@@ -632,11 +667,14 @@ pub fn update_slime_animations_system(
                 angry = s.is_feral || s.agitation.curr_val > 0.55;
             }
         }
-        *vis = if angry {
+        let target_vis = if angry {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+        if *vis != target_vis {
+            *vis = target_vis;
+        }
     }
 
     // 3. Pulsing Rad / Tarr auras

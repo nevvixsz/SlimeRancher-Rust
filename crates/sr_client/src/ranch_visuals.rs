@@ -42,7 +42,7 @@ pub fn spawn_ranch_structures(
 
     let stone_mat = materials.add(StandardMaterial {
         base_color: if assets.wall_texture.is_some() {
-            Color::srgb(0.84, 0.80, 0.76)
+            Color::WHITE
         } else {
             Color::srgb(0.55, 0.50, 0.46)
         },
@@ -51,7 +51,12 @@ pub fn spawn_ranch_structures(
         ..default()
     });
     let wood_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.54, 0.34, 0.18),
+        base_color: if assets.wood_texture.is_some() {
+            Color::WHITE
+        } else {
+            Color::srgb(0.54, 0.34, 0.18)
+        },
+        base_color_texture: assets.wood_texture.clone(),
         perceptual_roughness: 0.85,
         ..default()
     });
@@ -233,7 +238,13 @@ pub fn spawn_ranch_structures(
     }
     // Soil bed
     let soil_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.42, 0.25, 0.14),
+        base_color: if assets.soil_texture.is_some() {
+            Color::WHITE
+        } else {
+            Color::srgb(0.42, 0.25, 0.14)
+        },
+        base_color_texture: assets.soil_texture.clone(),
+        uv_transform: bevy::math::Affine2::from_scale(Vec2::splat(4.0)),
         perceptual_roughness: 0.95,
         ..default()
     });
@@ -420,11 +431,14 @@ pub fn sync_ranch_visuals_system(
             .land_plots
             .get(&pv.plot_id)
             .map_or(false, |plot| plot.has_upgrade(pv.upgrade));
-        *vis = if has {
+        let target_vis = if has {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+        if *vis != target_vis {
+            *vis = target_vis;
+        }
     }
 
     for mut tf in &mut holo_q {

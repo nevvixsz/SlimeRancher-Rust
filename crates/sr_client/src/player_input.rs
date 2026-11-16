@@ -16,6 +16,7 @@ use sr_sandbox::landmarks;
 use sr_sim::TimeDirector;
 
 use crate::assets::{play_sfx, ClientAssets, Language};
+use crate::ui_screens::UiScreenState;
 use crate::world_sync::{
     ident_color, AirBurstVisual, ShootFlashVisual, SimResource, TargetInfo, VacBeamVisual,
     VacMuzzleVisual, VisualRegistry,
@@ -53,12 +54,17 @@ impl Default for CameraLookState {
 pub fn handle_cursor_grab(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    ui_state: Res<UiScreenState>,
     mut look: ResMut<CameraLookState>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let Ok(mut window) = windows.get_single_mut() else {
         return;
     };
+
+    if ui_state.is_open() {
+        return;
+    }
 
     if mouse.just_pressed(MouseButton::Left) && !look.cursor_locked {
         window.cursor_options.grab_mode = CursorGrabMode::Locked;
@@ -100,6 +106,7 @@ pub fn step_simulation_system(
     mut sim_res: ResMut<SimResource>,
     mut target_info: ResMut<TargetInfo>,
     mut assets: ResMut<ClientAssets>,
+    ui_state: Res<UiScreenState>,
 ) {
     let dt = time.delta_secs().min(0.05);
 
@@ -275,8 +282,10 @@ pub fn step_simulation_system(
         }
     }
 
-    // Camera look (when cursor is captured)
-    if look.cursor_locked {
+    let controls_active = !ui_state.is_open();
+
+    // Camera look (when cursor is captured and no modal UI is open)
+    if controls_active && look.cursor_locked {
         for ev in motion_evr.read() {
             look.yaw -= ev.delta.x * 0.0024;
             look.pitch = (look.pitch - ev.delta.y * 0.0024).clamp(-1.45, 1.45);
@@ -286,16 +295,25 @@ pub fn step_simulation_system(
     }
 
     // Movement input aligned with PlayerMotor's basis
-    let forward = (keys.pressed(KeyCode::KeyW) as i32 - keys.pressed(KeyCode::KeyS) as i32) as f32;
-    let strafe = (keys.pressed(KeyCode::KeyA) as i32 - keys.pressed(KeyCode::KeyD) as i32) as f32;
+    let (forward, strafe, sprint, jump_held, jump_pressed) = if controls_active {
+        (
+            (keys.pressed(KeyCode::KeyW) as i32 - keys.pressed(KeyCode::KeyS) as i32) as f32,
+            (keys.pressed(KeyCode::KeyA) as i32 - keys.pressed(KeyCode::KeyD) as i32) as f32,
+            keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight),
+            keys.pressed(KeyCode::Space),
+            keys.just_pressed(KeyCode::Space),
+        )
+    } else {
+        (0.0, 0.0, false, false, false)
+    };
 
     let move_input = PlayerMoveInput {
         move_axes: [strafe, forward],
         yaw: look.yaw,
         pitch: look.pitch,
-        sprint: keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight),
-        jump_held: keys.pressed(KeyCode::Space),
-        jump_pressed: keys.just_pressed(KeyCode::Space),
+        sprint,
+        jump_held,
+        jump_pressed,
     };
 
     if move_input.jump_pressed && sim_res.sim.motor.grounded {
@@ -304,35 +322,42 @@ pub fn step_simulation_system(
 
     // Slot switching (1..4 + scroll wheel)
     let mut select_slot = None;
-    if keys.just_pressed(KeyCode::Digit1) {
-        select_slot = Some(0);
-    } else if keys.just_pressed(KeyCode::Digit2) {
-        select_slot = Some(1);
-    } else if keys.just_pressed(KeyCode::Digit3) {
-        select_slot = Some(2);
-    } else if keys.just_pressed(KeyCode::Digit4) {
-        select_slot = Some(3);
-    }
-
     let mut next_slot = false;
     let mut prev_slot = false;
-    for wh in wheel_evr.read() {
-        if wh.y > 0.0 {
-            prev_slot = true;
-        } else if wh.y < 0.0 {
-            next_slot = true;
+    if controls_active {
+        if keys.just_pressed(KeyCode::Digit1) {
+            select_slot = Some(0);
+        } else if keys.just_pressed(KeyCode::Digit2) {
+            select_slot = Some(1);
+        } else if keys.just_pressed(KeyCode::Digit3) {
+            select_slot = Some(2);
+        } else if keys.just_pressed(KeyCode::Digit4) {
+            select_slot = Some(3);
         }
+        for wh in wheel_evr.read() {
+            if wh.y > 0.0 {
+                prev_slot = true;
+            } else if wh.y < 0.0 {
+                next_slot = true;
+            }
+        }
+    } else {
+        wheel_evr.clear();
     }
 
     let vac_input = VacInput {
-        vac_held: look.cursor_locked && mouse_btn.pressed(MouseButton::Right),
-        shoot_held: look.cursor_locked && mouse_btn.pressed(MouseButton::Left),
-        burst_pressed: look.cursor_locked && keys.just_pressed(KeyCode::KeyQ),
+        vac_held: controls_active && look.cursor_locked && mouse_btn.pressed(MouseButton::Right),
+        shoot_held: controls_active && look.cursor_locked && mouse_btn.pressed(MouseButton::Left),
+        burst_pressed: controls_active && look.cursor_locked && keys.just_pressed(KeyCode::KeyQ),
         gadget_toggle_pressed: false,
         next_slot,
         prev_slot,
         select_slot,
     };
+
+    if vac_input.vac_held && !look.vac_active {
+        play_sfx(&mut commands, assets.sfx_vac_start.as_ref(), 0.45);
+    }
 
     let events = sim_res.sim.step_with_input(dt, move_input, vac_input);
 
@@ -437,24 +462,28 @@ pub fn sync_vacpack_visuals_system(
             Without<ShootFlashVisual>,
         ),
     >,
+    mut last_slot_id: Local<Option<IdentifiableId>>,
 ) {
     let elapsed = time.elapsed_secs();
 
-    // Update vacpack tank core material color to active slot's item color
+    // Update vacpack tank core material color only when active slot item changes
     let active_slot_id = sim_res.sim.ammo.slot_id(
         &sim_res.sim.model.player,
         sim_res.sim.ammo.selected_idx,
         sim_res.sim.model.world.world_time,
     );
-    if let Some(mat) = materials.get_mut(&registry.vac_core_material) {
-        if active_slot_id == IdentifiableId::None {
-            mat.base_color = Color::srgb(0.28, 0.80, 0.96);
-            mat.emissive = LinearRgba::rgb(0.12, 0.45, 0.75);
-        } else {
-            let c = ident_color(active_slot_id, sim_res.world_dump.as_ref());
-            mat.base_color = c;
-            let lin = c.to_linear();
-            mat.emissive = LinearRgba::rgb(lin.red * 0.45, lin.green * 0.45, lin.blue * 0.45);
+    if *last_slot_id != Some(active_slot_id) {
+        *last_slot_id = Some(active_slot_id);
+        if let Some(mat) = materials.get_mut(&registry.vac_core_material) {
+            if active_slot_id == IdentifiableId::None {
+                mat.base_color = Color::srgb(0.28, 0.80, 0.96);
+                mat.emissive = LinearRgba::rgb(0.12, 0.45, 0.75);
+            } else {
+                let c = ident_color(active_slot_id, sim_res.world_dump.as_ref());
+                mat.base_color = c;
+                let lin = c.to_linear();
+                mat.emissive = LinearRgba::rgb(lin.red * 0.45, lin.green * 0.45, lin.blue * 0.45);
+            }
         }
     }
 
@@ -490,7 +519,9 @@ pub fn sync_vacpack_visuals_system(
     // Animated vacuum cone beam (cone apex at muzzle, base extending 6m outward)
     for (mut b_tf, mut vis) in &mut beam_q {
         if look.vac_active {
-            *vis = Visibility::Visible;
+            if *vis != Visibility::Visible {
+                *vis = Visibility::Visible;
+            }
             let pulse = 0.88 + 0.16 * (elapsed * 18.0).sin();
             let spin = Quat::from_axis_angle(look_dir, elapsed * 7.0);
             let rot = spin * Quat::from_rotation_arc(-Vec3::Y, look_dir);
@@ -499,7 +530,7 @@ pub fn sync_vacpack_visuals_system(
                 rotation: rot,
                 scale: Vec3::new(pulse, 1.0, pulse),
             };
-        } else {
+        } else if *vis != Visibility::Hidden {
             *vis = Visibility::Hidden;
         }
     }
@@ -507,11 +538,13 @@ pub fn sync_vacpack_visuals_system(
     // Shoot muzzle flash
     for (mut f_tf, mut vis) in &mut flash_q {
         if look.flash_timer > 0.0 {
-            *vis = Visibility::Visible;
+            if *vis != Visibility::Visible {
+                *vis = Visibility::Visible;
+            }
             let s = 0.7 + 0.8 * (look.flash_timer / 0.09);
             *f_tf = Transform::from_translation(muzzle_pos + look_dir * 0.42)
                 .with_scale(Vec3::splat(s));
-        } else {
+        } else if *vis != Visibility::Hidden {
             *vis = Visibility::Hidden;
         }
     }
@@ -519,7 +552,9 @@ pub fn sync_vacpack_visuals_system(
     // Expanding AirBurst shockwave torus
     for (mut a_tf, mut vis) in &mut burst_q {
         if look.burst_timer > 0.0 {
-            *vis = Visibility::Visible;
+            if *vis != Visibility::Visible {
+                *vis = Visibility::Visible;
+            }
             let progress = 1.0 - (look.burst_timer / 0.38);
             let radius = 0.6 + progress * 10.0;
             *a_tf = Transform {
@@ -527,7 +562,7 @@ pub fn sync_vacpack_visuals_system(
                 rotation: Quat::from_rotation_arc(Vec3::Z, look_dir),
                 scale: Vec3::new(radius, radius, 1.2),
             };
-        } else {
+        } else if *vis != Visibility::Hidden {
             *vis = Visibility::Hidden;
         }
     }
