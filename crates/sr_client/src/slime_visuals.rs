@@ -1052,14 +1052,26 @@ pub fn update_slime_animations_system(
     time: Res<Time>,
     sim_res: Res<SimResource>,
     shared: Res<SlimeSharedAssets>,
-    mut bodies: Query<(&SlimeBodyVisual, &mut Transform), Without<GordoBodyVisual>>,
-    mut eyes_q: Query<(&mut SlimeEyesVisual, &mut MeshMaterial3d<StandardMaterial>)>,
-    mut mouths_q: Query<(&mut SlimeMouthVisual, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut bodies: Query<
+        (&SlimeBodyVisual, &mut Transform),
+        (Without<GordoBodyVisual>, Without<SlimeAuraVisual>, Without<GordoKeyVisual>),
+    >,
+    mut eyes_q: Query<
+        (&mut SlimeEyesVisual, &mut MeshMaterial3d<StandardMaterial>),
+        Without<SlimeMouthVisual>,
+    >,
+    mut mouths_q: Query<
+        (&mut SlimeMouthVisual, &mut MeshMaterial3d<StandardMaterial>),
+        Without<SlimeEyesVisual>,
+    >,
     mut auras: Query<
         (&SlimeAuraVisual, &mut Transform),
-        (Without<SlimeBodyVisual>, Without<GordoBodyVisual>),
+        (Without<SlimeBodyVisual>, Without<GordoBodyVisual>, Without<GordoKeyVisual>),
     >,
-    mut gordos: Query<(&GordoBodyVisual, &mut Transform), Without<SlimeBodyVisual>>,
+    mut gordos: Query<
+        (&GordoBodyVisual, &mut Transform),
+        (Without<SlimeBodyVisual>, Without<SlimeAuraVisual>, Without<GordoKeyVisual>),
+    >,
     mut keys: Query<
         &mut Transform,
         (
