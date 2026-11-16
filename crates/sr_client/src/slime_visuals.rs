@@ -33,6 +33,7 @@ pub struct SlimeAuraVisual {
 
 #[derive(Component)]
 pub struct GordoBodyVisual {
+    #[allow(dead_code)]
     pub gordo_id: String,
     pub base_pos: Vec3,
 }
@@ -565,6 +566,7 @@ pub fn spawn_gordo_visual(
             parent
                 .spawn((
                     Transform::from_xyz(0.0, 1.45, 0.0),
+                    Visibility::Inherited,
                     GordoKeyVisual,
                 ))
                 .with_children(|key| {
