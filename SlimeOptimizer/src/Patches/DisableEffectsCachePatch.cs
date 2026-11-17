@@ -24,7 +24,7 @@ namespace SlimeOptimizer.Patches
         [HarmonyPrefix]
         private static bool Prefix(DisableEffectsOnLowQuality __instance, ref DepthTextureMode ___lastDepthMode)
         {
-            if (!OptimizerConfig.EnableDisableEffectsCache)
+            if (!OptimizerConfig.EnableEffectsComponentCache)
             {
                 return true;
             }
@@ -67,7 +67,7 @@ namespace SlimeOptimizer.Patches
 
             if (OptimizerConfig.EnableStatsCollection)
             {
-                OptimizerStats.DisableEffectsGetComponentSaved += 3;
+                OptimizerStats.EffectsGetComponentsAvoided += 3;
             }
 
             return false;
