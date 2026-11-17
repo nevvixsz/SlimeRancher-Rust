@@ -26,7 +26,7 @@ namespace SlimeOptimizer
         public override void PostLoad()
         {
             QualityCapsPatch.ApplyCapsIfEnabled();
-            GrassOptimizerPatch.ReapplyAllSectors();
+            GrassOptimizerPatch.Initialize();
         }
 
         public override void Update()

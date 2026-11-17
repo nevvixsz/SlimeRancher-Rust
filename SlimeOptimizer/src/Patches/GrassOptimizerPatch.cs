@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 
 namespace SlimeOptimizer.Patches
 {
-    [HarmonyPatch(typeof(SECTR_Sector), "OnEnable")]
     internal static class GrassOptimizerPatch
     {
         private sealed class GrassRendererRecord
@@ -24,100 +22,131 @@ namespace SlimeOptimizer.Patches
             public bool LodAdjusted;
         }
 
-        private sealed class SectorGrassCache
+        private sealed class SceneGrassCache
         {
             public GrassRendererRecord[] Renderers;
             public GrassLodRecord[] LodGroups;
         }
 
-        private static readonly ConditionalWeakTable<SECTR_Sector, SectorGrassCache> SectorCaches =
-            new ConditionalWeakTable<SECTR_Sector, SectorGrassCache>();
+        private static bool _initialized;
+        private static readonly Dictionary<int, SceneGrassCache> SceneCaches = new Dictionary<int, SceneGrassCache>(32);
 
+        private static readonly List<GameObject> RootBuffer = new List<GameObject>(128);
         private static readonly List<MeshRenderer> RendererBuffer = new List<MeshRenderer>(256);
         private static readonly List<LODGroup> LodGroupBuffer = new List<LODGroup>(128);
         private static readonly List<GrassRendererRecord> TempRendererRecords = new List<GrassRendererRecord>(128);
         private static readonly List<GrassLodRecord> TempLodRecords = new List<GrassLodRecord>(64);
 
-        [HarmonyPostfix]
-        private static void Postfix(SECTR_Sector __instance)
+        public static void Initialize()
         {
-            if (__instance == null)
+            if (_initialized)
             {
                 return;
             }
 
-            SectorGrassCache cache = GetOrBuildCache(__instance);
+            _initialized = true;
+            SceneManager.sceneLoaded += OnSceneLoaded;
+            SceneManager.sceneUnloaded += OnSceneUnloaded;
+            ReapplyAllScenes();
+        }
+
+        private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                return;
+            }
+
+            SceneGrassCache cache = GetOrBuildCache(scene);
             ApplyToCache(cache, OptimizerConfig.EnableGrassOptimizer);
+        }
+
+        private static void OnSceneUnloaded(Scene scene)
+        {
+            SceneCaches.Remove(scene.handle);
         }
 
         public static void ReapplyAllSectors()
         {
-            List<SECTR_Sector> sectors = SECTR_Sector.All;
-            if (sectors == null)
-            {
-                return;
-            }
+            ReapplyAllScenes();
+        }
 
+        public static void ReapplyAllScenes()
+        {
             bool enabled = OptimizerConfig.EnableGrassOptimizer;
-            for (int i = 0; i < sectors.Count; i++)
+            int count = SceneManager.sceneCount;
+            for (int i = 0; i < count; i++)
             {
-                SECTR_Sector sector = sectors[i];
-                if (sector != null)
+                Scene scene = SceneManager.GetSceneAt(i);
+                if (scene.IsValid() && scene.isLoaded)
                 {
-                    SectorGrassCache cache = GetOrBuildCache(sector);
+                    SceneGrassCache cache = GetOrBuildCache(scene);
                     ApplyToCache(cache, enabled);
                 }
             }
         }
 
-        private static SectorGrassCache GetOrBuildCache(SECTR_Sector sector)
+        private static SceneGrassCache GetOrBuildCache(Scene scene)
         {
-            if (SectorCaches.TryGetValue(sector, out SectorGrassCache cache))
+            int handle = scene.handle;
+            if (SceneCaches.TryGetValue(handle, out SceneGrassCache cache))
             {
                 return cache;
             }
 
-            RendererBuffer.Clear();
+            RootBuffer.Clear();
             TempRendererRecords.Clear();
-            sector.GetComponentsInChildren<MeshRenderer>(true, RendererBuffer);
-
-            for (int i = 0; i < RendererBuffer.Count; i++)
-            {
-                MeshRenderer mr = RendererBuffer[i];
-                if (mr != null && IsGrassRenderer(mr))
-                {
-                    TempRendererRecords.Add(new GrassRendererRecord
-                    {
-                        Renderer = mr,
-                        OriginalShadowMode = mr.shadowCastingMode
-                    });
-                }
-            }
-            RendererBuffer.Clear();
-
-            LodGroupBuffer.Clear();
             TempLodRecords.Clear();
-            sector.GetComponentsInChildren<LODGroup>(true, LodGroupBuffer);
 
-            for (int i = 0; i < LodGroupBuffer.Count; i++)
+            scene.GetRootGameObjects(RootBuffer);
+            for (int r = 0; r < RootBuffer.Count; r++)
             {
-                LODGroup lg = LodGroupBuffer[i];
-                if (lg != null && IsGrassLodGroup(lg))
+                GameObject root = RootBuffer[r];
+                if (root == null)
                 {
-                    LOD[] lods = lg.GetLODs();
-                    if (lods != null && lods.Length > 0)
+                    continue;
+                }
+
+                RendererBuffer.Clear();
+                root.GetComponentsInChildren<MeshRenderer>(true, RendererBuffer);
+                for (int i = 0; i < RendererBuffer.Count; i++)
+                {
+                    MeshRenderer mr = RendererBuffer[i];
+                    if (mr != null && IsGrassRenderer(mr))
                     {
-                        TempLodRecords.Add(new GrassLodRecord
+                        TempRendererRecords.Add(new GrassRendererRecord
                         {
-                            Group = lg,
-                            OriginalLods = lods
+                            Renderer = mr,
+                            OriginalShadowMode = mr.shadowCastingMode
                         });
                     }
                 }
+
+                LodGroupBuffer.Clear();
+                root.GetComponentsInChildren<LODGroup>(true, LodGroupBuffer);
+                for (int i = 0; i < LodGroupBuffer.Count; i++)
+                {
+                    LODGroup lg = LodGroupBuffer[i];
+                    if (lg != null && IsGrassLodGroup(lg))
+                    {
+                        LOD[] lods = lg.GetLODs();
+                        if (lods != null && lods.Length > 0)
+                        {
+                            TempLodRecords.Add(new GrassLodRecord
+                            {
+                                Group = lg,
+                                OriginalLods = lods
+                            });
+                        }
+                    }
+                }
             }
+
+            RootBuffer.Clear();
+            RendererBuffer.Clear();
             LodGroupBuffer.Clear();
 
-            cache = new SectorGrassCache
+            cache = new SceneGrassCache
             {
                 Renderers = TempRendererRecords.ToArray(),
                 LodGroups = TempLodRecords.ToArray()
@@ -125,11 +154,11 @@ namespace SlimeOptimizer.Patches
 
             TempRendererRecords.Clear();
             TempLodRecords.Clear();
-            SectorCaches.Add(sector, cache);
+            SceneCaches[handle] = cache;
             return cache;
         }
 
-        private static void ApplyToCache(SectorGrassCache cache, bool enabled)
+        private static void ApplyToCache(SceneGrassCache cache, bool enabled)
         {
             if (cache == null)
             {
@@ -220,7 +249,9 @@ namespace SlimeOptimizer.Patches
             }
 
             return name.IndexOf("grass", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   name.IndexOf("sprig", StringComparison.OrdinalIgnoreCase) >= 0;
+                   name.IndexOf("sprig", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.IndexOf("drapeMoss", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.IndexOf("fern", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool IsGrassRenderer(MeshRenderer mr)
@@ -252,7 +283,19 @@ namespace SlimeOptimizer.Patches
                 Renderer[] first = lods[0].renderers;
                 for (int i = 0; i < first.Length; i++)
                 {
-                    if (first[i] != null && IsGrassName(first[i].name))
+                    Renderer r = first[i];
+                    if (r == null)
+                    {
+                        continue;
+                    }
+
+                    if (IsGrassName(r.name))
+                    {
+                        return true;
+                    }
+
+                    MeshFilter mf = r.GetComponent<MeshFilter>();
+                    if (mf != null && mf.sharedMesh != null && IsGrassName(mf.sharedMesh.name))
                     {
                         return true;
                     }
