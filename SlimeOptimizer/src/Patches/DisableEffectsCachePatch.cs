@@ -1,62 +1,73 @@
+using System;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
-using UnityStandardAssets.ImageEffects;
 
 namespace SlimeOptimizer.Patches
 {
     [HarmonyPatch(typeof(DisableEffectsOnLowQuality), "CheckQuality")]
     internal static class DisableEffectsCachePatch
     {
-        private sealed class CachedComponents
+        private static readonly Type BloomType = AccessTools.TypeByName("UnityStandardAssets.ImageEffects.Bloom");
+
+        private sealed class CachedEffects
         {
+            public bool Initialized;
             public SSAOPro Ssao;
-            public Bloom Bloom;
+            public Behaviour Bloom;
             public Camera Camera;
         }
 
-        private static readonly ConditionalWeakTable<DisableEffectsOnLowQuality, CachedComponents> Cache =
-            new ConditionalWeakTable<DisableEffectsOnLowQuality, CachedComponents>();
+        private static readonly ConditionalWeakTable<DisableEffectsOnLowQuality, CachedEffects> Cache =
+            new ConditionalWeakTable<DisableEffectsOnLowQuality, CachedEffects>();
 
         [HarmonyPrefix]
         private static bool Prefix(DisableEffectsOnLowQuality __instance, ref DepthTextureMode ___lastDepthMode)
         {
-            if (!OptimizerConfig.EnableEffectsComponentCache)
+            if (!OptimizerConfig.EnableDisableEffectsCache)
             {
                 return true;
             }
 
-            if (!Cache.TryGetValue(__instance, out CachedComponents cached))
+            if (!Cache.TryGetValue(__instance, out CachedEffects cached))
             {
-                cached = new CachedComponents
-                {
-                    Ssao = __instance.GetComponent<SSAOPro>(),
-                    Bloom = __instance.GetComponent<Bloom>(),
-                    Camera = __instance.GetComponent<Camera>()
-                };
+                cached = new CachedEffects();
                 Cache.Add(__instance, cached);
             }
 
-            if (cached.Ssao != null && cached.Ssao.enabled != SRQualitySettings.AmbientOcclusion)
+            if (!cached.Initialized)
             {
-                cached.Ssao.enabled = SRQualitySettings.AmbientOcclusion;
+                cached.Ssao = __instance.GetComponent<SSAOPro>();
+                cached.Bloom = BloomType != null ? (__instance.GetComponent(BloomType) as Behaviour) : null;
+                cached.Camera = __instance.GetComponent<Camera>();
+                cached.Initialized = true;
             }
 
-            if (cached.Bloom != null && cached.Bloom.enabled != SRQualitySettings.Bloom)
+            bool ao = SRQualitySettings.AmbientOcclusion;
+            if (cached.Ssao != null && cached.Ssao.enabled != ao)
             {
-                cached.Bloom.enabled = SRQualitySettings.Bloom;
+                cached.Ssao.enabled = ao;
+            }
+
+            bool bloom = SRQualitySettings.Bloom;
+            if (cached.Bloom != null && cached.Bloom.enabled != bloom)
+            {
+                cached.Bloom.enabled = bloom;
             }
 
             DepthTextureMode mode = SRQualitySettings.GetDepthTextureMode();
-            if (mode != ___lastDepthMode && cached.Camera != null)
+            if (mode != ___lastDepthMode)
             {
-                cached.Camera.depthTextureMode = mode;
+                if (cached.Camera != null)
+                {
+                    cached.Camera.depthTextureMode = mode;
+                }
                 ___lastDepthMode = mode;
             }
 
             if (OptimizerConfig.EnableStatsCollection)
             {
-                OptimizerStats.EffectsGetComponentsAvoided += 3;
+                OptimizerStats.DisableEffectsGetComponentSaved += 3;
             }
 
             return false;
