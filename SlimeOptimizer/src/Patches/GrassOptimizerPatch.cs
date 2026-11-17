@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
@@ -22,6 +23,15 @@ namespace SlimeOptimizer.Patches
             public bool LodAdjusted;
         }
 
+        private sealed class GrassShaderRecord
+        {
+            public Shader Shader;
+            public string Name;
+            public int OriginalMaxLod;
+            public bool IsGeneric;
+            public bool Capped;
+        }
+
         private sealed class SceneGrassCache
         {
             public GrassRendererRecord[] Renderers;
@@ -30,6 +40,7 @@ namespace SlimeOptimizer.Patches
 
         private static bool _initialized;
         private static readonly Dictionary<int, SceneGrassCache> SceneCaches = new Dictionary<int, SceneGrassCache>(32);
+        private static readonly Dictionary<Shader, GrassShaderRecord> GrassShaders = new Dictionary<Shader, GrassShaderRecord>(8);
 
         private static readonly List<GameObject> RootBuffer = new List<GameObject>(128);
         private static readonly List<MeshRenderer> RendererBuffer = new List<MeshRenderer>(256);
@@ -59,6 +70,7 @@ namespace SlimeOptimizer.Patches
 
             SceneGrassCache cache = GetOrBuildCache(scene);
             ApplyToCache(cache, OptimizerConfig.EnableGrassOptimizer);
+            ApplyGrassShaders();
         }
 
         private static void OnSceneUnloaded(Scene scene)
@@ -84,6 +96,35 @@ namespace SlimeOptimizer.Patches
                     ApplyToCache(cache, enabled);
                 }
             }
+
+            ApplyGrassShaders();
+        }
+
+        public static string GetSeenShadersSummary()
+        {
+            if (GrassShaders.Count == 0)
+            {
+                return "none";
+            }
+
+            StringBuilder sb = new StringBuilder(64);
+            foreach (GrassShaderRecord rec in GrassShaders.Values)
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append(", ");
+                }
+                sb.Append(rec.Name);
+                if (rec.Capped && rec.Shader != null)
+                {
+                    sb.Append("[LOD=").Append(rec.Shader.maximumLOD).Append(']');
+                }
+                else if (rec.IsGeneric)
+                {
+                    sb.Append("[generic]");
+                }
+            }
+            return sb.ToString();
         }
 
         private static SceneGrassCache GetOrBuildCache(Scene scene)
@@ -119,6 +160,7 @@ namespace SlimeOptimizer.Patches
                             Renderer = mr,
                             OriginalShadowMode = mr.shadowCastingMode
                         });
+                        TrackRendererShaders(mr);
                     }
                 }
 
@@ -156,6 +198,92 @@ namespace SlimeOptimizer.Patches
             TempLodRecords.Clear();
             SceneCaches[handle] = cache;
             return cache;
+        }
+
+        private static void TrackRendererShaders(MeshRenderer mr)
+        {
+            Material[] mats = mr.sharedMaterials;
+            if (mats == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < mats.Length; i++)
+            {
+                Material mat = mats[i];
+                if (mat == null)
+                {
+                    continue;
+                }
+
+                Shader shader = mat.shader;
+                if (shader == null || GrassShaders.ContainsKey(shader))
+                {
+                    continue;
+                }
+
+                string name = shader.name ?? string.Empty;
+                GrassShaders.Add(shader, new GrassShaderRecord
+                {
+                    Shader = shader,
+                    Name = name,
+                    OriginalMaxLod = shader.maximumLOD,
+                    IsGeneric = IsGenericWorldShader(name),
+                    Capped = false
+                });
+            }
+        }
+
+        private static void ApplyGrassShaders()
+        {
+            bool capEnabled = OptimizerConfig.EnableGrassOptimizer && OptimizerConfig.DisableGrassWindShader;
+            int capLod = OptimizerConfig.GrassShaderMaxLod;
+
+            foreach (GrassShaderRecord rec in GrassShaders.Values)
+            {
+                if (rec.Shader == null || rec.IsGeneric)
+                {
+                    continue;
+                }
+
+                if (capEnabled && capLod > 0)
+                {
+                    if (!rec.Capped || rec.Shader.maximumLOD != capLod)
+                    {
+                        if (rec.Shader.maximumLOD > capLod)
+                        {
+                            rec.Shader.maximumLOD = capLod;
+                            if (!rec.Capped && OptimizerConfig.EnableStatsCollection)
+                            {
+                                OptimizerStats.GrassShadersCapped++;
+                            }
+                            rec.Capped = true;
+                        }
+                    }
+                }
+                else if (rec.Capped)
+                {
+                    rec.Shader.maximumLOD = rec.OriginalMaxLod;
+                    rec.Capped = false;
+                }
+            }
+        }
+
+        private static bool IsGenericWorldShader(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return true;
+            }
+
+            return string.Equals(name, "Standard", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "Standard (Specular setup)", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("Hidden/", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("Particles/", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("UI/", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("Sprites/", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("Unlit/", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("Legacy Shaders/", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void ApplyToCache(SceneGrassCache cache, bool enabled)

@@ -50,11 +50,8 @@ namespace SlimeOptimizer
         [ConfigComment("Maximum pixel light count when SmartQualityCaps is enabled (vanilla Highest=4; recommended: 2).")]
         public static int MaxPixelLightCount = 2;
 
-        [ConfigComment("Optimize SECTR_CullingCamera and throttle SECTR_LOD.SelectLOD (eliminates per-frame Plane[6] GC and GetComponent overhead).")]
-        public static bool EnableSectrCullingOpt = true;
-
-        [ConfigComment("Update each SECTR_LOD only every N frames after initial activation (recommended: 4 = 75% less SECTR_LOD work).")]
-        public static int SectrLodInterval = 4;
+        [ConfigComment("Maximum global Shader.globalMaximumLOD when SmartQualityCaps is enabled (-1 = unchanged; 900=High, 700=Medium, 400=Low).")]
+        public static int MaxGlobalShaderLod = -1;
 
         [ConfigComment("Apply per-layer camera cull distances and a smart farClipPlane cap to skip rendering distant small actors.")]
         public static bool EnableCameraLayerCull = true;
@@ -97,6 +94,12 @@ namespace SlimeOptimizer
 
         [ConfigComment("Multiplier applied to grass-only LODGroup transition heights (>1.0 switches grass to lighter LODs sooner; 1.0 = unchanged).")]
         public static float GrassLodMultiplier = 1.5f;
+
+        [ConfigComment("Cap shader.maximumLOD specifically on grass/foliage shaders to disable expensive vertex wind waving while keeping water/world shaders at max.")]
+        public static bool DisableGrassWindShader = true;
+
+        [ConfigComment("Shader LOD cap applied to grass shaders when DisableGrassWindShader is true (400 matches Low shaders).")]
+        public static int GrassShaderMaxLod = 400;
 
         [ConfigComment("Cache slime face renderer Material[] arrays and skip no-op expression assignments (eliminates GC spikes).")]
         public static bool EnableExpressionCache = true;

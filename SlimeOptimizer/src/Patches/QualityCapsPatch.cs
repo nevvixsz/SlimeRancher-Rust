@@ -72,6 +72,12 @@ namespace SlimeOptimizer.Patches
             {
                 QualitySettings.pixelLightCount = maxPixelLights;
             }
+
+            int maxGlobalShaderLod = OptimizerConfig.MaxGlobalShaderLod;
+            if (maxGlobalShaderLod > 0 && Shader.globalMaximumLOD > maxGlobalShaderLod)
+            {
+                Shader.globalMaximumLOD = maxGlobalShaderLod;
+            }
         }
 
         public static void ReapplyQualitySettings()
