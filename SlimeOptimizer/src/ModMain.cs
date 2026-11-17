@@ -15,7 +15,7 @@ namespace SlimeOptimizer
             Logger = ConsoleInstance;
             HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
             Console.RegisterCommand(new SlimeOptCommand());
-            Logger?.LogSuccess("SlimeOptimizer v0.3.0 pre-loaded (Harmony patches applied). Use 'slimeopt' in console.");
+            Logger?.LogSuccess("SlimeOptimizer v0.4.0 pre-loaded (Harmony patches applied). Use 'slimeopt' in console.");
         }
 
         public override void Load()
@@ -27,11 +27,13 @@ namespace SlimeOptimizer
         {
             QualityCapsPatch.ApplyCapsIfEnabled();
             GrassOptimizerPatch.Initialize();
+            CameraCullDistancePatch.MarkDirty();
         }
 
         public override void Update()
         {
             CameraCache.EnsureCurrentFrame();
+            CameraCullDistancePatch.UpdateActiveCamera();
         }
     }
 }

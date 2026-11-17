@@ -44,6 +44,24 @@ namespace SlimeOptimizer
         [ConfigComment("Maximum Unity LOD bias when SmartQualityCaps is enabled (vanilla High=2.0, Medium=1.0; recommended: 1.2 to stop distant grass/foliage from staying in heavy LOD0).")]
         public static float MaxLodBias = 1.2f;
 
+        [ConfigComment("Maximum shadow map resolution when SmartQualityCaps is enabled (0=Low, 1=Medium, 2=High, 3=VeryHigh; recommended: 1 for big GPU FPS gain).")]
+        public static int MaxShadowResolution = 1;
+
+        [ConfigComment("Maximum pixel light count when SmartQualityCaps is enabled (vanilla Highest=4; recommended: 2).")]
+        public static int MaxPixelLightCount = 2;
+
+        [ConfigComment("Maximum global Shader.globalMaximumLOD when SmartQualityCaps is enabled (-1 = unchanged; 900=High, 700=Medium, 400=Low).")]
+        public static int MaxGlobalShaderLod = -1;
+
+        [ConfigComment("Apply per-layer camera cull distances and a smart farClipPlane cap to skip rendering distant small actors.")]
+        public static bool EnableCameraLayerCull = true;
+
+        [ConfigComment("Cull distance (in meters) for Actor/ActorEchoes/ActorIgnorePlayer/Launched layers (slimes/plorts/food far beyond sight; 0 = disabled).")]
+        public static float LayerActorCullDistance = 95f;
+
+        [ConfigComment("Maximum camera farClipPlane in meters (0 = unchanged; recommended: 450 to trim distant fogged geometry).")]
+        public static float MaxFarClipPlane = 450f;
+
         [ConfigComment("Slow down AI rethink and ground-raycast frequency for distant slimes (>= 24m) to save CPU in large ranches.")]
         public static bool EnableSlimeAiLod = true;
 
@@ -76,6 +94,12 @@ namespace SlimeOptimizer
 
         [ConfigComment("Multiplier applied to grass-only LODGroup transition heights (>1.0 switches grass to lighter LODs sooner; 1.0 = unchanged).")]
         public static float GrassLodMultiplier = 1.5f;
+
+        [ConfigComment("Cap shader.maximumLOD specifically on grass/foliage shaders to disable expensive vertex wind waving while keeping water/world shaders at max.")]
+        public static bool DisableGrassWindShader = true;
+
+        [ConfigComment("Shader LOD cap applied to grass shaders when DisableGrassWindShader is true (400 matches Low shaders).")]
+        public static int GrassShaderMaxLod = 400;
 
         [ConfigComment("Cache slime face renderer Material[] arrays and skip no-op expression assignments (eliminates GC spikes).")]
         public static bool EnableExpressionCache = true;
