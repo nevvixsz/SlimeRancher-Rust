@@ -2,6 +2,6 @@
   "id": "slimeoptimizer",
   "name": "SlimeOptimizer",
   "author": "nevvixsz",
-  "version": "0.1.0",
-  "description": "High-impact FPS and GC optimizations for Slime Rancher: RubberBone distance LOD, zero-GC slime face material cache, and hot-loop patches."
+  "version": "0.2.0",
+  "description": "High-impact FPS and GC optimizations for Slime Rancher: RubberBone LOD, slime shadow/skinning LOD, smart shadow/MSAA caps, zero-GC expression cache, and hot-loop patches."
 }
