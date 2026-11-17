@@ -1,13 +1,18 @@
+# Build outputs
 bin/
 obj/
 .vs/
 .idea/
 *.user
 *.suo
-*.log
-.DS_Store
+*.sln.docstates
+SlimeOptimizer/Directory.Build.props
+
+# Local game DLLs and reference copies
 libs/*.dll
-!libs/README.md
 /local_ref/
 /local_assets/
-/Unselected files/
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db

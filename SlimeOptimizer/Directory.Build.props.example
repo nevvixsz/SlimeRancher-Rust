@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Copy this file to Directory.Build.props and set your Slime Rancher installation folder -->
+    <SlimeRancherDir>C:\Program Files (x86)\Steam\steamapps\common\Slime Rancher</SlimeRancherDir>
+  </PropertyGroup>
+</Project>
