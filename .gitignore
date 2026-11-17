@@ -1,7 +1,13 @@
-/target/
-**/*.rs.bk
-.DS_Store
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
 *.log
+.DS_Store
+libs/*.dll
+!libs/README.md
 /local_ref/
 /local_assets/
 /Unselected files/
