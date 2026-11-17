@@ -2,6 +2,7 @@ using System.Reflection;
 using SRML;
 using SRML.Console;
 using SlimeOptimizer.Commands;
+using SlimeOptimizer.Patches;
 
 namespace SlimeOptimizer
 {
@@ -14,7 +15,17 @@ namespace SlimeOptimizer
             Logger = ConsoleInstance;
             HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
             Console.RegisterCommand(new SlimeOptCommand());
-            Logger?.LogSuccess("SlimeOptimizer initialized (Harmony patches applied). Use 'slimeopt' in console.");
+            Logger?.LogSuccess("SlimeOptimizer v0.2.0 pre-loaded (Harmony patches applied). Use 'slimeopt' in console.");
+        }
+
+        public override void Load()
+        {
+            QualityCapsPatch.Install(HarmonyInstance);
+        }
+
+        public override void PostLoad()
+        {
+            QualityCapsPatch.ApplyCapsIfEnabled();
         }
 
         public override void Update()

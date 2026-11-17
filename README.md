@@ -2,64 +2,60 @@
 
 Мод оптимизации производительности и снижения микрофризов (GC) для **Slime Rancher** на базе **SRML** (`0.2.1.0+`) и **Harmony**.
 
-## Что включено
+## Что включено (v0.2.0)
 
-1. **RubberBone LOD (`RubberBoneLodPatch`)** — главный прирост FPS на ранчо:
-   - Вблизи (`< 18 м`) и при захвате вакпаком желе-физика работает на полной частоте без изменений.
-   - В средней зоне (`18–36 м`) обновление желе переводится на каждый `N`-й кадр (по умолчанию `3`), с равномерным распределением слаймов по кадрам.
-   - Дальше `36 м` кости один раз сбрасываются в покой (`Reset()`), и `RubberBoneEffect.LateUpdate` пропускается до приближения игрока.
-2. **Кэш материалов лица слаймов (`ExpressionCachePatch`)** — убирает покадровый GC-мусор при моргании и смене эмоций:
-   - Переиспользует кэшированный `Material[]` на `Renderer` и не переприсваивает `sharedMaterials`, если ссылки `Eyes`/`Mouth` не изменились.
-   - Автоматически сбрасывает кэш при `ClearAppearance()` (поддержка пула объектов и переключения Secret Style).
-3. **Пул списка в `PlortCollector.Update` (`PlortCollectorPatch`)** — Harmony-транспайлер (совместимый с `PlortCollectorUpdatePatch` из SRML), убирающий создание `new List<JointReference>()` на каждом кадре во время сбора плортов.
-4. **Быстрый подсчёт в `CellDirector.Update` (`CellDirectorPatch`)** — замена LINQ `.Count<Entry>()` на прямое чтение `ICollection.Count`.
-5. **Пул `List<Collider>` и быстрый выход в `TrackCollisions` (`TrackCollisionsPatch`)** — переиспользование списков коллайдеров и ранний возврат при пустом триггере.
-6. **Кэш камеры для билбордов (`BillboardCachePatch`)** — замена повторных поисков `Camera.main` в `CameraFacingBillboard` на кэш раз в кадр (`CameraCache`).
+### GPU / Рендеринг (против просадок на общем виде ранчо)
+1. **Slime Render LOD (`RubberBoneLodPatch`)**:
+   - На дистанции `>= 18 м` переключает скиннинг дальних слаймов на 1-костный (`SkinQuality.Bone1`).
+   - На дистанции `>= 24 м` отключает отбрасывание теней дальними слаймами (вблизи и в вакпаке тени и полный скиннинг возвращаются автоматически).
+2. **Отключение теней у мелких объектов (`SmallActorShadowPatch`)**:
+   - Отключает отбрасывание теней у плортов, овощей, фруктов, мяса, цыплят и крафт-ресурсов при спавне — резко снижает нагрузку в картах теней на ранчо.
+3. **Умные лимиты теней и MSAA (`QualityCapsPatch`)**:
+   - На максимальных настройках игра ставит `4` каскада теней, `150 м` дальности теней и `8x MSAA`.
+   - По умолчанию мод оставляет максимальные шейдеры, текстуры, объёмный свет, SSAO и Bloom, но ограничивает потолок до `2` каскадов, `85 м` и `2x MSAA` (все пороги настраиваются в `.ini`, можно мгновенно переключать на лету командой `slimeopt toggle qcaps`).
+
+### CPU / GC (против лагов и статтеров от сотни слаймов)
+4. **RubberBone LOD (`RubberBoneLodPatch`)** — дистанционный LOD и усыпление желе-физики костей (`< 10 м` 100%, `10–20 м` раз в 3 кадра, `>= 20 м` `Reset()` + пропуск).
+5. **Кэш материалов лица (`ExpressionCachePatch`)** — убирает покадровый GC-мусор `Material[]` в `SlimeAppearanceApplicator.SetExpression()`.
+6. **Пул списка в `PlortCollector.Update` (`PlortCollectorPatch`)** — Harmony-транспайлер (совместимый с SRML), переиспользующий один `List<JointReference>`.
+7. **Быстрый подсчёт в `CellDirector.Update` (`CellDirectorPatch`)** — замена LINQ `.Count<Entry>()` на `ICollection.Count`.
+8. **Пул `List<Collider>` и быстрый выход в `TrackCollisions` (`TrackCollisionsPatch`)**.
+9. **Кэш камеры для билбордов (`BillboardCachePatch`)** и **кэш компонентов камеры (`DisableEffectsCachePatch`)** в `DisableEffectsOnLowQuality`.
+10. **Кэш делегата `Action<RaycastHit>` (`SlimePlexerCachePatch`)** в `SlimeSubbehaviourPlexer.RegistryFixedUpdate()`.
 
 ---
 
 ## Как собрать (Windows)
 
-Требуются установленные **Slime Rancher** с **SRML** и **.NET SDK** (например, .NET 6/8 SDK) или Visual Studio / MSBuild.
+```powershell
+git pull
+dotnet build SlimeOptimizer\SlimeOptimizer.csproj -c Release -p:SlimeRancherDir="D:\Slime Rancher"
+```
 
-1. Клонируйте или обновите репозиторий:
-   ```powershell
-   git pull
-   ```
-2. Укажите путь к папке с игрой одним из способов:
-   - **Вариант A (через файл):** скопируйте `SlimeOptimizer\Directory.Build.props.example` в `SlimeOptimizer\Directory.Build.props` (в `.gitignore`) и впишите свой путь в `<SlimeRancherDir>`.
-   - **Вариант B (параметром в терминале):** передайте путь напрямую при сборке:
-     ```powershell
-     dotnet build SlimeOptimizer\SlimeOptimizer.csproj -c Release -p:SlimeRancherDir="D:\Games\Slime Rancher"
-     ```
-3. Готовый мод (один файл с вшитым `modinfo.json`) появится по пути:
-   ```text
-   SlimeOptimizer\bin\Release\SlimeOptimizer.dll
-   ```
+Готовый файл (один DLL со вшитым `modinfo.json`):
+`SlimeOptimizer\bin\Release\SlimeOptimizer.dll`
 
 ---
 
 ## Как установить
 
-1. Убедитесь, что в папке с игрой установлен **SRML** (в `SlimeRancher_Data\Managed\` есть `SRML.dll` и `0Harmony.dll`).
-2. Скопируйте `SlimeOptimizer.dll` в папку:
-   ```text
-   <Папка с игрой>\SRML\Mods\SlimeOptimizer.dll
-   ```
-3. Запустите игру. В логе/консоли SRML появится:
-   `SlimeOptimizer initialized (Harmony patches applied). Use 'slimeopt' in console.`
+Скопируйте `SlimeOptimizer.dll` в:
+```text
+<Папка с игрой>\SRML\Mods\SlimeOptimizer.dll
+```
 
 ---
 
-## Консольные команды и настройка
+## Консоль и конфиг
 
-Откройте консоль SRML в игре (`Ctrl + Tab` или `~` в зависимости от раскладки) и введите:
-
-- `slimeopt status` — какие модули активны и текущие пороги LOD
-- `slimeopt stats` — сколько вызовов и аллокаций сэкономлено с момента запуска
+В консоли SRML (`Ctrl + Tab` или `~`):
+- `slimeopt status` — активные модули, пороги и текущие `QualitySettings` (`cascades`, `dist`, `MSAA`)
+- `slimeopt stats` — статистика сэкономленных вызовов и аллокаций
+- `slimeopt toggle <module>` — включить/выключить на лету (`rubber`, `renderlod`, `smallshadows`, `qcaps`, `expr`, `plort`, `cell`, `collisions`, `billboard`, `effects`, `plexer`, `stats`)
 - `slimeopt reset` — обнулить счётчики
-- `slimeopt toggle rubber` (или `expr`, `plort`, `cell`, `collisions`, `billboard`, `stats`) — мгновенно включать/выключать конкретный патч прямо в игре для замера разницы FPS
 
-Файл конфигурации создаётся автоматически после первого запуска игры в:
+Файл конфигурации:
 `%UserProfile%\AppData\LocalLow\Monomi Park\Slime Rancher\SRML\Config\slimeoptimizer\SlimeOptimizer.ini`
-(там можно подкрутить `RubberLodDistance`, `RubberDisableDistance`, `RubberLodInterval` и тумблеры патчей).
+
+Лог SRML:
+`%UserProfile%\AppData\LocalLow\Monomi Park\Slime Rancher\SRML\srml.log`

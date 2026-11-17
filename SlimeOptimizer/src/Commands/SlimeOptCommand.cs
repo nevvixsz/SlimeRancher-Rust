@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using SRML.Console;
+using SlimeOptimizer.Patches;
 
 namespace SlimeOptimizer.Commands
 {
@@ -16,11 +17,16 @@ namespace SlimeOptimizer.Commands
         private static readonly List<string> Modules = new List<string>
         {
             "rubber",
+            "renderlod",
+            "smallshadows",
+            "qcaps",
             "expr",
             "plort",
             "cell",
             "collisions",
             "billboard",
+            "effects",
+            "plexer",
             "stats"
         };
 
@@ -32,10 +38,10 @@ namespace SlimeOptimizer.Commands
 
         public override string ExtendedDescription =>
             "Subcommands:\n" +
-            "  status              - Show active modules and RubberBone LOD thresholds\n" +
+            "  status              - Show active modules and LOD/quality thresholds\n" +
             "  stats               - Show saved calls and avoided GC allocations\n" +
             "  reset               - Reset statistics counters\n" +
-            "  toggle <module>     - Toggle: rubber, expr, plort, cell, collisions, billboard, stats";
+            "  toggle <module>     - Toggle: rubber, renderlod, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
 
         public override List<string> GetAutoComplete(int argIndex, string argText)
         {
@@ -71,7 +77,7 @@ namespace SlimeOptimizer.Commands
                 case "toggle":
                     if (args.Length < 2)
                     {
-                        LogWarn("Usage: slimeopt toggle <rubber|expr|plort|cell|collisions|billboard|stats>");
+                        LogWarn("Usage: slimeopt toggle <rubber|renderlod|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
                         return false;
                     }
                     return ToggleModule(args[1].ToLowerInvariant());
@@ -88,6 +94,20 @@ namespace SlimeOptimizer.Commands
                 case "rubber":
                     OptimizerConfig.EnableRubberBoneLod = !OptimizerConfig.EnableRubberBoneLod;
                     Log("RubberBoneLod = " + OptimizerConfig.EnableRubberBoneLod);
+                    return true;
+                case "renderlod":
+                    OptimizerConfig.EnableSlimeRenderLod = !OptimizerConfig.EnableSlimeRenderLod;
+                    Log("SlimeRenderLod = " + OptimizerConfig.EnableSlimeRenderLod);
+                    return true;
+                case "smallshadows":
+                    OptimizerConfig.EnableSmallObjectShadowCull = !OptimizerConfig.EnableSmallObjectShadowCull;
+                    Log("SmallObjectShadowCull = " + OptimizerConfig.EnableSmallObjectShadowCull + " (applies to newly spawned actors)");
+                    return true;
+                case "qcaps":
+                    OptimizerConfig.EnableSmartQualityCaps = !OptimizerConfig.EnableSmartQualityCaps;
+                    QualityCapsPatch.ReapplyQualitySettings();
+                    Log("SmartQualityCaps = " + OptimizerConfig.EnableSmartQualityCaps +
+                        $" (cascades={UnityEngine.QualitySettings.shadowCascades}, dist={UnityEngine.QualitySettings.shadowDistance}m, MSAA={UnityEngine.QualitySettings.antiAliasing}x)");
                     return true;
                 case "expr":
                     OptimizerConfig.EnableExpressionCache = !OptimizerConfig.EnableExpressionCache;
@@ -109,12 +129,20 @@ namespace SlimeOptimizer.Commands
                     OptimizerConfig.EnableBillboardCameraCache = !OptimizerConfig.EnableBillboardCameraCache;
                     Log("BillboardCameraCache = " + OptimizerConfig.EnableBillboardCameraCache);
                     return true;
+                case "effects":
+                    OptimizerConfig.EnableEffectsComponentCache = !OptimizerConfig.EnableEffectsComponentCache;
+                    Log("EffectsComponentCache = " + OptimizerConfig.EnableEffectsComponentCache);
+                    return true;
+                case "plexer":
+                    OptimizerConfig.EnablePlexerDelegateCache = !OptimizerConfig.EnablePlexerDelegateCache;
+                    Log("PlexerDelegateCache = " + OptimizerConfig.EnablePlexerDelegateCache);
+                    return true;
                 case "stats":
                     OptimizerConfig.EnableStatsCollection = !OptimizerConfig.EnableStatsCollection;
                     Log("StatsCollection = " + OptimizerConfig.EnableStatsCollection);
                     return true;
                 default:
-                    LogWarn("Unknown module '" + module + "'. Available: rubber, expr, plort, cell, collisions, billboard, stats");
+                    LogWarn("Unknown module '" + module + "'.");
                     return false;
             }
         }
@@ -122,13 +150,18 @@ namespace SlimeOptimizer.Commands
         private static void LogStatus()
         {
             Log(
-                "SlimeOptimizer Status:\n" +
+                "SlimeOptimizer v0.2.0 Status:\n" +
                 $"  RubberBoneLOD:      {OptimizerConfig.EnableRubberBoneLod} (LOD >= {OptimizerConfig.RubberLodDistance}m every {OptimizerConfig.RubberLodInterval} frames, Cull >= {OptimizerConfig.RubberDisableDistance}m)\n" +
+                $"  SlimeRenderLOD:     {OptimizerConfig.EnableSlimeRenderLod} (Skin1 >= {OptimizerConfig.SlimeSkinLodDistance}m, NoShadow >= {OptimizerConfig.SlimeShadowCullDistance}m)\n" +
+                $"  SmallShadowCull:    {OptimizerConfig.EnableSmallObjectShadowCull}\n" +
+                $"  SmartQualityCaps:   {OptimizerConfig.EnableSmartQualityCaps} (now: cascades={UnityEngine.QualitySettings.shadowCascades}, dist={UnityEngine.QualitySettings.shadowDistance}m, MSAA={UnityEngine.QualitySettings.antiAliasing}x)\n" +
                 $"  ExpressionCache:    {OptimizerConfig.EnableExpressionCache}\n" +
                 $"  PlortCollectorPool: {OptimizerConfig.EnablePlortCollectorPool}\n" +
                 $"  CellDirectorCount:  {OptimizerConfig.EnableCellDirectorFastCount}\n" +
                 $"  TrackCollisionsPool:{OptimizerConfig.EnableTrackCollisionsPool}\n" +
                 $"  BillboardCache:     {OptimizerConfig.EnableBillboardCameraCache}\n" +
+                $"  EffectsCache:       {OptimizerConfig.EnableEffectsComponentCache}\n" +
+                $"  PlexerDelegateCache:{OptimizerConfig.EnablePlexerDelegateCache}\n" +
                 $"  StatsCollection:    {OptimizerConfig.EnableStatsCollection}"
             );
         }
@@ -137,15 +170,22 @@ namespace SlimeOptimizer.Commands
         {
             Log(
                 "SlimeOptimizer Saved Work:\n" +
+                $"  RubberBone active (near/full):    {OptimizerStats.RubberActiveCalls}\n" +
+                $"  RubberBone LOD0 hidden (LOD1+):   {OptimizerStats.RubberNotVisibleCalls}\n" +
                 $"  RubberBone culled calls:          {OptimizerStats.RubberCulledCalls}\n" +
                 $"  RubberBone LOD skipped frames:    {OptimizerStats.RubberSkippedFrames}\n" +
+                $"  Slime shadow LOD switches:        {OptimizerStats.SlimeShadowChanges}\n" +
+                $"  Slime skinning LOD switches:      {OptimizerStats.SlimeSkinLodChanges}\n" +
+                $"  Small actor shadows culled:       {OptimizerStats.SmallActorShadowsCulled}\n" +
                 $"  Expression no-ops skipped:        {OptimizerStats.ExpressionNoOpsAvoided}\n" +
                 $"  Expression Material[] avoided:    {OptimizerStats.ExpressionArrayAllocsAvoided}\n" +
                 $"  PlortCollector lists reused:      {OptimizerStats.PlortCollectorListsReused}\n" +
                 $"  CellDirector LINQ Count avoided:  {OptimizerStats.LinqCallsAvoided}\n" +
                 $"  TrackCollisions empty fast-paths: {OptimizerStats.TrackCollisionsEmptyFastPaths}\n" +
                 $"  TrackCollisions lists reused:     {OptimizerStats.ColliderListsReused}\n" +
-                $"  Billboard Camera.main hits saved: {OptimizerStats.BillboardCacheHits}"
+                $"  Billboard Camera.main hits saved: {OptimizerStats.BillboardCacheHits}\n" +
+                $"  Effects GetComponent avoided:     {OptimizerStats.EffectsGetComponentsAvoided}\n" +
+                $"  Plexer Raycast delegates reused:  {OptimizerStats.PlexerDelegatesReused}"
             );
         }
 
