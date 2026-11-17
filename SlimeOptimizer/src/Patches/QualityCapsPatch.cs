@@ -54,6 +54,12 @@ namespace SlimeOptimizer.Patches
             {
                 QualitySettings.antiAliasing = maxAa;
             }
+
+            float maxLodBias = OptimizerConfig.MaxLodBias;
+            if (maxLodBias > 0f && QualitySettings.lodBias > maxLodBias)
+            {
+                QualitySettings.lodBias = maxLodBias;
+            }
         }
 
         public static void ReapplyQualitySettings()

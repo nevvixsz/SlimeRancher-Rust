@@ -15,7 +15,7 @@ namespace SlimeOptimizer
             Logger = ConsoleInstance;
             HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
             Console.RegisterCommand(new SlimeOptCommand());
-            Logger?.LogSuccess("SlimeOptimizer v0.2.0 pre-loaded (Harmony patches applied). Use 'slimeopt' in console.");
+            Logger?.LogSuccess("SlimeOptimizer v0.3.0 pre-loaded (Harmony patches applied). Use 'slimeopt' in console.");
         }
 
         public override void Load()
@@ -26,6 +26,7 @@ namespace SlimeOptimizer
         public override void PostLoad()
         {
             QualityCapsPatch.ApplyCapsIfEnabled();
+            GrassOptimizerPatch.Initialize();
         }
 
         public override void Update()

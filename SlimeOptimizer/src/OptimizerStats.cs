@@ -18,6 +18,12 @@ namespace SlimeOptimizer
         public static long BillboardCacheHits;
         public static long EffectsGetComponentsAvoided;
         public static long PlexerDelegatesReused;
+        public static long SlimeAiSlowedRethinks;
+        public static long SlimeAiSlowedGroundChecks;
+        public static long FastFoodSearches;
+        public static long FastFoodEntriesScanned;
+        public static long GrassShadowsDisabled;
+        public static long GrassLodGroupsAdjusted;
 
         public static void Reset()
         {
@@ -37,6 +43,12 @@ namespace SlimeOptimizer
             BillboardCacheHits = 0;
             EffectsGetComponentsAvoided = 0;
             PlexerDelegatesReused = 0;
+            SlimeAiSlowedRethinks = 0;
+            SlimeAiSlowedGroundChecks = 0;
+            FastFoodSearches = 0;
+            FastFoodEntriesScanned = 0;
+            GrassShadowsDisabled = 0;
+            GrassLodGroupsAdjusted = 0;
         }
     }
 }
