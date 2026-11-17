@@ -170,6 +170,8 @@ namespace SlimeOptimizer.Commands
         {
             Log(
                 "SlimeOptimizer Saved Work:\n" +
+                $"  RubberBone active (near/full):    {OptimizerStats.RubberActiveCalls}\n" +
+                $"  RubberBone LOD0 hidden (LOD1+):   {OptimizerStats.RubberNotVisibleCalls}\n" +
                 $"  RubberBone culled calls:          {OptimizerStats.RubberCulledCalls}\n" +
                 $"  RubberBone LOD skipped frames:    {OptimizerStats.RubberSkippedFrames}\n" +
                 $"  Slime shadow LOD switches:        {OptimizerStats.SlimeShadowChanges}\n" +

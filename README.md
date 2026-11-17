@@ -15,7 +15,7 @@
    - По умолчанию мод оставляет максимальные шейдеры, текстуры, объёмный свет, SSAO и Bloom, но ограничивает потолок до `2` каскадов, `85 м` и `2x MSAA` (все пороги настраиваются в `.ini`, можно мгновенно переключать на лету командой `slimeopt toggle qcaps`).
 
 ### CPU / GC (против лагов и статтеров от сотни слаймов)
-4. **RubberBone LOD (`RubberBoneLodPatch`)** — дистанционный LOD и усыпление желе-физики костей (`< 18 м` 100%, `18–36 м` раз в 3 кадра, `>= 36 м` `Reset()` + пропуск).
+4. **RubberBone LOD (`RubberBoneLodPatch`)** — дистанционный LOD и усыпление желе-физики костей (`< 10 м` 100%, `10–20 м` раз в 3 кадра, `>= 20 м` `Reset()` + пропуск).
 5. **Кэш материалов лица (`ExpressionCachePatch`)** — убирает покадровый GC-мусор `Material[]` в `SlimeAppearanceApplicator.SetExpression()`.
 6. **Пул списка в `PlortCollector.Update` (`PlortCollectorPatch`)** — Harmony-транспайлер (совместимый с SRML), переиспользующий один `List<JointReference>`.
 7. **Быстрый подсчёт в `CellDirector.Update` (`CellDirectorPatch`)** — замена LINQ `.Count<Entry>()` на `ICollection.Count`.

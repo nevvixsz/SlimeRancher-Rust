@@ -2,6 +2,8 @@ namespace SlimeOptimizer
 {
     public static class OptimizerStats
     {
+        public static long RubberActiveCalls;
+        public static long RubberNotVisibleCalls;
         public static long RubberCulledCalls;
         public static long RubberSkippedFrames;
         public static long SlimeShadowChanges;
@@ -19,6 +21,8 @@ namespace SlimeOptimizer
 
         public static void Reset()
         {
+            RubberActiveCalls = 0;
+            RubberNotVisibleCalls = 0;
             RubberCulledCalls = 0;
             RubberSkippedFrames = 0;
             SlimeShadowChanges = 0;

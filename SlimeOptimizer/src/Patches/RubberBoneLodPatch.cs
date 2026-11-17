@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
@@ -8,17 +9,100 @@ namespace SlimeOptimizer.Patches
     [HarmonyPatch(typeof(RubberBoneEffect), "LateUpdate")]
     internal static class RubberBoneLodPatch
     {
-        private sealed class RenderLodState
+        private sealed class RendererEntry
         {
-            public bool Initialized;
+            public Renderer Renderer;
+            public SkinnedMeshRenderer SkinnedRenderer;
             public ShadowCastingMode OriginalShadowMode;
             public SkinQuality OriginalSkinQuality;
             public bool ShadowsDisabled;
             public bool ReducedSkinning;
         }
 
-        private static readonly ConditionalWeakTable<Renderer, RenderLodState> RenderStates =
-            new ConditionalWeakTable<Renderer, RenderLodState>();
+        private sealed class SlimeRenderGroup
+        {
+            public RendererEntry[] Entries;
+        }
+
+        private static readonly ConditionalWeakTable<RubberBoneEffect, SlimeRenderGroup> Groups =
+            new ConditionalWeakTable<RubberBoneEffect, SlimeRenderGroup>();
+
+        private static readonly List<RendererEntry> BuildBuffer = new List<RendererEntry>(16);
+        private static readonly HashSet<Renderer> SeenRenderers = new HashSet<Renderer>();
+
+        internal static void RegisterApplicator(SlimeAppearanceApplicator applicator)
+        {
+            if (applicator == null || applicator.RootAppearanceObject == null || applicator.LODGroup == null)
+            {
+                return;
+            }
+
+            RubberBoneEffect rbe = applicator.RootAppearanceObject.GetComponent<RubberBoneEffect>();
+            if (rbe == null)
+            {
+                return;
+            }
+
+            BuildBuffer.Clear();
+            SeenRenderers.Clear();
+
+            LOD[] lods = applicator.LODGroup.GetLODs();
+            if (lods != null)
+            {
+                for (int i = 0; i < lods.Length; i++)
+                {
+                    Renderer[] renderers = lods[i].renderers;
+                    if (renderers == null)
+                    {
+                        continue;
+                    }
+
+                    for (int j = 0; j < renderers.Length; j++)
+                    {
+                        Renderer r = renderers[j];
+                        if (r != null && SeenRenderers.Add(r))
+                        {
+                            SkinnedMeshRenderer smr = r as SkinnedMeshRenderer;
+                            BuildBuffer.Add(new RendererEntry
+                            {
+                                Renderer = r,
+                                SkinnedRenderer = smr,
+                                OriginalShadowMode = r.shadowCastingMode,
+                                OriginalSkinQuality = smr != null ? smr.quality : SkinQuality.Auto
+                            });
+                        }
+                    }
+                }
+            }
+
+            if (BuildBuffer.Count > 0)
+            {
+                if (!Groups.TryGetValue(rbe, out SlimeRenderGroup group))
+                {
+                    group = new SlimeRenderGroup();
+                    Groups.Add(rbe, group);
+                }
+                group.Entries = BuildBuffer.ToArray();
+            }
+
+            BuildBuffer.Clear();
+            SeenRenderers.Clear();
+        }
+
+        internal static void ClearApplicator(SlimeAppearanceApplicator applicator)
+        {
+            if (applicator == null || applicator.RootAppearanceObject == null)
+            {
+                return;
+            }
+
+            RubberBoneEffect rbe = applicator.RootAppearanceObject.GetComponent<RubberBoneEffect>();
+            if (rbe != null && Groups.TryGetValue(rbe, out SlimeRenderGroup group) && group.Entries != null)
+            {
+                RestoreGroup(group);
+                group.Entries = null;
+            }
+        }
 
         [HarmonyPrefix]
         private static bool Prefix(
@@ -31,7 +115,7 @@ namespace SlimeOptimizer.Patches
             ref bool ___wasSleeping)
         {
             bool rubberEnabled = OptimizerConfig.EnableRubberBoneLod && ___verts != null;
-            bool renderLodEnabled = OptimizerConfig.EnableSlimeRenderLod && ___ownRenderer != null;
+            bool renderLodEnabled = OptimizerConfig.EnableSlimeRenderLod;
 
             if (!rubberEnabled && !renderLodEnabled)
             {
@@ -43,45 +127,58 @@ namespace SlimeOptimizer.Patches
             {
                 if (renderLodEnabled)
                 {
-                    RestoreRenderLod(___ownRenderer);
+                    RestoreForEffect(__instance, ___ownRenderer);
                 }
+                if (OptimizerConfig.EnableStatsCollection)
+                {
+                    OptimizerStats.RubberActiveCalls++;
+                }
+                return true;
+            }
+
+            CameraCache.EnsureCurrentFrame();
+            bool hasCamera = CameraCache.HasCamera;
+            float sqrDist = 0f;
+            if (hasCamera)
+            {
+                Vector3 pos = __instance.transform.position;
+                Vector3 cam = CameraCache.Position;
+                float dx = pos.x - cam.x;
+                float dy = pos.y - cam.y;
+                float dz = pos.z - cam.z;
+                sqrDist = dx * dx + dy * dy + dz * dz;
+
+                if (((__instance.GetInstanceID() + Time.frameCount) & 7) == 0)
+                {
+                    if (renderLodEnabled)
+                    {
+                        ApplyForEffect(__instance, ___ownRenderer, sqrDist);
+                    }
+                    else
+                    {
+                        RestoreForEffect(__instance, ___ownRenderer);
+                    }
+                }
+            }
+
+            if (!rubberEnabled)
+            {
                 return true;
             }
 
             bool bodySleeping = ___ownBody != null && ___ownBody.IsSleeping();
             bool isVisible = ___ownRenderer == null || ___ownRenderer.isVisible;
 
-            if (!isVisible)
+            if (bodySleeping || !isVisible)
             {
+                if (!isVisible && OptimizerConfig.EnableStatsCollection)
+                {
+                    OptimizerStats.RubberNotVisibleCalls++;
+                }
                 return true;
             }
 
-            CameraCache.EnsureCurrentFrame();
-            if (!CameraCache.HasCamera)
-            {
-                return true;
-            }
-
-            Vector3 pos = __instance.transform.position;
-            Vector3 cam = CameraCache.Position;
-            float dx = pos.x - cam.x;
-            float dy = pos.y - cam.y;
-            float dz = pos.z - cam.z;
-            float sqrDist = dx * dx + dy * dy + dz * dz;
-
-            if (___ownRenderer != null && (((__instance.GetInstanceID() + Time.frameCount) & 7) == 0))
-            {
-                if (OptimizerConfig.EnableSlimeRenderLod)
-                {
-                    ApplyRenderLod(___ownRenderer, sqrDist);
-                }
-                else
-                {
-                    RestoreRenderLod(___ownRenderer);
-                }
-            }
-
-            if (!rubberEnabled || bodySleeping)
+            if (!hasCamera)
             {
                 return true;
             }
@@ -120,45 +217,80 @@ namespace SlimeOptimizer.Patches
                 }
             }
 
+            if (OptimizerConfig.EnableStatsCollection)
+            {
+                OptimizerStats.RubberActiveCalls++;
+            }
+
             return true;
         }
 
-        private static void ApplyRenderLod(Renderer renderer, float sqrDist)
+        private static SlimeRenderGroup GetOrCreateFallbackGroup(RubberBoneEffect rbe, Renderer fallbackRenderer)
         {
-            if (!RenderStates.TryGetValue(renderer, out RenderLodState state))
+            if (!Groups.TryGetValue(rbe, out SlimeRenderGroup group))
             {
-                state = new RenderLodState();
-                RenderStates.Add(renderer, state);
+                if (fallbackRenderer == null)
+                {
+                    return null;
+                }
+
+                SkinnedMeshRenderer smr = fallbackRenderer as SkinnedMeshRenderer;
+                group = new SlimeRenderGroup
+                {
+                    Entries = new[]
+                    {
+                        new RendererEntry
+                        {
+                            Renderer = fallbackRenderer,
+                            SkinnedRenderer = smr,
+                            OriginalShadowMode = fallbackRenderer.shadowCastingMode,
+                            OriginalSkinQuality = smr != null ? smr.quality : SkinQuality.Auto
+                        }
+                    }
+                };
+                Groups.Add(rbe, group);
             }
 
-            SkinnedMeshRenderer smr = renderer as SkinnedMeshRenderer;
-            if (!state.Initialized)
+            return group;
+        }
+
+        private static void ApplyForEffect(RubberBoneEffect rbe, Renderer fallbackRenderer, float sqrDist)
+        {
+            SlimeRenderGroup group = GetOrCreateFallbackGroup(rbe, fallbackRenderer);
+            if (group == null || group.Entries == null)
             {
-                state.OriginalShadowMode = renderer.shadowCastingMode;
-                state.OriginalSkinQuality = smr != null ? smr.quality : SkinQuality.Auto;
-                state.Initialized = true;
+                return;
             }
 
             float shadowDist = OptimizerConfig.SlimeShadowCullDistance;
             bool shouldCullShadow = shadowDist > 0f && sqrDist >= shadowDist * shadowDist;
-            if (shouldCullShadow != state.ShadowsDisabled)
-            {
-                renderer.shadowCastingMode = shouldCullShadow ? ShadowCastingMode.Off : state.OriginalShadowMode;
-                state.ShadowsDisabled = shouldCullShadow;
-                if (OptimizerConfig.EnableStatsCollection)
-                {
-                    OptimizerStats.SlimeShadowChanges++;
-                }
-            }
 
-            if (smr != null)
+            float skinDist = OptimizerConfig.SlimeSkinLodDistance;
+            bool shouldReduceSkin = skinDist > 0f && sqrDist >= skinDist * skinDist;
+
+            RendererEntry[] entries = group.Entries;
+            for (int i = 0; i < entries.Length; i++)
             {
-                float skinDist = OptimizerConfig.SlimeSkinLodDistance;
-                bool shouldReduceSkin = skinDist > 0f && sqrDist >= skinDist * skinDist;
-                if (shouldReduceSkin != state.ReducedSkinning)
+                RendererEntry entry = entries[i];
+                if (entry.Renderer == null)
                 {
-                    smr.quality = shouldReduceSkin ? SkinQuality.Bone1 : state.OriginalSkinQuality;
-                    state.ReducedSkinning = shouldReduceSkin;
+                    continue;
+                }
+
+                if (shouldCullShadow != entry.ShadowsDisabled)
+                {
+                    entry.Renderer.shadowCastingMode = shouldCullShadow ? ShadowCastingMode.Off : entry.OriginalShadowMode;
+                    entry.ShadowsDisabled = shouldCullShadow;
+                    if (OptimizerConfig.EnableStatsCollection)
+                    {
+                        OptimizerStats.SlimeShadowChanges++;
+                    }
+                }
+
+                if (entry.SkinnedRenderer != null && shouldReduceSkin != entry.ReducedSkinning)
+                {
+                    entry.SkinnedRenderer.quality = shouldReduceSkin ? SkinQuality.Bone1 : entry.OriginalSkinQuality;
+                    entry.ReducedSkinning = shouldReduceSkin;
                     if (OptimizerConfig.EnableStatsCollection)
                     {
                         OptimizerStats.SlimeSkinLodChanges++;
@@ -167,24 +299,61 @@ namespace SlimeOptimizer.Patches
             }
         }
 
-        private static void RestoreRenderLod(Renderer renderer)
+        private static void RestoreForEffect(RubberBoneEffect rbe, Renderer fallbackRenderer)
         {
-            if (renderer == null || !RenderStates.TryGetValue(renderer, out RenderLodState state) || !state.Initialized)
+            if (Groups.TryGetValue(rbe, out SlimeRenderGroup group) && group.Entries != null)
             {
+                RestoreGroup(group);
                 return;
             }
 
-            if (state.ShadowsDisabled)
+            if (fallbackRenderer != null)
             {
-                renderer.shadowCastingMode = state.OriginalShadowMode;
-                state.ShadowsDisabled = false;
+                // Nothing modified yet if not in Groups
             }
+        }
 
-            if (state.ReducedSkinning && renderer is SkinnedMeshRenderer smr)
+        private static void RestoreGroup(SlimeRenderGroup group)
+        {
+            RendererEntry[] entries = group.Entries;
+            for (int i = 0; i < entries.Length; i++)
             {
-                smr.quality = state.OriginalSkinQuality;
-                state.ReducedSkinning = false;
+                RendererEntry entry = entries[i];
+                if (entry.Renderer == null)
+                {
+                    continue;
+                }
+
+                if (entry.ShadowsDisabled)
+                {
+                    entry.Renderer.shadowCastingMode = entry.OriginalShadowMode;
+                    entry.ShadowsDisabled = false;
+                }
+
+                if (entry.ReducedSkinning && entry.SkinnedRenderer != null)
+                {
+                    entry.SkinnedRenderer.quality = entry.OriginalSkinQuality;
+                    entry.ReducedSkinning = false;
+                }
             }
+        }
+    }
+
+    [HarmonyPatch(typeof(SlimeAppearanceApplicator))]
+    internal static class SlimeAppearanceLodTrackerPatch
+    {
+        [HarmonyPatch("ApplyAppearance")]
+        [HarmonyPostfix]
+        private static void ApplyAppearancePostfix(SlimeAppearanceApplicator __instance)
+        {
+            RubberBoneLodPatch.RegisterApplicator(__instance);
+        }
+
+        [HarmonyPatch("ClearAppearance")]
+        [HarmonyPrefix]
+        private static void ClearAppearancePrefix(SlimeAppearanceApplicator __instance)
+        {
+            RubberBoneLodPatch.ClearApplicator(__instance);
         }
     }
 }

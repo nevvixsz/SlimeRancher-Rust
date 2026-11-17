@@ -9,10 +9,10 @@ namespace SlimeOptimizer
         public static bool EnableRubberBoneLod = true;
 
         [ConfigComment("Distance (in meters) at which slime jiggle physics switches to reduced frame rate.")]
-        public static float RubberLodDistance = 18f;
+        public static float RubberLodDistance = 10f;
 
         [ConfigComment("Distance (in meters) beyond which slime jiggle physics rests and skips updates until closer.")]
-        public static float RubberDisableDistance = 36f;
+        public static float RubberDisableDistance = 20f;
 
         [ConfigComment("Update interval (every N frames) for slimes in the LOD zone (e.g., 3 = ~1/3 CPU cost).")]
         public static int RubberLodInterval = 3;
