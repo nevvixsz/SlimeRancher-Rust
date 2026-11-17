@@ -41,6 +41,42 @@ namespace SlimeOptimizer
         [ConfigComment("Maximum MSAA level when SmartQualityCaps is enabled (0, 2, 4, or 8; recommended: 2 for high FPS).")]
         public static int MaxAntiAliasing = 2;
 
+        [ConfigComment("Maximum Unity LOD bias when SmartQualityCaps is enabled (vanilla High=2.0, Medium=1.0; recommended: 1.2 to stop distant grass/foliage from staying in heavy LOD0).")]
+        public static float MaxLodBias = 1.2f;
+
+        [ConfigComment("Slow down AI rethink and ground-raycast frequency for distant slimes (>= 24m) to save CPU in large ranches.")]
+        public static bool EnableSlimeAiLod = true;
+
+        [ConfigComment("Distance (in meters) beyond which slime AI uses reduced rethink/ground-check intervals.")]
+        public static float FarAiDistance = 24f;
+
+        [ConfigComment("AI rethink interval in seconds for slimes at >= FarAiDistance (vanilla: 1.0s).")]
+        public static float FarAiRethinkInterval = 2.8f;
+
+        [ConfigComment("Ground check raycast interval in seconds for slimes at >= FarAiDistance (vanilla: 0.25s).")]
+        public static float FarGroundCheckInterval = 0.6f;
+
+        [ConfigComment("Distance (in meters) beyond which slime AI uses ultra-low rethink/ground-check intervals.")]
+        public static float UltraFarAiDistance = 48f;
+
+        [ConfigComment("AI rethink interval in seconds for slimes at >= UltraFarAiDistance (vanilla: 1.0s).")]
+        public static float UltraFarAiRethinkInterval = 5.0f;
+
+        [ConfigComment("Ground check raycast interval in seconds for slimes at >= UltraFarAiDistance (vanilla: 0.25s).")]
+        public static float UltraFarGroundCheckInterval = 1.0f;
+
+        [ConfigComment("Optimize FindConsumable food/target search (avoid per-entry GetComponent<Identifiable> and key-collection boxing).")]
+        public static bool EnableFastFoodSearch = true;
+
+        [ConfigComment("Optimize dense grass/foliage meshes when sectors load (disable grass shadow casting and tighten grass-only LOD fade).")]
+        public static bool EnableGrassOptimizer = true;
+
+        [ConfigComment("Disable shadow casting on grass meshes (big GPU win in grassy areas like Moss Blanket/Wilds).")]
+        public static bool DisableGrassShadows = true;
+
+        [ConfigComment("Multiplier applied to grass-only LODGroup transition heights (>1.0 switches grass to lighter LODs sooner; 1.0 = unchanged).")]
+        public static float GrassLodMultiplier = 1.5f;
+
         [ConfigComment("Cache slime face renderer Material[] arrays and skip no-op expression assignments (eliminates GC spikes).")]
         public static bool EnableExpressionCache = true;
 

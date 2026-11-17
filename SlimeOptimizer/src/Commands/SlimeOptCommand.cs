@@ -18,6 +18,9 @@ namespace SlimeOptimizer.Commands
         {
             "rubber",
             "renderlod",
+            "ailod",
+            "foodsearch",
+            "grass",
             "smallshadows",
             "qcaps",
             "expr",
@@ -41,7 +44,7 @@ namespace SlimeOptimizer.Commands
             "  status              - Show active modules and LOD/quality thresholds\n" +
             "  stats               - Show saved calls and avoided GC allocations\n" +
             "  reset               - Reset statistics counters\n" +
-            "  toggle <module>     - Toggle: rubber, renderlod, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
+            "  toggle <module>     - Toggle: rubber, renderlod, ailod, foodsearch, grass, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
 
         public override List<string> GetAutoComplete(int argIndex, string argText)
         {
@@ -77,7 +80,7 @@ namespace SlimeOptimizer.Commands
                 case "toggle":
                     if (args.Length < 2)
                     {
-                        LogWarn("Usage: slimeopt toggle <rubber|renderlod|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
+                        LogWarn("Usage: slimeopt toggle <rubber|renderlod|ailod|foodsearch|grass|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
                         return false;
                     }
                     return ToggleModule(args[1].ToLowerInvariant());
@@ -99,6 +102,19 @@ namespace SlimeOptimizer.Commands
                     OptimizerConfig.EnableSlimeRenderLod = !OptimizerConfig.EnableSlimeRenderLod;
                     Log("SlimeRenderLod = " + OptimizerConfig.EnableSlimeRenderLod);
                     return true;
+                case "ailod":
+                    OptimizerConfig.EnableSlimeAiLod = !OptimizerConfig.EnableSlimeAiLod;
+                    Log("SlimeAiLod = " + OptimizerConfig.EnableSlimeAiLod);
+                    return true;
+                case "foodsearch":
+                    OptimizerConfig.EnableFastFoodSearch = !OptimizerConfig.EnableFastFoodSearch;
+                    Log("FastFoodSearch = " + OptimizerConfig.EnableFastFoodSearch);
+                    return true;
+                case "grass":
+                    OptimizerConfig.EnableGrassOptimizer = !OptimizerConfig.EnableGrassOptimizer;
+                    GrassOptimizerPatch.ReapplyAllSectors();
+                    Log("GrassOptimizer = " + OptimizerConfig.EnableGrassOptimizer + " (reapplied to loaded sectors)");
+                    return true;
                 case "smallshadows":
                     OptimizerConfig.EnableSmallObjectShadowCull = !OptimizerConfig.EnableSmallObjectShadowCull;
                     Log("SmallObjectShadowCull = " + OptimizerConfig.EnableSmallObjectShadowCull + " (applies to newly spawned actors)");
@@ -107,7 +123,7 @@ namespace SlimeOptimizer.Commands
                     OptimizerConfig.EnableSmartQualityCaps = !OptimizerConfig.EnableSmartQualityCaps;
                     QualityCapsPatch.ReapplyQualitySettings();
                     Log("SmartQualityCaps = " + OptimizerConfig.EnableSmartQualityCaps +
-                        $" (cascades={UnityEngine.QualitySettings.shadowCascades}, dist={UnityEngine.QualitySettings.shadowDistance}m, MSAA={UnityEngine.QualitySettings.antiAliasing}x)");
+                        $" (cascades={UnityEngine.QualitySettings.shadowCascades}, dist={UnityEngine.QualitySettings.shadowDistance}m, MSAA={UnityEngine.QualitySettings.antiAliasing}x, lodBias={UnityEngine.QualitySettings.lodBias:0.00})");
                     return true;
                 case "expr":
                     OptimizerConfig.EnableExpressionCache = !OptimizerConfig.EnableExpressionCache;
@@ -150,11 +166,14 @@ namespace SlimeOptimizer.Commands
         private static void LogStatus()
         {
             Log(
-                "SlimeOptimizer v0.2.0 Status:\n" +
+                "SlimeOptimizer v0.3.0 Status:\n" +
                 $"  RubberBoneLOD:      {OptimizerConfig.EnableRubberBoneLod} (LOD >= {OptimizerConfig.RubberLodDistance}m every {OptimizerConfig.RubberLodInterval} frames, Cull >= {OptimizerConfig.RubberDisableDistance}m)\n" +
                 $"  SlimeRenderLOD:     {OptimizerConfig.EnableSlimeRenderLod} (Skin1 >= {OptimizerConfig.SlimeSkinLodDistance}m, NoShadow >= {OptimizerConfig.SlimeShadowCullDistance}m)\n" +
+                $"  SlimeAiLOD:         {OptimizerConfig.EnableSlimeAiLod} (Far >= {OptimizerConfig.FarAiDistance}m: {OptimizerConfig.FarAiRethinkInterval}s, Ultra >= {OptimizerConfig.UltraFarAiDistance}m: {OptimizerConfig.UltraFarAiRethinkInterval}s)\n" +
+                $"  FastFoodSearch:     {OptimizerConfig.EnableFastFoodSearch}\n" +
+                $"  GrassOptimizer:     {OptimizerConfig.EnableGrassOptimizer} (noShadows={OptimizerConfig.DisableGrassShadows}, lodMult={OptimizerConfig.GrassLodMultiplier:0.00}x)\n" +
                 $"  SmallShadowCull:    {OptimizerConfig.EnableSmallObjectShadowCull}\n" +
-                $"  SmartQualityCaps:   {OptimizerConfig.EnableSmartQualityCaps} (now: cascades={UnityEngine.QualitySettings.shadowCascades}, dist={UnityEngine.QualitySettings.shadowDistance}m, MSAA={UnityEngine.QualitySettings.antiAliasing}x)\n" +
+                $"  SmartQualityCaps:   {OptimizerConfig.EnableSmartQualityCaps} (now: cascades={UnityEngine.QualitySettings.shadowCascades}, dist={UnityEngine.QualitySettings.shadowDistance}m, MSAA={UnityEngine.QualitySettings.antiAliasing}x, lodBias={UnityEngine.QualitySettings.lodBias:0.00})\n" +
                 $"  ExpressionCache:    {OptimizerConfig.EnableExpressionCache}\n" +
                 $"  PlortCollectorPool: {OptimizerConfig.EnablePlortCollectorPool}\n" +
                 $"  CellDirectorCount:  {OptimizerConfig.EnableCellDirectorFastCount}\n" +
@@ -176,6 +195,11 @@ namespace SlimeOptimizer.Commands
                 $"  RubberBone LOD skipped frames:    {OptimizerStats.RubberSkippedFrames}\n" +
                 $"  Slime shadow LOD switches:        {OptimizerStats.SlimeShadowChanges}\n" +
                 $"  Slime skinning LOD switches:      {OptimizerStats.SlimeSkinLodChanges}\n" +
+                $"  Slime AI slowed rethinks:         {OptimizerStats.SlimeAiSlowedRethinks}\n" +
+                $"  Slime AI slowed ground checks:    {OptimizerStats.SlimeAiSlowedGroundChecks}\n" +
+                $"  Fast food searches (no-GetComp):  {OptimizerStats.FastFoodSearches} ({OptimizerStats.FastFoodEntriesScanned} entries)\n" +
+                $"  Grass shadows disabled:           {OptimizerStats.GrassShadowsDisabled}\n" +
+                $"  Grass LODGroups tightened:        {OptimizerStats.GrassLodGroupsAdjusted}\n" +
                 $"  Small actor shadows culled:       {OptimizerStats.SmallActorShadowsCulled}\n" +
                 $"  Expression no-ops skipped:        {OptimizerStats.ExpressionNoOpsAvoided}\n" +
                 $"  Expression Material[] avoided:    {OptimizerStats.ExpressionArrayAllocsAvoided}\n" +
