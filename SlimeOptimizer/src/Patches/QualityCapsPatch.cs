@@ -4,13 +4,27 @@ using UnityEngine;
 
 namespace SlimeOptimizer.Patches
 {
-    [HarmonyPatch(typeof(SRQualitySettings), "UpdateFromLevels")]
     internal static class QualityCapsPatch
     {
-        private static readonly MethodInfo UpdateFromLevelsMethod =
-            AccessTools.Method(typeof(SRQualitySettings), "UpdateFromLevels");
+        private static bool _installed;
+        private static MethodInfo _updateFromLevelsMethod;
 
-        [HarmonyPostfix]
+        public static void Install(Harmony harmony)
+        {
+            if (_installed || harmony == null)
+            {
+                return;
+            }
+
+            _updateFromLevelsMethod = AccessTools.Method(typeof(SRQualitySettings), "UpdateFromLevels");
+            MethodInfo postfix = AccessTools.Method(typeof(QualityCapsPatch), nameof(Postfix));
+            if (_updateFromLevelsMethod != null && postfix != null)
+            {
+                harmony.Patch(_updateFromLevelsMethod, postfix: new HarmonyMethod(postfix));
+                _installed = true;
+            }
+        }
+
         private static void Postfix()
         {
             ApplyCapsIfEnabled();
@@ -44,9 +58,14 @@ namespace SlimeOptimizer.Patches
 
         public static void ReapplyQualitySettings()
         {
-            if (UpdateFromLevelsMethod != null)
+            if (_updateFromLevelsMethod == null)
             {
-                UpdateFromLevelsMethod.Invoke(null, null);
+                _updateFromLevelsMethod = AccessTools.Method(typeof(SRQualitySettings), "UpdateFromLevels");
+            }
+
+            if (_updateFromLevelsMethod != null)
+            {
+                _updateFromLevelsMethod.Invoke(null, null);
             }
             else
             {
