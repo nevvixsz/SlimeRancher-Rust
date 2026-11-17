@@ -12,6 +12,13 @@
 
     <SlimeRancherDir Condition="'$(SlimeRancherDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Slime Rancher</SlimeRancherDir>
     <ManagedDir>$(SlimeRancherDir)\SlimeRancher_Data\Managed</ManagedDir>
+
+    <HarmonyPath Condition="'$(HarmonyPath)' == '' and Exists('$(SlimeRancherDir)\SRML\Libs\0Harmony.dll')">$(SlimeRancherDir)\SRML\Libs\0Harmony.dll</HarmonyPath>
+    <HarmonyPath Condition="'$(HarmonyPath)' == '' and Exists('$(ManagedDir)\0Harmony.dll')">$(ManagedDir)\0Harmony.dll</HarmonyPath>
+    <HarmonyPath Condition="'$(HarmonyPath)' == '' and Exists('$(SlimeRancherDir)\SlimeRancher_Data\SRML\Libs\0Harmony.dll')">$(SlimeRancherDir)\SlimeRancher_Data\SRML\Libs\0Harmony.dll</HarmonyPath>
+    <HarmonyPath Condition="'$(HarmonyPath)' == '' and Exists('$(SlimeRancherDir)\SRML\0Harmony.dll')">$(SlimeRancherDir)\SRML\0Harmony.dll</HarmonyPath>
+    <HarmonyPath Condition="'$(HarmonyPath)' == '' and Exists('$(SlimeRancherDir)\0Harmony.dll')">$(SlimeRancherDir)\0Harmony.dll</HarmonyPath>
+    <HarmonyPath Condition="'$(HarmonyPath)' == ''">$(SlimeRancherDir)\SRML\Libs\0Harmony.dll</HarmonyPath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,7 +31,7 @@
 
   <ItemGroup>
     <Reference Include="0Harmony">
-      <HintPath>$(ManagedDir)\0Harmony.dll</HintPath>
+      <HintPath>$(HarmonyPath)</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="SRML">
