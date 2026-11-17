@@ -24,6 +24,10 @@ namespace SlimeOptimizer
         public static long FastFoodEntriesScanned;
         public static long GrassShadowsDisabled;
         public static long GrassLodGroupsAdjusted;
+        public static long SectrLodCallsSkipped;
+        public static long SectrFrustumPlanesSaved;
+        public static long SectrGetComponentsAvoided;
+        public static long CamerasLayerCulled;
 
         public static void Reset()
         {
@@ -49,6 +53,10 @@ namespace SlimeOptimizer
             FastFoodEntriesScanned = 0;
             GrassShadowsDisabled = 0;
             GrassLodGroupsAdjusted = 0;
+            SectrLodCallsSkipped = 0;
+            SectrFrustumPlanesSaved = 0;
+            SectrGetComponentsAvoided = 0;
+            CamerasLayerCulled = 0;
         }
     }
 }

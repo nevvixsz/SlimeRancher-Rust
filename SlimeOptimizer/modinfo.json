@@ -2,6 +2,6 @@
   "id": "slimeoptimizer",
   "name": "SlimeOptimizer",
   "author": "nevvixsz",
-  "version": "0.3.0",
-  "description": "High-impact FPS, AI, foliage, and GC optimizations for Slime Rancher: RubberBone LOD, slime AI/food LOD, grass shadow/LOD optimization, slime shadow/skinning LOD, smart quality caps, and hot-loop caches."
+  "version": "0.4.0",
+  "description": "High-impact FPS, AI, foliage, SECTR culling, camera layer cull, and GPU shadow/MSAA optimizations for Slime Rancher."
 }

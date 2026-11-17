@@ -60,6 +60,18 @@ namespace SlimeOptimizer.Patches
             {
                 QualitySettings.lodBias = maxLodBias;
             }
+
+            int maxShadowRes = OptimizerConfig.MaxShadowResolution;
+            if (maxShadowRes >= 0 && maxShadowRes <= 3 && (int)QualitySettings.shadowResolution > maxShadowRes)
+            {
+                QualitySettings.shadowResolution = (ShadowResolution)maxShadowRes;
+            }
+
+            int maxPixelLights = OptimizerConfig.MaxPixelLightCount;
+            if (maxPixelLights >= 0 && QualitySettings.pixelLightCount > maxPixelLights)
+            {
+                QualitySettings.pixelLightCount = maxPixelLights;
+            }
         }
 
         public static void ReapplyQualitySettings()

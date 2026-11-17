@@ -44,6 +44,27 @@ namespace SlimeOptimizer
         [ConfigComment("Maximum Unity LOD bias when SmartQualityCaps is enabled (vanilla High=2.0, Medium=1.0; recommended: 1.2 to stop distant grass/foliage from staying in heavy LOD0).")]
         public static float MaxLodBias = 1.2f;
 
+        [ConfigComment("Maximum shadow map resolution when SmartQualityCaps is enabled (0=Low, 1=Medium, 2=High, 3=VeryHigh; recommended: 1 for big GPU FPS gain).")]
+        public static int MaxShadowResolution = 1;
+
+        [ConfigComment("Maximum pixel light count when SmartQualityCaps is enabled (vanilla Highest=4; recommended: 2).")]
+        public static int MaxPixelLightCount = 2;
+
+        [ConfigComment("Optimize SECTR_CullingCamera and throttle SECTR_LOD.SelectLOD (eliminates per-frame Plane[6] GC and GetComponent overhead).")]
+        public static bool EnableSectrCullingOpt = true;
+
+        [ConfigComment("Update each SECTR_LOD only every N frames after initial activation (recommended: 4 = 75% less SECTR_LOD work).")]
+        public static int SectrLodInterval = 4;
+
+        [ConfigComment("Apply per-layer camera cull distances and a smart farClipPlane cap to skip rendering distant small actors.")]
+        public static bool EnableCameraLayerCull = true;
+
+        [ConfigComment("Cull distance (in meters) for Actor/ActorEchoes/ActorIgnorePlayer/Launched layers (slimes/plorts/food far beyond sight; 0 = disabled).")]
+        public static float LayerActorCullDistance = 95f;
+
+        [ConfigComment("Maximum camera farClipPlane in meters (0 = unchanged; recommended: 450 to trim distant fogged geometry).")]
+        public static float MaxFarClipPlane = 450f;
+
         [ConfigComment("Slow down AI rethink and ground-raycast frequency for distant slimes (>= 24m) to save CPU in large ranches.")]
         public static bool EnableSlimeAiLod = true;
 
