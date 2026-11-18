@@ -26,6 +26,10 @@ namespace SlimeOptimizer
         public static long GrassLodGroupsAdjusted;
         public static long GrassShadersCapped;
         public static long CamerasLayerCulled;
+        public static long SsaoDownsampledFrames;
+        public static long SsaoKeywordResetsAvoided;
+        public static long FaceAnimCallsSkipped;
+        public static long EmotionsCallsSkipped;
 
         public static void Reset()
         {
@@ -53,6 +57,10 @@ namespace SlimeOptimizer
             GrassLodGroupsAdjusted = 0;
             GrassShadersCapped = 0;
             CamerasLayerCulled = 0;
+            SsaoDownsampledFrames = 0;
+            SsaoKeywordResetsAvoided = 0;
+            FaceAnimCallsSkipped = 0;
+            EmotionsCallsSkipped = 0;
         }
     }
 }

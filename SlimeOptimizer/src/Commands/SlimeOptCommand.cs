@@ -19,9 +19,11 @@ namespace SlimeOptimizer.Commands
             "rubber",
             "renderlod",
             "ailod",
+            "facelod",
             "foodsearch",
             "grass",
             "grasswind",
+            "ssao",
             "cameracull",
             "smallshadows",
             "qcaps",
@@ -46,7 +48,7 @@ namespace SlimeOptimizer.Commands
             "  status              - Show active modules and LOD/quality thresholds\n" +
             "  stats               - Show saved calls and avoided GC allocations\n" +
             "  reset               - Reset statistics counters\n" +
-            "  toggle <module>     - Toggle: rubber, renderlod, ailod, foodsearch, grass, grasswind, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
+            "  toggle <module>     - Toggle: rubber, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
 
         public override List<string> GetAutoComplete(int argIndex, string argText)
         {
@@ -82,7 +84,7 @@ namespace SlimeOptimizer.Commands
                 case "toggle":
                     if (args.Length < 2)
                     {
-                        LogWarn("Usage: slimeopt toggle <rubber|renderlod|ailod|foodsearch|grass|grasswind|cameracull|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
+                        LogWarn("Usage: slimeopt toggle <rubber|renderlod|ailod|facelod|foodsearch|grass|grasswind|ssao|cameracull|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
                         return false;
                     }
                     return ToggleModule(args[1].ToLowerInvariant());
@@ -108,6 +110,10 @@ namespace SlimeOptimizer.Commands
                     OptimizerConfig.EnableSlimeAiLod = !OptimizerConfig.EnableSlimeAiLod;
                     Log("SlimeAiLod = " + OptimizerConfig.EnableSlimeAiLod);
                     return true;
+                case "facelod":
+                    OptimizerConfig.EnableSlimeFaceEmotionLod = !OptimizerConfig.EnableSlimeFaceEmotionLod;
+                    Log("SlimeFaceEmotionLod = " + OptimizerConfig.EnableSlimeFaceEmotionLod);
+                    return true;
                 case "foodsearch":
                     OptimizerConfig.EnableFastFoodSearch = !OptimizerConfig.EnableFastFoodSearch;
                     Log("FastFoodSearch = " + OptimizerConfig.EnableFastFoodSearch);
@@ -121,6 +127,11 @@ namespace SlimeOptimizer.Commands
                     OptimizerConfig.DisableGrassWindShader = !OptimizerConfig.DisableGrassWindShader;
                     GrassOptimizerPatch.ReapplyAllScenes();
                     Log("DisableGrassWindShader = " + OptimizerConfig.DisableGrassWindShader + " (shaders: " + GrassOptimizerPatch.GetSeenShadersSummary() + ")");
+                    return true;
+                case "ssao":
+                    OptimizerConfig.EnableSsaoOptimizer = !OptimizerConfig.EnableSsaoOptimizer;
+                    Log("SsaoOptimizer = " + OptimizerConfig.EnableSsaoOptimizer +
+                        $" (downsample={OptimizerConfig.SsaoDownsampling}x, blurDown={OptimizerConfig.SsaoBlurDownsampling}, gaussian={OptimizerConfig.SsaoUseGaussianBlur})");
                     return true;
                 case "cameracull":
                     OptimizerConfig.EnableCameraLayerCull = !OptimizerConfig.EnableCameraLayerCull;
@@ -179,12 +190,14 @@ namespace SlimeOptimizer.Commands
         private static void LogStatus()
         {
             Log(
-                "SlimeOptimizer v0.4.0 Status:\n" +
+                "SlimeOptimizer v0.5.0 Status:\n" +
                 $"  RubberBoneLOD:      {OptimizerConfig.EnableRubberBoneLod} (LOD >= {OptimizerConfig.RubberLodDistance}m every {OptimizerConfig.RubberLodInterval} frames, Cull >= {OptimizerConfig.RubberDisableDistance}m)\n" +
                 $"  SlimeRenderLOD:     {OptimizerConfig.EnableSlimeRenderLod} (Skin1 >= {OptimizerConfig.SlimeSkinLodDistance}m, NoShadow >= {OptimizerConfig.SlimeShadowCullDistance}m)\n" +
                 $"  SlimeAiLOD:         {OptimizerConfig.EnableSlimeAiLod} (Far >= {OptimizerConfig.FarAiDistance}m: {OptimizerConfig.FarAiRethinkInterval}s, Ultra >= {OptimizerConfig.UltraFarAiDistance}m: {OptimizerConfig.UltraFarAiRethinkInterval}s)\n" +
+                $"  SlimeFaceEmotLOD:   {OptimizerConfig.EnableSlimeFaceEmotionLod} (>= {OptimizerConfig.FaceEmotionLodDistance}m: /{OptimizerConfig.FaceEmotionLodInterval}, >= {OptimizerConfig.FaceEmotionUltraDistance}m: /{OptimizerConfig.FaceEmotionUltraInterval})\n" +
                 $"  FastFoodSearch:     {OptimizerConfig.EnableFastFoodSearch}\n" +
                 $"  GrassOptimizer:     {OptimizerConfig.EnableGrassOptimizer} (noShadows={OptimizerConfig.DisableGrassShadows}, lodMult={OptimizerConfig.GrassLodMultiplier:0.00}x, windCap={OptimizerConfig.DisableGrassWindShader}@{OptimizerConfig.GrassShaderMaxLod}, shaders=[{GrassOptimizerPatch.GetSeenShadersSummary()}])\n" +
+                $"  SsaoOptimizer:      {OptimizerConfig.EnableSsaoOptimizer} (downsample={OptimizerConfig.SsaoDownsampling}x, blurDown={OptimizerConfig.SsaoBlurDownsampling}, gaussian={OptimizerConfig.SsaoUseGaussianBlur})\n" +
                 $"  CameraLayerCull:    {OptimizerConfig.EnableCameraLayerCull} (actors={OptimizerConfig.LayerActorCullDistance}m, maxFar={OptimizerConfig.MaxFarClipPlane}m)\n" +
                 $"  SmallShadowCull:    {OptimizerConfig.EnableSmallObjectShadowCull}\n" +
                 $"  SmartQualityCaps:   {OptimizerConfig.EnableSmartQualityCaps} (now: cascades={UnityEngine.QualitySettings.shadowCascades}, res={UnityEngine.QualitySettings.shadowResolution}, dist={UnityEngine.QualitySettings.shadowDistance}m, MSAA={UnityEngine.QualitySettings.antiAliasing}x, lights={UnityEngine.QualitySettings.pixelLightCount}, lodBias={UnityEngine.QualitySettings.lodBias:0.00}, shaderLOD={UnityEngine.Shader.globalMaximumLOD})\n" +
@@ -211,10 +224,13 @@ namespace SlimeOptimizer.Commands
                 $"  Slime skinning LOD switches:      {OptimizerStats.SlimeSkinLodChanges}\n" +
                 $"  Slime AI slowed rethinks:         {OptimizerStats.SlimeAiSlowedRethinks}\n" +
                 $"  Slime AI slowed ground checks:    {OptimizerStats.SlimeAiSlowedGroundChecks}\n" +
+                $"  Slime face anim calls skipped:    {OptimizerStats.FaceAnimCallsSkipped}\n" +
+                $"  Slime emotion calls skipped:      {OptimizerStats.EmotionsCallsSkipped}\n" +
                 $"  Fast food searches (no-GetComp):  {OptimizerStats.FastFoodSearches} ({OptimizerStats.FastFoodEntriesScanned} entries)\n" +
                 $"  Grass shadows disabled:           {OptimizerStats.GrassShadowsDisabled}\n" +
                 $"  Grass LODGroups tightened:        {OptimizerStats.GrassLodGroupsAdjusted}\n" +
                 $"  Grass shaders LOD-capped:         {OptimizerStats.GrassShadersCapped}\n" +
+                $"  SSAO downsampled frames:          {OptimizerStats.SsaoDownsampledFrames} (keyword resets avoided: {OptimizerStats.SsaoKeywordResetsAvoided})\n" +
                 $"  Cameras layer-culled:             {OptimizerStats.CamerasLayerCulled}\n" +
                 $"  Small actor shadows culled:       {OptimizerStats.SmallActorShadowsCulled}\n" +
                 $"  Expression no-ops skipped:        {OptimizerStats.ExpressionNoOpsAvoided}\n" +
