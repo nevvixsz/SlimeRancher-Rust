@@ -203,48 +203,48 @@ namespace SlimeOptimizer.Patches
             AddToggle(ui, state, contentParent, font, fontMat,
                 T("Умные лимиты графики (тени / MSAA / свет)", "Smart GPU Quality Caps"),
                 () => OptimizerConfig.EnableSmartQualityCaps,
-                v => { OptimizerConfig.EnableSmartQualityCaps = v; SettingsDatabase.ApplyRuntimeEffects(); });
+                v => { OptimizerConfig.EnableSmartQualityCaps = v; SettingsDatabase.ApplyQualityCapsOnly(); });
             AddIntSlider(ui, state, contentParent, font, fontMat,
-                T("Каскады теней (макс.)", "Max Shadow Cascades"),
-                0, 4,
-                () => OptimizerConfig.MaxShadowCascades,
-                v => { OptimizerConfig.MaxShadowCascades = v; SettingsDatabase.ApplyRuntimeEffects(); },
-                v => v.ToString(CultureInfo.InvariantCulture));
+                T("Каскады теней (0=Выкл, 1=2 каск., 2=4 каск.)", "Max Shadow Cascades"),
+                0, 2,
+                () => CascadesToStep(OptimizerConfig.MaxShadowCascades),
+                s => { OptimizerConfig.MaxShadowCascades = StepToCascades(s); SettingsDatabase.ApplyQualityCapsOnly(); },
+                s => StepToCascades(s).ToString(CultureInfo.InvariantCulture));
             AddIntSlider(ui, state, contentParent, font, fontMat,
                 T("Разрешение теней (0=Низк .. 3=Ультра)", "Max Shadow Resolution"),
                 0, 3,
                 () => OptimizerConfig.MaxShadowResolution,
-                v => { OptimizerConfig.MaxShadowResolution = v; SettingsDatabase.ApplyRuntimeEffects(); },
+                v => { OptimizerConfig.MaxShadowResolution = v; SettingsDatabase.ApplyQualityCapsOnly(); },
                 FormatShadowRes);
             AddFloatSlider(ui, state, contentParent, font, fontMat,
                 T("Дальность теней (м)", "Max Shadow Distance"),
                 20f, 150f, true,
                 () => OptimizerConfig.MaxShadowDistance,
-                v => { OptimizerConfig.MaxShadowDistance = v; SettingsDatabase.ApplyRuntimeEffects(); },
+                v => { OptimizerConfig.MaxShadowDistance = v; SettingsDatabase.ApplyQualityCapsOnly(); },
                 v => Mathf.RoundToInt(v) + " m");
             AddIntSlider(ui, state, contentParent, font, fontMat,
                 T("Сглаживание MSAA (0=Выкл, 1=2x, 2=4x, 3=8x)", "Max MSAA"),
                 0, 3,
                 () => AaToStep(OptimizerConfig.MaxAntiAliasing),
-                s => { OptimizerConfig.MaxAntiAliasing = StepToAa(s); SettingsDatabase.ApplyRuntimeEffects(); },
+                s => { OptimizerConfig.MaxAntiAliasing = StepToAa(s); SettingsDatabase.ApplyQualityCapsOnly(); },
                 s => { int aa = StepToAa(s); return aa == 0 ? T("Выкл", "Off") : aa + "x"; });
             AddIntSlider(ui, state, contentParent, font, fontMat,
                 T("Пиксельных источников света", "Max Pixel Light Count"),
                 0, 4,
                 () => OptimizerConfig.MaxPixelLightCount,
-                v => { OptimizerConfig.MaxPixelLightCount = v; SettingsDatabase.ApplyRuntimeEffects(); },
+                v => { OptimizerConfig.MaxPixelLightCount = v; SettingsDatabase.ApplyQualityCapsOnly(); },
                 v => v.ToString(CultureInfo.InvariantCulture));
             AddFloatSlider(ui, state, contentParent, font, fontMat,
                 T("Множитель дальности LOD моделей", "Max LOD Bias"),
                 0.5f, 2.0f, false,
                 () => OptimizerConfig.MaxLodBias,
-                v => { OptimizerConfig.MaxLodBias = (float)Math.Round(v, 2); SettingsDatabase.ApplyRuntimeEffects(); },
+                v => { OptimizerConfig.MaxLodBias = (float)Math.Round(v, 2); SettingsDatabase.ApplyQualityCapsOnly(); },
                 v => v.ToString("0.00", CultureInfo.InvariantCulture));
             AddIntSlider(ui, state, contentParent, font, fontMat,
                 T("Лимит шейдеров мира (3=Без лимита, 0=400, 1=700, 2=900)", "Global Shader LOD Cap"),
                 0, 3,
                 () => ShaderLodToStep(OptimizerConfig.MaxGlobalShaderLod),
-                s => { OptimizerConfig.MaxGlobalShaderLod = StepToShaderLod(s); SettingsDatabase.ApplyRuntimeEffects(); },
+                s => { OptimizerConfig.MaxGlobalShaderLod = StepToShaderLod(s); SettingsDatabase.ApplyQualityCapsOnly(); },
                 s => { int l = StepToShaderLod(s); return l < 0 ? T("Макс", "Auto") : l.ToString(CultureInfo.InvariantCulture); });
 
             AddSectionHeader(contentParent, font, fontMat, T("Постобработка SSAO", "SSAO Post-Processing"));
@@ -865,6 +865,23 @@ namespace SlimeOptimizer.Patches
                 case 2: return 4;
                 case 3: return 8;
                 default: return 0;
+            }
+        }
+
+        private static int CascadesToStep(int cascades)
+        {
+            if (cascades <= 0) return 0;
+            if (cascades <= 2) return 1;
+            return 2;
+        }
+
+        private static int StepToCascades(int step)
+        {
+            switch (step)
+            {
+                case 0: return 0;
+                case 1: return 2;
+                default: return 4;
             }
         }
 

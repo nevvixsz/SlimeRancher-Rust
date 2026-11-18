@@ -161,9 +161,9 @@ namespace SlimeOptimizer
 
                 case OptimizerPreset.MaxFps:
                     OptimizerConfig.EnableSmartQualityCaps = true;
-                    OptimizerConfig.MaxShadowCascades = 1;
+                    OptimizerConfig.MaxShadowCascades = 0;
                     OptimizerConfig.MaxShadowResolution = 0;
-                    OptimizerConfig.MaxShadowDistance = 55f;
+                    OptimizerConfig.MaxShadowDistance = 45f;
                     OptimizerConfig.MaxAntiAliasing = 0;
                     OptimizerConfig.MaxPixelLightCount = 1;
                     OptimizerConfig.MaxLodBias = 0.85f;
@@ -255,6 +255,17 @@ namespace SlimeOptimizer
 
             ApplyRuntimeEffects();
             Save();
+        }
+
+        public static void ApplyQualityCapsOnly()
+        {
+            Patches.QualityCapsPatch.ReapplyQualitySettings();
+        }
+
+        public static void ApplyCameraCullOnly()
+        {
+            Patches.CameraCullDistancePatch.MarkDirty();
+            Patches.CameraCullDistancePatch.UpdateActiveCamera();
         }
 
         public static void ApplyRuntimeEffects()

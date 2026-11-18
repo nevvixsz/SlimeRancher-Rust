@@ -37,7 +37,7 @@ namespace SlimeOptimizer.Patches
                 return;
             }
 
-            int maxCascades = OptimizerConfig.MaxShadowCascades;
+            int maxCascades = NormalizeCascades(OptimizerConfig.MaxShadowCascades);
             if (maxCascades >= 0 && QualitySettings.shadowCascades > maxCascades)
             {
                 QualitySettings.shadowCascades = maxCascades;
@@ -47,6 +47,11 @@ namespace SlimeOptimizer.Patches
             if (maxShadowDist > 0f && QualitySettings.shadowDistance > maxShadowDist)
             {
                 QualitySettings.shadowDistance = maxShadowDist;
+            }
+
+            if (QualitySettings.shadowCascades == 0 || QualitySettings.shadowDistance < 60f)
+            {
+                QualitySettings.shadowProjection = ShadowProjection.CloseFit;
             }
 
             int maxAa = OptimizerConfig.MaxAntiAliasing;
@@ -78,6 +83,13 @@ namespace SlimeOptimizer.Patches
             {
                 Shader.globalMaximumLOD = maxGlobalShaderLod;
             }
+        }
+
+        private static int NormalizeCascades(int cascades)
+        {
+            if (cascades <= 0) return 0;
+            if (cascades <= 2) return 2;
+            return 4;
         }
 
         public static void ReapplyQualitySettings()
