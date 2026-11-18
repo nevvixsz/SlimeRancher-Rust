@@ -8,12 +8,12 @@ namespace SlimeOptimizer.Patches
     {
         public static bool ShouldRunThisFrame(Component component, bool isFaceAnimator)
         {
-            if (!OptimizerConfig.EnableSlimeFaceEmotionLod || !CameraCache.HasMainCamera)
+            if (!OptimizerConfig.EnableSlimeFaceEmotionLod || !CameraCache.HasCamera)
             {
                 return true;
             }
 
-            Vector3 diff = component.transform.position - CameraCache.MainPosition;
+            Vector3 diff = component.transform.position - CameraCache.Position;
             float distSq = diff.sqrMagnitude;
 
             float nearDist = OptimizerConfig.FaceEmotionLodDistance;
