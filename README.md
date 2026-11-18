@@ -2,7 +2,13 @@
 
 Мод оптимизации производительности и снижения микрофризов (GC) для **Slime Rancher** на базе **SRML** (`0.2.1.0+`) и **Harmony**.
 
-## Что включено (v0.5.0)
+## Что включено (v0.6.0)
+
+### Меню настроек в стиле Sodium / OptiFine (`Options` → вкладка `Расширенное` / `Advanced`)
+- В официальное меню **Настройки** (и в главном меню, и в меню паузы в игре) добавлена отдельная прокручиваемая вкладка **«Расширенное»** (`AdvancedOptionsPatch`):
+  - **Быстрые пресеты в 1 клик:** `Макс. FPS`, `Баланс` (по умолчанию, все оптимизации включены), `Качество`, `Ваниль (Выкл.)`.
+  - **Ползунки и переключатели на лету** для всех модулей GPU, SSAO, травы, камеры, слаймов, ИИ, кэшей и сбора статистики.
+  - **База настроек (`SettingsDatabase`)**: все изменения из вкладки и консоли автоматически сохраняются в `SlimeOptimizer.db` (`SRML/Config/slimeoptimizer/SlimeOptimizer.db`) и применяются сразу при запуске игры.
 
 ### GPU / Рендеринг (против просадок на общем виде ранчо и в густой траве)
 1. **Ускорение SSAO (`SsaoFastPatch`)**:
@@ -57,7 +63,8 @@ dotnet build SlimeOptimizer\SlimeOptimizer.csproj -c Release -p:SlimeRancherDir=
 В консоли SRML (`Ctrl + Tab` или `~`):
 - `slimeopt status` — активные модули, пороги и текущие `QualitySettings` (`cascades`, `dist`, `MSAA`)
 - `slimeopt stats` — статистика сэкономленных вызовов и аллокаций
-- `slimeopt toggle <module>` — включить/выключить на лету (`rubber`, `renderlod`, `ailod`, `facelod`, `foodsearch`, `grass`, `grasswind`, `ssao`, `cameracull`, `smallshadows`, `qcaps`, `expr`, `plort`, `cell`, `collisions`, `billboard`, `effects`, `plexer`, `stats`)
+- `slimeopt preset <maxfps|balanced|quality|vanilla>` — мгновенно применить пресет настроек и сохранить в базу
+- `slimeopt toggle <module>` — включить/выключить на лету и сохранить в базу (`rubber`, `renderlod`, `ailod`, `facelod`, `foodsearch`, `grass`, `grasswind`, `ssao`, `cameracull`, `smallshadows`, `qcaps`, `expr`, `plort`, `cell`, `collisions`, `billboard`, `effects`, `plexer`, `stats`)
 - `slimeopt reset` — обнулить счётчики
 
 Файл конфигурации:

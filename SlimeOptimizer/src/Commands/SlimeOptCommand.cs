@@ -39,7 +39,7 @@ namespace SlimeOptimizer.Commands
 
         public override string ID => "slimeopt";
 
-        public override string Usage => "slimeopt <status|stats|reset|toggle <module>>";
+        public override string Usage => "slimeopt <status|stats|reset|preset <name>|toggle <module>>";
 
         public override string Description => "Shows SlimeOptimizer status/stats or toggles optimization modules at runtime.";
 
@@ -48,6 +48,7 @@ namespace SlimeOptimizer.Commands
             "  status              - Show active modules and LOD/quality thresholds\n" +
             "  stats               - Show saved calls and avoided GC allocations\n" +
             "  reset               - Reset statistics counters\n" +
+            "  preset <name>       - Apply preset: maxfps, balanced, quality, vanilla\n" +
             "  toggle <module>     - Toggle: rubber, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
 
         public override List<string> GetAutoComplete(int argIndex, string argText)
@@ -87,9 +88,47 @@ namespace SlimeOptimizer.Commands
                         LogWarn("Usage: slimeopt toggle <rubber|renderlod|ailod|facelod|foodsearch|grass|grasswind|ssao|cameracull|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
                         return false;
                     }
-                    return ToggleModule(args[1].ToLowerInvariant());
+                    bool ok = ToggleModule(args[1].ToLowerInvariant());
+                    if (ok)
+                    {
+                        SettingsDatabase.Save();
+                    }
+                    return ok;
+                case "preset":
+                    if (args.Length < 2)
+                    {
+                        LogWarn("Usage: slimeopt preset <maxfps|balanced|quality|vanilla>");
+                        return false;
+                    }
+                    return ApplyPresetCommand(args[1].ToLowerInvariant());
                 default:
                     LogWarn("Unknown subcommand. Usage: " + Usage);
+                    return false;
+            }
+        }
+
+        private static bool ApplyPresetCommand(string preset)
+        {
+            switch (preset)
+            {
+                case "maxfps":
+                    SettingsDatabase.ApplyPreset(OptimizerPreset.MaxFps);
+                    Log("Applied preset: MaxFps");
+                    return true;
+                case "balanced":
+                    SettingsDatabase.ApplyPreset(OptimizerPreset.Balanced);
+                    Log("Applied preset: Balanced");
+                    return true;
+                case "quality":
+                    SettingsDatabase.ApplyPreset(OptimizerPreset.HighQuality);
+                    Log("Applied preset: HighQuality");
+                    return true;
+                case "vanilla":
+                    SettingsDatabase.ApplyPreset(OptimizerPreset.VanillaOff);
+                    Log("Applied preset: VanillaOff");
+                    return true;
+                default:
+                    LogWarn("Unknown preset. Use: maxfps, balanced, quality, vanilla");
                     return false;
             }
         }
@@ -190,7 +229,7 @@ namespace SlimeOptimizer.Commands
         private static void LogStatus()
         {
             Log(
-                "SlimeOptimizer v0.5.0 Status:\n" +
+                "SlimeOptimizer v0.6.0 Status:\n" +
                 $"  RubberBoneLOD:      {OptimizerConfig.EnableRubberBoneLod} (LOD >= {OptimizerConfig.RubberLodDistance}m every {OptimizerConfig.RubberLodInterval} frames, Cull >= {OptimizerConfig.RubberDisableDistance}m)\n" +
                 $"  SlimeRenderLOD:     {OptimizerConfig.EnableSlimeRenderLod} (Skin1 >= {OptimizerConfig.SlimeSkinLodDistance}m, NoShadow >= {OptimizerConfig.SlimeShadowCullDistance}m)\n" +
                 $"  SlimeAiLOD:         {OptimizerConfig.EnableSlimeAiLod} (Far >= {OptimizerConfig.FarAiDistance}m: {OptimizerConfig.FarAiRethinkInterval}s, Ultra >= {OptimizerConfig.UltraFarAiDistance}m: {OptimizerConfig.UltraFarAiRethinkInterval}s)\n" +
