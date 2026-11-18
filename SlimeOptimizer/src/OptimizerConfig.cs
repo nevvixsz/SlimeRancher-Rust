@@ -122,6 +122,33 @@ namespace SlimeOptimizer
         [ConfigComment("Cache Action<RaycastHit> ground-check delegates in SlimeSubbehaviourPlexer.")]
         public static bool EnablePlexerDelegateCache = true;
 
+        [ConfigComment("Optimize SSAOPro post-processing (render AO & bilateral blur at half resolution and eliminate per-frame shaderKeywords/string hashing; ~4x faster SSAO).")]
+        public static bool EnableSsaoOptimizer = true;
+
+        [ConfigComment("SSAO render resolution divisor (1 = native, 2 = half-res / 4x fewer pixels; recommended: 2).")]
+        public static int SsaoDownsampling = 2;
+
+        [ConfigComment("Run SSAO blur passes at downsampled resolution too (huge GPU win with minimal visual difference).")]
+        public static bool SsaoBlurDownsampling = true;
+
+        [ConfigComment("Use faster Gaussian blur instead of HighQualityBilateral in SSAOPro (false keeps crisp edges at 2x downsample).")]
+        public static bool SsaoUseGaussianBlur = false;
+
+        [ConfigComment("Throttle SlimeFaceAnimator and SlimeEmotions RegistryUpdate for distant slimes (>= 20m).")]
+        public static bool EnableSlimeFaceEmotionLod = true;
+
+        [ConfigComment("Distance (in meters) beyond which slime face/emotion updates run at FaceEmotionLodInterval.")]
+        public static float FaceEmotionLodDistance = 20f;
+
+        [ConfigComment("Update interval (every N frames) for slime face/emotions at >= FaceEmotionLodDistance.")]
+        public static int FaceEmotionLodInterval = 6;
+
+        [ConfigComment("Distance (in meters) beyond which slime face/emotion updates run at FaceEmotionUltraInterval.")]
+        public static float FaceEmotionUltraDistance = 45f;
+
+        [ConfigComment("Update interval (every N frames) for slime face/emotions at >= FaceEmotionUltraDistance.")]
+        public static int FaceEmotionUltraInterval = 12;
+
         [ConfigComment("Collect counters for the 'slimeopt stats' console command.")]
         public static bool EnableStatsCollection = true;
     }
