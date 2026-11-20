@@ -122,6 +122,16 @@ namespace SlimeOptimizer.Patches
             }
         }
 
+        public static void ApplyTargetFrameRate()
+        {
+            int target = OptimizerConfig.TargetFrameRate;
+            int desired = target > 0 ? target : -1;
+            if (Application.targetFrameRate != desired)
+            {
+                Application.targetFrameRate = desired;
+            }
+        }
+
         private static int NormalizeCascades(int cascades)
         {
             if (cascades <= 0) return 0;
@@ -145,6 +155,16 @@ namespace SlimeOptimizer.Patches
                 ApplyCapsIfEnabled();
             }
             ApplyPhysicsSettings();
+            ApplyTargetFrameRate();
+        }
+    }
+
+    [HarmonyPatch(typeof(OptionsDirector), nameof(OptionsDirector.SetVsync))]
+    internal static class OptionsDirectorVsyncPatch
+    {
+        private static void Postfix()
+        {
+            QualityCapsPatch.ApplyTargetFrameRate();
         }
     }
 }

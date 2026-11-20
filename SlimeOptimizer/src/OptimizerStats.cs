@@ -34,6 +34,8 @@ namespace SlimeOptimizer
         public static long BloomFramesOptimized;
         public static long KeepUprightSkipped;
         public static long ChickenAiSkipped;
+        public static long RanchTimersSkipped;
+        public static long ParticlesCapped;
 
         public static void Reset()
         {
@@ -69,6 +71,8 @@ namespace SlimeOptimizer
             BloomFramesOptimized = 0;
             KeepUprightSkipped = 0;
             ChickenAiSkipped = 0;
+            RanchTimersSkipped = 0;
+            ParticlesCapped = 0;
         }
     }
 }
