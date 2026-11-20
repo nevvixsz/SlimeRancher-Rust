@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -6,6 +7,17 @@ namespace SlimeOptimizer.Patches
     [HarmonyPatch(typeof(KeepUpright), nameof(KeepUpright.RegistryFixedUpdate))]
     internal static class KeepUprightLodPatch
     {
+        private sealed class UprightEntry
+        {
+            public Transform Transform;
+            public int Hash;
+            public int NextCheckFrame;
+            public bool IsFar;
+        }
+
+        private static readonly FastObjCache<KeepUpright, UprightEntry> Cache =
+            new FastObjCache<KeepUpright, UprightEntry>(256);
+
         private static bool Prefix(KeepUpright __instance, Rigidbody ___body)
         {
             if (!OptimizerConfig.EnableKeepUprightOpt)
@@ -24,18 +36,31 @@ namespace SlimeOptimizer.Patches
 
             if (CameraCache.HasCamera)
             {
-                Vector3 diff = __instance.transform.position - CameraCache.Position;
-                if (diff.sqrMagnitude >= 625f) // >= 25m
+                int frame = CameraCache.FrameCount;
+                if (!Cache.TryGetValue(__instance, out UprightEntry entry))
                 {
-                    int phase = (Time.frameCount + (__instance.GetInstanceID() & 0x7FFFFFFF)) % 3;
-                    if (phase != 0)
+                    entry = new UprightEntry
                     {
-                        if (OptimizerConfig.EnableStatsCollection)
-                        {
-                            OptimizerStats.KeepUprightSkipped++;
-                        }
-                        return false;
+                        Transform = __instance.transform,
+                        Hash = RuntimeHelpers.GetHashCode(__instance) & 0x7FFFFFFF,
+                        NextCheckFrame = -1
+                    };
+                    Cache.Set(__instance, entry);
+                }
+
+                if (frame >= entry.NextCheckFrame)
+                {
+                    entry.NextCheckFrame = frame + 16 + (entry.Hash & 7);
+                    entry.IsFar = CameraCache.SqrDistanceToCamera(entry.Transform) >= 625f;
+                }
+
+                if (entry.IsFar && ((frame + entry.Hash) & 3) != 0)
+                {
+                    if (OptimizerConfig.EnableStatsCollection)
+                    {
+                        OptimizerStats.KeepUprightSkipped++;
                     }
+                    return false;
                 }
             }
 
@@ -46,6 +71,17 @@ namespace SlimeOptimizer.Patches
     [HarmonyPatch(typeof(ChickenRandomMove), nameof(ChickenRandomMove.RegistryUpdate))]
     internal static class ChickenAiLodPatch
     {
+        private sealed class ChickenEntry
+        {
+            public Transform Transform;
+            public int Hash;
+            public int NextCheckFrame;
+            public byte Tier;
+        }
+
+        private static readonly FastObjCache<ChickenRandomMove, ChickenEntry> Cache =
+            new FastObjCache<ChickenRandomMove, ChickenEntry>(128);
+
         private static bool Prefix(ChickenRandomMove __instance)
         {
             if (!OptimizerConfig.EnableChickenAiLod || !CameraCache.HasCamera)
@@ -53,16 +89,33 @@ namespace SlimeOptimizer.Patches
                 return true;
             }
 
-            Vector3 diff = __instance.transform.position - CameraCache.Position;
-            float distSq = diff.sqrMagnitude;
-            if (distSq < 400f) // < 20m
+            int frame = CameraCache.FrameCount;
+            if (!Cache.TryGetValue(__instance, out ChickenEntry entry))
+            {
+                entry = new ChickenEntry
+                {
+                    Transform = __instance.transform,
+                    Hash = RuntimeHelpers.GetHashCode(__instance) & 0x7FFFFFFF,
+                    NextCheckFrame = -1
+                };
+                Cache.Set(__instance, entry);
+            }
+
+            if (frame >= entry.NextCheckFrame)
+            {
+                entry.NextCheckFrame = frame + 16 + (entry.Hash & 7);
+                float distSq = CameraCache.SqrDistanceToCamera(entry.Transform);
+                entry.Tier = distSq < 400f ? (byte)0 : (distSq >= 1600f ? (byte)2 : (byte)1);
+            }
+
+            byte tier = entry.Tier;
+            if (tier == 0)
             {
                 return true;
             }
 
-            int interval = distSq >= 1600f ? 10 : 5;
-            int phase = (Time.frameCount + (__instance.GetInstanceID() & 0x7FFFFFFF)) % interval;
-            if (phase == 0)
+            int mask = tier == 2 ? 7 : 3;
+            if (((frame + entry.Hash) & mask) == 0)
             {
                 return true;
             }

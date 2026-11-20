@@ -1,8 +1,6 @@
-using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using MonomiPark.SlimeRancher.DataModel;
 using MonomiPark.SlimeRancher.Regions;
@@ -16,18 +14,15 @@ namespace SlimeOptimizer.Patches
         private sealed class CachedKeys
         {
             public Identifiable.Id[] Keys;
-            public int LastCount;
+            public int LastCount = -1;
         }
 
         private delegate ActorModel EntryActorModelGetter(GameObjectActorModelIdentifiableIndex.Entry entry);
 
         private static readonly EntryActorModelGetter GetEntryActorModel = BuildActorModelGetter();
 
-        private static readonly ConditionalWeakTable<FindConsumable, CachedKeys> KeyCache =
-            new ConditionalWeakTable<FindConsumable, CachedKeys>();
-
-        private static readonly List<GameObjectActorModelIdentifiableIndex.Entry> SharedEntries =
-            new List<GameObjectActorModelIdentifiableIndex.Entry>(128);
+        private static readonly FastObjCache<FindConsumable, CachedKeys> KeyCache =
+            new FastObjCache<FindConsumable, CachedKeys>(256);
 
         private static EntryActorModelGetter BuildActorModelGetter()
         {
@@ -65,8 +60,8 @@ namespace SlimeOptimizer.Patches
         {
             if (!KeyCache.TryGetValue(instance, out CachedKeys cached))
             {
-                cached = new CachedKeys { LastCount = -1 };
-                KeyCache.Add(instance, cached);
+                cached = new CachedKeys();
+                KeyCache.Set(instance, cached);
             }
 
             int count = searchIds.Count;
@@ -97,7 +92,7 @@ namespace SlimeOptimizer.Patches
 
             GameObject selfGo = instance.gameObject;
             Vector3 selfPos = instance.transform.position;
-            GameObject playerGo = SRSingleton<SceneContext>.Instance != null ? SRSingleton<SceneContext>.Instance.Player : null;
+            GameObject playerGo = CameraCache.PlayerGo;
 
             int count = gameObjects.Count;
             if (OptimizerConfig.EnableStatsCollection)
@@ -110,7 +105,7 @@ namespace SlimeOptimizer.Patches
             {
                 GameObjectActorModelIdentifiableIndex.Entry entry = gameObjects[i];
                 GameObject go = entry.GameObject;
-                if (go == null || go == selfGo)
+                if (ReferenceEquals(go, null) || ReferenceEquals(go, selfGo))
                 {
                     continue;
                 }
@@ -138,7 +133,7 @@ namespace SlimeOptimizer.Patches
                 }
 
                 Vector3 targetPos = go.transform.position;
-                if (go == playerGo)
+                if (ReferenceEquals(go, playerGo))
                 {
                     targetPos.y += 1f;
                 }
@@ -156,7 +151,7 @@ namespace SlimeOptimizer.Patches
                     {
                         result = go;
                         bestScore = score;
-                        drive = Mathf.Clamp(rawDrive, 0f, 1f);
+                        drive = rawDrive < 0f ? 0f : (rawDrive > 1f ? 1f : rawDrive);
                     }
                 }
             }

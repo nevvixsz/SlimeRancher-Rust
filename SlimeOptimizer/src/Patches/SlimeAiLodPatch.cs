@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -58,17 +59,15 @@ namespace SlimeOptimizer.Patches
                 return;
             }
 
-            CameraCache.EnsureCurrentFrame();
             if (!CameraCache.HasCamera)
             {
                 return;
             }
 
             Vector3 pos = __instance.transform.position;
-            Vector3 cam = CameraCache.Position;
-            float dx = pos.x - cam.x;
-            float dy = pos.y - cam.y;
-            float dz = pos.z - cam.z;
+            float dx = pos.x - CameraCache.CamX;
+            float dy = pos.y - CameraCache.CamY;
+            float dz = pos.z - CameraCache.CamZ;
             float sqrDist = dx * dx + dy * dy + dz * dz;
 
             float ultraDist = OptimizerConfig.UltraFarAiDistance;
@@ -92,7 +91,7 @@ namespace SlimeOptimizer.Patches
                 return;
             }
 
-            float jitter = (__instance.GetInstanceID() & 3) * 0.05f;
+            float jitter = (RuntimeHelpers.GetHashCode(__instance) & 3) * 0.05f;
             float now = Time.fixedTime;
 
             if (rethinkUpdated && rethinkInterval > 1f)

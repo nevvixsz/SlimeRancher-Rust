@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
@@ -7,83 +8,133 @@ namespace SlimeOptimizer.Patches
     [HarmonyPatch(typeof(SRBehaviour), nameof(SRBehaviour.PlayFX), new[] { typeof(GameObject) })]
     internal static class ParticleCapPatch
     {
-        private sealed class PsEntry
+        private struct PsSlot
         {
             public ParticleSystem System;
             public int OriginalMaxParticles;
-            public bool Capped;
         }
 
-        private static readonly ConditionalWeakTable<GameObject, PsEntry[]> Cache =
-            new ConditionalWeakTable<GameObject, PsEntry[]>();
+        private sealed class FxCacheEntry
+        {
+            public PsSlot[] Slots;
+            public int AppliedCap;
+            public bool AppliedEnabled;
+        }
 
+        private static readonly FastObjCache<GameObject, FxCacheEntry> Cache =
+            new FastObjCache<GameObject, FxCacheEntry>(256);
+
+        private static readonly List<ParticleSystem> TempSystems = new List<ParticleSystem>(8);
+        private static readonly PsSlot[] EmptySlots = new PsSlot[0];
+        private static bool _anyEverCapped;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void Prefix(GameObject fxObject)
         {
-            if (fxObject == null)
-            {
-                return;
-            }
-
-            PsEntry[] entries = Cache.GetValue(fxObject, go =>
-            {
-                ParticleSystem[] systems = go.GetComponentsInChildren<ParticleSystem>(true);
-                if (systems == null || systems.Length == 0)
-                {
-                    return new PsEntry[0];
-                }
-
-                PsEntry[] arr = new PsEntry[systems.Length];
-                for (int i = 0; i < systems.Length; i++)
-                {
-                    arr[i] = new PsEntry
-                    {
-                        System = systems[i],
-                        OriginalMaxParticles = systems[i].main.maxParticles,
-                        Capped = false
-                    };
-                }
-                return arr;
-            });
-
-            if (entries.Length == 0)
+            if (ReferenceEquals(fxObject, null))
             {
                 return;
             }
 
             bool capEnabled = OptimizerConfig.EnableParticleCap;
-            int cap = Mathf.Max(8, OptimizerConfig.MaxParticlesPerSystem);
-
-            for (int i = 0; i < entries.Length; i++)
+            if (!capEnabled && !_anyEverCapped)
             {
-                PsEntry e = entries[i];
-                if (e.System == null)
+                return;
+            }
+
+            int cap = OptimizerConfig.MaxParticlesPerSystem;
+            if (cap < 8)
+            {
+                cap = 8;
+            }
+
+            if (!Cache.TryGetValue(fxObject, out FxCacheEntry entry))
+            {
+                if (!capEnabled)
                 {
-                    continue;
+                    return;
                 }
 
-                ParticleSystem.MainModule main = e.System.main;
-                if (capEnabled)
+                TempSystems.Clear();
+                fxObject.GetComponentsInChildren<ParticleSystem>(true, TempSystems);
+                int count = TempSystems.Count;
+                PsSlot[] slots;
+                if (count == 0)
                 {
-                    if (e.OriginalMaxParticles > cap && main.maxParticles != cap)
+                    slots = EmptySlots;
+                }
+                else
+                {
+                    slots = new PsSlot[count];
+                    for (int i = 0; i < count; i++)
                     {
+                        ParticleSystem ps = TempSystems[i];
+                        slots[i] = new PsSlot
+                        {
+                            System = ps,
+                            OriginalMaxParticles = ps.main.maxParticles
+                        };
+                    }
+                }
+                TempSystems.Clear();
+
+                entry = new FxCacheEntry
+                {
+                    Slots = slots,
+                    AppliedCap = -1,
+                    AppliedEnabled = false
+                };
+                Cache.Set(fxObject, entry);
+            }
+
+            if (entry.Slots.Length == 0)
+            {
+                return;
+            }
+
+            if (entry.AppliedEnabled == capEnabled && (!capEnabled || entry.AppliedCap == cap))
+            {
+                return;
+            }
+
+            PsSlot[] arr = entry.Slots;
+            if (capEnabled)
+            {
+                _anyEverCapped = true;
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    ParticleSystem ps = arr[i].System;
+                    if (ps == null)
+                    {
+                        continue;
+                    }
+
+                    if (arr[i].OriginalMaxParticles > cap)
+                    {
+                        ParticleSystem.MainModule main = ps.main;
                         main.maxParticles = cap;
-                        e.Capped = true;
                         if (OptimizerConfig.EnableStatsCollection)
                         {
                             OptimizerStats.ParticlesCapped++;
                         }
                     }
-                    else if (main.maxParticles > cap)
+                }
+                entry.AppliedEnabled = true;
+                entry.AppliedCap = cap;
+            }
+            else if (entry.AppliedEnabled)
+            {
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    ParticleSystem ps = arr[i].System;
+                    if (ps != null)
                     {
-                        main.maxParticles = cap;
-                        e.Capped = true;
+                        ParticleSystem.MainModule main = ps.main;
+                        main.maxParticles = arr[i].OriginalMaxParticles;
                     }
                 }
-                else if (e.Capped)
-                {
-                    main.maxParticles = e.OriginalMaxParticles;
-                    e.Capped = false;
-                }
+                entry.AppliedEnabled = false;
+                entry.AppliedCap = -1;
             }
         }
     }
