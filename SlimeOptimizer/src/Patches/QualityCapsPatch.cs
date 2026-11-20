@@ -83,6 +83,43 @@ namespace SlimeOptimizer.Patches
             {
                 Shader.globalMaximumLOD = maxGlobalShaderLod;
             }
+
+            if (OptimizerConfig.DisableSoftParticles && QualitySettings.softParticles)
+            {
+                QualitySettings.softParticles = false;
+            }
+
+            int maxBudget = OptimizerConfig.MaxParticleRaycastBudget;
+            if (maxBudget >= 0 && QualitySettings.particleRaycastBudget > maxBudget)
+            {
+                QualitySettings.particleRaycastBudget = maxBudget;
+            }
+
+            int maxAniso = OptimizerConfig.MaxAnisoMode;
+            if (maxAniso >= 0 && maxAniso <= 2 && (int)QualitySettings.anisotropicFiltering > maxAniso)
+            {
+                QualitySettings.anisotropicFiltering = (AnisotropicFiltering)maxAniso;
+            }
+        }
+
+        public static void ApplyPhysicsSettings()
+        {
+            if (OptimizerConfig.EnablePhysicsOpt)
+            {
+                int target = Mathf.Clamp(OptimizerConfig.PhysicsSolverIterations, 2, 6);
+                if (Physics.defaultSolverIterations != target)
+                {
+                    Physics.defaultSolverIterations = target;
+                }
+                if (Physics.defaultSolverVelocityIterations != 1)
+                {
+                    Physics.defaultSolverVelocityIterations = 1;
+                }
+            }
+            else if (Physics.defaultSolverIterations != 6)
+            {
+                Physics.defaultSolverIterations = 6;
+            }
         }
 
         private static int NormalizeCascades(int cascades)
@@ -107,6 +144,7 @@ namespace SlimeOptimizer.Patches
             {
                 ApplyCapsIfEnabled();
             }
+            ApplyPhysicsSettings();
         }
     }
 }

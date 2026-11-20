@@ -30,6 +30,10 @@ namespace SlimeOptimizer
         public static long SsaoKeywordResetsAvoided;
         public static long FaceAnimCallsSkipped;
         public static long EmotionsCallsSkipped;
+        public static long AnimatorsCulled;
+        public static long BloomFramesOptimized;
+        public static long KeepUprightSkipped;
+        public static long ChickenAiSkipped;
 
         public static void Reset()
         {
@@ -61,6 +65,10 @@ namespace SlimeOptimizer
             SsaoKeywordResetsAvoided = 0;
             FaceAnimCallsSkipped = 0;
             EmotionsCallsSkipped = 0;
+            AnimatorsCulled = 0;
+            BloomFramesOptimized = 0;
+            KeepUprightSkipped = 0;
+            ChickenAiSkipped = 0;
         }
     }
 }

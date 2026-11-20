@@ -27,6 +27,9 @@ namespace SlimeOptimizer.Patches
         private static readonly MethodInfo DeselectAllMethod =
             AccessTools.Method(typeof(OptionsUI), "DeselectAll");
 
+        private static readonly MethodInfo NotifyQualityChangedMethod =
+            AccessTools.Method(typeof(OptionsUI), "NotifyQualityChanged");
+
         [HarmonyPatch("SetupOptionsUI")]
         [HarmonyPostfix]
         private static void SetupOptionsUIPostfix(OptionsUI __instance)
@@ -199,6 +202,11 @@ namespace SlimeOptimizer.Patches
             AddSectionHeader(contentParent, font, fontMat, T("Пресеты производительности (Sodium Style)", "Performance Presets"));
             AddPresetsRow(ui, state, contentParent, font, fontMat);
 
+            AddToggle(ui, state, contentParent, font, fontMat,
+                T("Показывать счётчик FPS и ms сверху (HUD)", "Show FPS / Frametime HUD Overlay"),
+                () => OptimizerConfig.ShowFpsHud,
+                v => OptimizerConfig.ShowFpsHud = v);
+
             AddSectionHeader(contentParent, font, fontMat, T("Графика и GPU", "Video & GPU Caps"));
             AddToggle(ui, state, contentParent, font, fontMat,
                 T("Умные лимиты графики (тени / MSAA / свет)", "Smart GPU Quality Caps"),
@@ -246,8 +254,28 @@ namespace SlimeOptimizer.Patches
                 () => ShaderLodToStep(OptimizerConfig.MaxGlobalShaderLod),
                 s => { OptimizerConfig.MaxGlobalShaderLod = StepToShaderLod(s); SettingsDatabase.ApplyQualityCapsOnly(); },
                 s => { int l = StepToShaderLod(s); return l < 0 ? T("Макс", "Auto") : l.ToString(CultureInfo.InvariantCulture); });
+            AddToggle(ui, state, contentParent, font, fontMat,
+                T("Отключить мягкие частицы (SoftParticles)", "Disable Soft Particles"),
+                () => OptimizerConfig.DisableSoftParticles,
+                v => { OptimizerConfig.DisableSoftParticles = v; SettingsDatabase.ApplyQualityCapsOnly(); });
+            AddIntSlider(ui, state, contentParent, font, fontMat,
+                T("Анизотропная фильтрация (0=Выкл, 1=Авто, 2=Макс)", "Max Anisotropic Filtering"),
+                0, 2,
+                () => OptimizerConfig.MaxAnisoMode,
+                v => { OptimizerConfig.MaxAnisoMode = v; SettingsDatabase.ApplyQualityCapsOnly(); },
+                FormatAniso);
+            AddIntSlider(ui, state, contentParent, font, fontMat,
+                T("Бюджет коллизий частиц (лучи)", "Particle Raycast Budget"),
+                16, 1024,
+                () => OptimizerConfig.MaxParticleRaycastBudget,
+                v => { OptimizerConfig.MaxParticleRaycastBudget = v; SettingsDatabase.ApplyQualityCapsOnly(); },
+                v => v.ToString(CultureInfo.InvariantCulture));
 
-            AddSectionHeader(contentParent, font, fontMat, T("Постобработка SSAO", "SSAO Post-Processing"));
+            AddSectionHeader(contentParent, font, fontMat, T("Постобработка (SSAO и Bloom)", "SSAO & Bloom Post-Processing"));
+            AddToggle(ui, state, contentParent, font, fontMat,
+                T("Ускорение Bloom (1 проход / Low Res)", "Fast Bloom Optimizer"),
+                () => OptimizerConfig.EnableBloomOptimizer,
+                v => OptimizerConfig.EnableBloomOptimizer = v);
             AddToggle(ui, state, contentParent, font, fontMat,
                 T("Оптимизатор SSAO (ускорение в 4x + без утечек)", "Fast SSAO Optimizer"),
                 () => OptimizerConfig.EnableSsaoOptimizer,
@@ -354,6 +382,28 @@ namespace SlimeOptimizer.Patches
                 T("LOD анимации лиц и эмоций слаймов", "Slime Face & Emotions LOD"),
                 () => OptimizerConfig.EnableSlimeFaceEmotionLod,
                 v => OptimizerConfig.EnableSlimeFaceEmotionLod = v);
+            AddToggle(ui, state, contentParent, font, fontMat,
+                T("Куллинг аниматоров за спиной камеры", "Animator Frustum Culling"),
+                () => OptimizerConfig.EnableAnimatorCulling,
+                v => { OptimizerConfig.EnableAnimatorCulling = v; AnimatorCullingPatch.ReapplyAll(); });
+            AddToggle(ui, state, contentParent, font, fontMat,
+                T("Оптимизация физики загонов (PhysX Solver)", "Optimize Ranch PhysX Solver"),
+                () => OptimizerConfig.EnablePhysicsOpt,
+                v => { OptimizerConfig.EnablePhysicsOpt = v; QualityCapsPatch.ApplyPhysicsSettings(); });
+            AddIntSlider(ui, state, contentParent, font, fontMat,
+                T("Итерации солвера физики (меньше = быстрее)", "PhysX Solver Iterations"),
+                2, 6,
+                () => OptimizerConfig.PhysicsSolverIterations,
+                v => { OptimizerConfig.PhysicsSolverIterations = v; QualityCapsPatch.ApplyPhysicsSettings(); },
+                v => v.ToString(CultureInfo.InvariantCulture));
+            AddToggle(ui, state, contentParent, font, fontMat,
+                T("Усыплять KeepUpright у спящих/дальних тел", "Skip Sleeping/Far KeepUpright"),
+                () => OptimizerConfig.EnableKeepUprightOpt,
+                v => OptimizerConfig.EnableKeepUprightOpt = v);
+            AddToggle(ui, state, contentParent, font, fontMat,
+                T("LOD ИИ дальних куриц (ChickenRandomMove)", "Distant Chicken AI LOD"),
+                () => OptimizerConfig.EnableChickenAiLod,
+                v => OptimizerConfig.EnableChickenAiLod = v);
 
             AddSectionHeader(contentParent, font, fontMat, T("Движок, Память и Статистика (GC)", "Engine, Memory & Stats"));
             AddToggle(ui, state, contentParent, font, fontMat,
@@ -511,21 +561,25 @@ namespace SlimeOptimizer.Patches
             CreateActionButton(ui, row.transform, font, fontMat, T("Макс. FPS", "Max FPS"), new Color(0.22f, 0.65f, 0.38f), () =>
             {
                 SettingsDatabase.ApplyPreset(OptimizerPreset.MaxFps);
+                NotifyQualityChangedMethod?.Invoke(ui, null);
                 RefreshState(state);
             });
             CreateActionButton(ui, row.transform, font, fontMat, T("Баланс", "Balanced"), new Color(0.22f, 0.52f, 0.78f), () =>
             {
                 SettingsDatabase.ApplyPreset(OptimizerPreset.Balanced);
+                NotifyQualityChangedMethod?.Invoke(ui, null);
                 RefreshState(state);
             });
             CreateActionButton(ui, row.transform, font, fontMat, T("Качество", "High Quality"), new Color(0.68f, 0.50f, 0.20f), () =>
             {
                 SettingsDatabase.ApplyPreset(OptimizerPreset.HighQuality);
+                NotifyQualityChangedMethod?.Invoke(ui, null);
                 RefreshState(state);
             });
             CreateActionButton(ui, row.transform, font, fontMat, T("Ваниль (Выкл.)", "Vanilla (Off)"), new Color(0.62f, 0.28f, 0.28f), () =>
             {
                 SettingsDatabase.ApplyPreset(OptimizerPreset.VanillaOff);
+                NotifyQualityChangedMethod?.Invoke(ui, null);
                 RefreshState(state);
             });
         }
@@ -846,6 +900,16 @@ namespace SlimeOptimizer.Patches
                 case 1: return T("Средн.", "Med");
                 case 2: return T("Высок.", "High");
                 default: return T("Ультра", "VeryHigh");
+            }
+        }
+
+        private static string FormatAniso(int v)
+        {
+            switch (v)
+            {
+                case 0: return T("Выкл", "Off");
+                case 1: return T("Авто", "Enable");
+                default: return T("Макс", "Force");
             }
         }
 
