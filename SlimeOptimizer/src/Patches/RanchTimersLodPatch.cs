@@ -1,21 +1,32 @@
-using System;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
 namespace SlimeOptimizer.Patches
 {
-    internal static class RanchTimersLodHelper
+    [HarmonyPatch(typeof(ResourceCycle), nameof(ResourceCycle.RegistryUpdate))]
+    internal static class ResourceCycleLodPatch
     {
-        public static bool ShouldRun(Component component)
+        [HarmonyPrefix]
+        private static bool Prefix(
+            ResourceCycle __instance,
+            bool ___preparingToRelease,
+            Material ___rotInProgressMat,
+            object ___additionalRipenessDelegate)
         {
-            if (!OptimizerConfig.EnableRanchTimersLod)
+            if (!OptimizerConfig.EnableRanchTimersLod ||
+                ___preparingToRelease ||
+                !ReferenceEquals(___rotInProgressMat, null) ||
+                !ReferenceEquals(___additionalRipenessDelegate, null))
             {
                 return true;
             }
 
-            int interval = Math.Max(2, OptimizerConfig.RanchTimersLodInterval);
-            int phase = (Time.frameCount + (component.GetInstanceID() & 0x7FFFFFFF)) % interval;
-            if (phase == 0)
+            int interval = OptimizerConfig.RanchTimersLodInterval;
+            int mask = interval >= 16 ? 15 : (interval >= 8 ? 7 : (interval >= 4 ? 3 : 1));
+            int hash = RuntimeHelpers.GetHashCode(__instance);
+
+            if (((CameraCache.FrameCount + hash) & mask) == 0)
             {
                 return true;
             }
@@ -25,51 +36,6 @@ namespace SlimeOptimizer.Patches
                 OptimizerStats.RanchTimersSkipped++;
             }
             return false;
-        }
-    }
-
-    [HarmonyPatch(typeof(ResourceCycle), nameof(ResourceCycle.RegistryUpdate))]
-    internal static class ResourceCycleLodPatch
-    {
-        private static bool Prefix(
-            ResourceCycle __instance,
-            bool ___preparingToRelease,
-            Material ___rotInProgressMat,
-            object ___additionalRipenessDelegate)
-        {
-            if (___preparingToRelease || ___rotInProgressMat != null || ___additionalRipenessDelegate != null)
-            {
-                return true;
-            }
-
-            return RanchTimersLodHelper.ShouldRun(__instance);
-        }
-    }
-
-    [HarmonyPatch(typeof(DestroyPlortAfterTime), nameof(DestroyPlortAfterTime.RegistryUpdate))]
-    internal static class DestroyPlortAfterTimeLodPatch
-    {
-        private static bool Prefix(DestroyPlortAfterTime __instance)
-        {
-            return RanchTimersLodHelper.ShouldRun(__instance);
-        }
-    }
-
-    [HarmonyPatch(typeof(DestroyAfterTime), nameof(DestroyAfterTime.RegistryUpdate))]
-    internal static class DestroyAfterTimeLodPatch
-    {
-        private static bool Prefix(DestroyAfterTime __instance)
-        {
-            return RanchTimersLodHelper.ShouldRun(__instance);
-        }
-    }
-
-    [HarmonyPatch(typeof(GlintController), nameof(GlintController.RegistryUpdate))]
-    internal static class GlintControllerLodPatch
-    {
-        private static bool Prefix(GlintController __instance)
-        {
-            return RanchTimersLodHelper.ShouldRun(__instance);
         }
     }
 }

@@ -1,4 +1,4 @@
-using System;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -6,6 +6,18 @@ namespace SlimeOptimizer.Patches
 {
     internal static class SlimeFaceEmotionLodHelper
     {
+        private sealed class LodEntry
+        {
+            public Transform Transform;
+            public int Hash;
+            public int NextCheckFrame;
+            public byte Tier; // 0 = near, 1 = far, 2 = ultra
+        }
+
+        private static readonly FastObjCache<Component, LodEntry> Cache =
+            new FastObjCache<Component, LodEntry>(512);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool ShouldRunThisFrame(Component component, bool isFaceAnimator)
         {
             if (!OptimizerConfig.EnableSlimeFaceEmotionLod || !CameraCache.HasCamera)
@@ -13,22 +25,43 @@ namespace SlimeOptimizer.Patches
                 return true;
             }
 
-            Vector3 diff = component.transform.position - CameraCache.Position;
-            float distSq = diff.sqrMagnitude;
+            int frame = CameraCache.FrameCount;
+            if (!Cache.TryGetValue(component, out LodEntry entry))
+            {
+                entry = new LodEntry
+                {
+                    Transform = component.transform,
+                    Hash = RuntimeHelpers.GetHashCode(component) & 0x7FFFFFFF,
+                    NextCheckFrame = -1,
+                    Tier = 0
+                };
+                Cache.Set(component, entry);
+            }
 
-            float nearDist = OptimizerConfig.FaceEmotionLodDistance;
-            if (distSq < nearDist * nearDist)
+            if (frame >= entry.NextCheckFrame)
+            {
+                entry.NextCheckFrame = frame + 16 + (entry.Hash & 7);
+                float distSq = CameraCache.SqrDistanceToCamera(entry.Transform);
+                float nearDist = OptimizerConfig.FaceEmotionLodDistance;
+                if (distSq < nearDist * nearDist)
+                {
+                    entry.Tier = 0;
+                }
+                else
+                {
+                    float ultraDist = OptimizerConfig.FaceEmotionUltraDistance;
+                    entry.Tier = distSq >= ultraDist * ultraDist ? (byte)2 : (byte)1;
+                }
+            }
+
+            byte tier = entry.Tier;
+            if (tier == 0)
             {
                 return true;
             }
 
-            float ultraDist = OptimizerConfig.FaceEmotionUltraDistance;
-            int interval = distSq >= ultraDist * ultraDist
-                ? Math.Max(2, OptimizerConfig.FaceEmotionUltraInterval)
-                : Math.Max(2, OptimizerConfig.FaceEmotionLodInterval);
-
-            int phase = (Time.frameCount + (component.GetInstanceID() & 0x7FFFFFFF)) % interval;
-            if (phase == 0)
+            int mask = tier == 2 ? 15 : 7;
+            if (((frame + entry.Hash) & mask) == 0)
             {
                 return true;
             }

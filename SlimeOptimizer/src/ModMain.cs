@@ -16,7 +16,7 @@ namespace SlimeOptimizer
             SettingsDatabase.LoadOrCreate();
             HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
             Console.RegisterCommand(new SlimeOptCommand());
-            Logger?.LogSuccess("SlimeOptimizer v0.8.0 pre-loaded (Sodium-style Options -> Advanced + DB ready). Use 'slimeopt' in console.");
+            Logger?.LogSuccess("SlimeOptimizer v0.9.0 pre-loaded (Zero-GC / Zero-Icall FastCache engine). Use 'slimeopt' in console.");
         }
 
         public override void Load()

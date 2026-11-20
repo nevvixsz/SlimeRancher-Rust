@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -20,8 +19,11 @@ namespace SlimeOptimizer.Patches
             public int LastSamples = -1;
         }
 
-        private static readonly ConditionalWeakTable<SSAOPro, SsaoState> States =
-            new ConditionalWeakTable<SSAOPro, SsaoState>();
+        private static readonly FastObjCache<SSAOPro, SsaoState> States =
+            new FastObjCache<SSAOPro, SsaoState>(8);
+
+        private static SSAOPro _lastKey;
+        private static SsaoState _lastState;
 
         private static readonly string[][] SampleKeywords =
         {
@@ -49,13 +51,32 @@ namespace SlimeOptimizer.Patches
                 return true;
             }
 
-            if (__instance.ShaderSSAO == null || Mathf.Approximately(__instance.Intensity, 0f))
+            float intensity = __instance.Intensity;
+            if (__instance.ShaderSSAO == null || (intensity > -1e-5f && intensity < 1e-5f))
             {
                 Graphics.Blit(source, destination);
                 return false;
             }
 
-            SsaoState state = States.GetOrCreateValue(__instance);
+            SsaoState state;
+            if (ReferenceEquals(__instance, _lastKey))
+            {
+                state = _lastState;
+            }
+            else
+            {
+                if (!States.TryGetValue(__instance, out state))
+                {
+                    state = new SsaoState
+                    {
+                        Camera = __instance.GetComponent<Camera>()
+                    };
+                    States.Set(__instance, state);
+                }
+                _lastKey = __instance;
+                _lastState = state;
+            }
+
             if (state.Camera == null)
             {
                 state.Camera = __instance.GetComponent<Camera>();
@@ -89,11 +110,13 @@ namespace SlimeOptimizer.Patches
             }
 
             int passNum = 0;
-            if (__instance.NoiseTexture != null)
+            Texture noise = __instance.NoiseTexture;
+            if (noise != null)
             {
                 passNum = 1;
             }
-            if (!Mathf.Approximately(__instance.LumContribution, 0f))
+            float lum = __instance.LumContribution;
+            if (lum < -1e-5f || lum > 1e-5f)
             {
                 passNum += 2;
             }
@@ -102,15 +125,15 @@ namespace SlimeOptimizer.Patches
             Camera cam = state.Camera;
             mat.SetMatrix(PropInverseViewProject, (cam.projectionMatrix * cam.worldToCameraMatrix).inverse);
             mat.SetMatrix(PropCameraModelView, cam.cameraToWorldMatrix);
-            mat.SetTexture(PropNoiseTex, __instance.NoiseTexture);
+            mat.SetTexture(PropNoiseTex, noise);
             mat.SetVector(PropParams1, new Vector4(
-                __instance.NoiseTexture == null ? 0f : __instance.NoiseTexture.width,
+                noise == null ? 0f : noise.width,
                 __instance.Radius,
-                __instance.Intensity,
+                intensity,
                 __instance.Distance));
             mat.SetVector(PropParams2, new Vector4(
                 __instance.Bias,
-                __instance.LumContribution,
+                lum,
                 __instance.CutoffDistance,
                 __instance.CutoffFalloff));
             mat.SetColor(PropOcclusionColor, __instance.OcclusionColor);

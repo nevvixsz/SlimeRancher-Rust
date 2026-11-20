@@ -2,7 +2,14 @@
 
 Мод оптимизации производительности и снижения микрофризов (GC) для **Slime Rancher** на базе **SRML** (`0.2.1.0+`) и **Harmony**.
 
-## Что включено (v0.8.0)
+## Что включено (v0.9.0 — Zero-GC / Zero-Icall FastCache Engine)
+
+### Архитектурная оптимизация самого мода (`v0.9.0`)
+- **`FastObjCache<TKey, TVal>`**: плоская lock-free хэш-таблица открытой адресации с `RuntimeHelpers.GetHashCode` заменила `ConditionalWeakTable` (и её внутренний `Monitor.Enter` lock в Mono) во всех горячих патчах, плюс 1-слотный `ReferenceEquals` кэш (`SsaoFastPatch`, `BloomFastPatch`, `DisableEffectsCachePatch`).
+- **Единый снимок кадра `CameraCache` (`FrameCount`, `CamX/Y/Z`, `PlayerGo`)**: убраны сотни покадровых native Unity icall'ов (`Time.frameCount`, `GetInstanceID()`, `transform.position`) — дистанционный Tier (`Near / Far / Ultra`) кэшируется на 8–16 кадров, а все фазы проверяются побитовыми масками `&` без целочисленного деления `%`.
+- **Удалены анти-оптимизации таймеров**: убраны Harmony-хуки с микро-методов `DestroyPlortAfterTime`, `DestroyAfterTime`, `GlintController` (чей ванильный код быстрее любой обёртки), оставлен только `ResourceCycle` LOD.
+- **Zero-GC `ParticleCapPatch` и `FpsHudOverlay`**: `PlayFX` выходит за 1 сравнение `int == int` для уже обработанных эффектов из пула, а FPS HUD пишет цифры в статический `char[64]` через `TMP_Text.SetCharArray` с **0 байт GC-аллокаций**.
+- **Ранний выход в `ExpressionCachePatch`**: пропуск всего цикла рендереров при неизменном `slimeExpression`.
 
 ### Меню настроек в стиле Sodium (`Options` → вкладка `Расширенное` / `Advanced`) + FPS HUD
 - В официальное меню **Настройки** (и в главном меню, и в меню паузы в игре) добавлена структурированная вкладка **«Расширенное»** (`AdvancedOptionsPatch`):

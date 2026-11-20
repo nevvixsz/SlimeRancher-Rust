@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -20,8 +19,8 @@ namespace SlimeOptimizer.Patches
         private static readonly MethodInfo GetCallbackMethod =
             AccessTools.Method(typeof(SlimePlexerCachePatch), nameof(GetGroundedCallback));
 
-        private static readonly ConditionalWeakTable<SlimeSubbehaviourPlexer, Action<RaycastHit>> CallbackCache =
-            new ConditionalWeakTable<SlimeSubbehaviourPlexer, Action<RaycastHit>>();
+        private static readonly FastObjCache<SlimeSubbehaviourPlexer, Action<RaycastHit>> CallbackCache =
+            new FastObjCache<SlimeSubbehaviourPlexer, Action<RaycastHit>>(512);
 
         [HarmonyPrepare]
         private static bool Prepare()
@@ -57,7 +56,7 @@ namespace SlimeOptimizer.Patches
 
         public static Action<RaycastHit> GetGroundedCallback(SlimeSubbehaviourPlexer plexer)
         {
-            if (!OptimizerConfig.EnablePlexerDelegateCache || plexer == null)
+            if (!OptimizerConfig.EnablePlexerDelegateCache || ReferenceEquals(plexer, null))
             {
                 return (Action<RaycastHit>)Delegate.CreateDelegate(typeof(Action<RaycastHit>), plexer, OnGroundedMethod);
             }
@@ -65,7 +64,7 @@ namespace SlimeOptimizer.Patches
             if (!CallbackCache.TryGetValue(plexer, out Action<RaycastHit> callback))
             {
                 callback = (Action<RaycastHit>)Delegate.CreateDelegate(typeof(Action<RaycastHit>), plexer, OnGroundedMethod);
-                CallbackCache.Add(plexer, callback);
+                CallbackCache.Set(plexer, callback);
             }
             else if (OptimizerConfig.EnableStatsCollection)
             {

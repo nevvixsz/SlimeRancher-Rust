@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -18,13 +17,31 @@ namespace SlimeOptimizer.Patches
             public bool Initialized;
         }
 
-        private static readonly ConditionalWeakTable<Renderer, CachedFaceMaterials> Cache =
-            new ConditionalWeakTable<Renderer, CachedFaceMaterials>();
+        private sealed class ApplicatorExprState
+        {
+            public SlimeFace.SlimeExpression LastExpression;
+            public SlimeAppearance LastAppearance;
+            public bool HasExpression;
+        }
+
+        private static readonly FastObjCache<Renderer, CachedFaceMaterials> RendererCache =
+            new FastObjCache<Renderer, CachedFaceMaterials>(512);
+
+        private static readonly FastObjCache<SlimeAppearanceApplicator, ApplicatorExprState> ApplicatorCache =
+            new FastObjCache<SlimeAppearanceApplicator, ApplicatorExprState>(256);
 
         [HarmonyPatch("ClearAppearance")]
         [HarmonyPrefix]
-        private static void ClearAppearancePrefix(List<SlimeAppearanceApplicator.FaceRenderer> ____faceRenderers)
+        private static void ClearAppearancePrefix(
+            SlimeAppearanceApplicator __instance,
+            List<SlimeAppearanceApplicator.FaceRenderer> ____faceRenderers)
         {
+            if (ApplicatorCache.TryGetValue(__instance, out ApplicatorExprState appState))
+            {
+                appState.HasExpression = false;
+                appState.LastAppearance = null;
+            }
+
             if (____faceRenderers == null)
             {
                 return;
@@ -33,7 +50,7 @@ namespace SlimeOptimizer.Patches
             for (int i = 0; i < ____faceRenderers.Count; i++)
             {
                 Renderer r = ____faceRenderers[i].Renderer;
-                if (r != null && Cache.TryGetValue(r, out CachedFaceMaterials entry))
+                if (r != null && RendererCache.TryGetValue(r, out CachedFaceMaterials entry))
                 {
                     entry.Initialized = false;
                     entry.Materials = null;
@@ -55,12 +72,30 @@ namespace SlimeOptimizer.Patches
                 return true;
             }
 
-            if (__instance.Appearance == null || __instance.Appearance.Face == null || ____faceRenderers == null)
+            SlimeAppearance appearance = __instance.Appearance;
+            if (appearance == null || appearance.Face == null || ____faceRenderers == null)
             {
                 return true;
             }
 
-            SlimeExpressionFace expressionFace = __instance.Appearance.Face.GetExpressionFace(slimeExpression);
+            if (!ApplicatorCache.TryGetValue(__instance, out ApplicatorExprState appState))
+            {
+                appState = new ApplicatorExprState();
+                ApplicatorCache.Set(__instance, appState);
+            }
+
+            if (appState.HasExpression &&
+                appState.LastExpression == slimeExpression &&
+                ReferenceEquals(appState.LastAppearance, appearance))
+            {
+                if (OptimizerConfig.EnableStatsCollection)
+                {
+                    OptimizerStats.ExpressionNoOpsAvoided++;
+                }
+                return false;
+            }
+
+            SlimeExpressionFace expressionFace = appearance.Face.GetExpressionFace(slimeExpression);
 
             for (int i = 0; i < ____faceRenderers.Count; i++)
             {
@@ -71,10 +106,10 @@ namespace SlimeOptimizer.Patches
                     continue;
                 }
 
-                if (!Cache.TryGetValue(r, out CachedFaceMaterials entry))
+                if (!RendererCache.TryGetValue(r, out CachedFaceMaterials entry))
                 {
                     entry = new CachedFaceMaterials();
-                    Cache.Add(r, entry);
+                    RendererCache.Set(r, entry);
                 }
 
                 if (!entry.Initialized)
@@ -139,6 +174,9 @@ namespace SlimeOptimizer.Patches
                 }
             }
 
+            appState.LastExpression = slimeExpression;
+            appState.LastAppearance = appearance;
+            appState.HasExpression = true;
             return false;
         }
     }

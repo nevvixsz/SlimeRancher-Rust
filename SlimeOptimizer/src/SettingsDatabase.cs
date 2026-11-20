@@ -170,9 +170,6 @@ namespace SlimeOptimizer
                     if (IsGameContextReady())
                     {
                         SRQualitySettings.CurrentLevel = SRQualitySettings.Level.LOWEST;
-                        SRQualitySettings.Shadows = SRQualitySettings.ShadowsLevel.NONE;
-                        SRQualitySettings.AmbientOcclusion = false;
-                        SRQualitySettings.Bloom = false;
                     }
 
                     OptimizerConfig.EnableSmartQualityCaps = true;
@@ -230,8 +227,9 @@ namespace SlimeOptimizer
                     OptimizerConfig.EnableKeepUprightOpt = true;
                     OptimizerConfig.EnableChickenAiLod = true;
                     OptimizerConfig.EnableRanchTimersLod = true;
-                    OptimizerConfig.RanchTimersLodInterval = 15;
+                    OptimizerConfig.RanchTimersLodInterval = 16;
                     OptimizerConfig.EnableSmallObjectShadowCull = true;
+                    OptimizerConfig.EnableStatsCollection = false;
                     break;
 
                 case OptimizerPreset.HighQuality:
@@ -312,7 +310,14 @@ namespace SlimeOptimizer
                     break;
             }
 
-            ApplyRuntimeEffects();
+            if (preset == OptimizerPreset.MaxFps)
+            {
+                ApplyRuntimeEffectsFast();
+            }
+            else
+            {
+                ApplyRuntimeEffects();
+            }
             Save();
         }
 
@@ -336,6 +341,17 @@ namespace SlimeOptimizer
         public static void ApplyRuntimeEffects()
         {
             Patches.QualityCapsPatch.ReapplyQualitySettings();
+            Patches.GrassOptimizerPatch.ReapplyAllScenes();
+            Patches.AnimatorCullingPatch.ReapplyAll();
+            Patches.CameraCullDistancePatch.MarkDirty();
+            Patches.CameraCullDistancePatch.UpdateActiveCamera();
+        }
+
+        private static void ApplyRuntimeEffectsFast()
+        {
+            Patches.QualityCapsPatch.ApplyCapsIfEnabled();
+            Patches.QualityCapsPatch.ApplyPhysicsSettings();
+            Patches.QualityCapsPatch.ApplyTargetFrameRate();
             Patches.GrassOptimizerPatch.ReapplyAllScenes();
             Patches.AnimatorCullingPatch.ReapplyAll();
             Patches.CameraCullDistancePatch.MarkDirty();

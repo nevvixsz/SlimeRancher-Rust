@@ -1,25 +1,34 @@
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace SlimeOptimizer
 {
     public static class CameraCache
     {
+        public static int FrameCount;
+        public static float CamX;
+        public static float CamY;
+        public static float CamZ;
+        public static bool HasCamera;
+        public static Camera MainCam;
+        public static GameObject PlayerGo;
+
         private static int _lastFrame = -1;
-        private static Camera _mainCamera;
         private static Vector3 _position;
-        private static bool _hasCamera;
 
         public static Camera MainCamera
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
                 EnsureCurrentFrame();
-                return _mainCamera;
+                return MainCam;
             }
         }
 
         public static Vector3 Position
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
                 EnsureCurrentFrame();
@@ -27,15 +36,13 @@ namespace SlimeOptimizer
             }
         }
 
-        public static bool HasCamera
+        public static bool HasCameraCached
         {
-            get
-            {
-                EnsureCurrentFrame();
-                return _hasCamera;
-            }
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => HasCamera;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void EnsureCurrentFrame()
         {
             int frame = Time.frameCount;
@@ -44,22 +51,46 @@ namespace SlimeOptimizer
                 return;
             }
 
-            _lastFrame = frame;
+            RefreshFrame(frame);
+        }
 
-            if (_mainCamera == null || !_mainCamera.isActiveAndEnabled)
+        public static void RefreshFrame(int frame)
+        {
+            _lastFrame = frame;
+            FrameCount = frame;
+
+            if (MainCam == null || !MainCam.isActiveAndEnabled)
             {
-                _mainCamera = Camera.main;
+                MainCam = Camera.main;
             }
 
-            if (_mainCamera != null)
+            if (MainCam != null)
             {
-                _position = _mainCamera.transform.position;
-                _hasCamera = true;
+                _position = MainCam.transform.position;
+                CamX = _position.x;
+                CamY = _position.y;
+                CamZ = _position.z;
+                HasCamera = true;
             }
             else
             {
-                _hasCamera = false;
+                HasCamera = false;
             }
+
+            if (PlayerGo == null && SRSingleton<SceneContext>.Instance != null)
+            {
+                PlayerGo = SRSingleton<SceneContext>.Instance.Player;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float SqrDistanceToCamera(Transform tr)
+        {
+            Vector3 p = tr.position;
+            float dx = p.x - CamX;
+            float dy = p.y - CamY;
+            float dz = p.z - CamZ;
+            return dx * dx + dy * dy + dz * dz;
         }
     }
 }

@@ -1,6 +1,5 @@
 using System;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -23,8 +22,11 @@ namespace SlimeOptimizer.Patches
         private static object _cheapQualityValue;
         private static object _lowResolutionValue;
 
-        private static readonly ConditionalWeakTable<object, BloomOriginal> Originals =
-            new ConditionalWeakTable<object, BloomOriginal>();
+        private static readonly FastObjCache<object, BloomOriginal> Originals =
+            new FastObjCache<object, BloomOriginal>(8);
+
+        private static object _lastKey;
+        private static BloomOriginal _lastOrig;
 
         public static void Install(Harmony harmony)
         {
@@ -70,18 +72,32 @@ namespace SlimeOptimizer.Patches
 
         private static void Prefix(object __instance)
         {
-            if (__instance == null)
+            if (ReferenceEquals(__instance, null))
             {
                 return;
             }
 
-            BloomOriginal orig = Originals.GetValue(__instance, inst => new BloomOriginal
+            BloomOriginal orig;
+            if (ReferenceEquals(__instance, _lastKey))
             {
-                BlurIterations = _blurIterField != null ? (int)_blurIterField.GetValue(inst) : 2,
-                Quality = _qualityField != null ? _qualityField.GetValue(inst) : null,
-                Resolution = _resolutionField != null ? _resolutionField.GetValue(inst) : null,
-                Applied = false
-            });
+                orig = _lastOrig;
+            }
+            else
+            {
+                if (!Originals.TryGetValue(__instance, out orig))
+                {
+                    orig = new BloomOriginal
+                    {
+                        BlurIterations = _blurIterField != null ? (int)_blurIterField.GetValue(__instance) : 2,
+                        Quality = _qualityField != null ? _qualityField.GetValue(__instance) : null,
+                        Resolution = _resolutionField != null ? _resolutionField.GetValue(__instance) : null,
+                        Applied = false
+                    };
+                    Originals.Set(__instance, orig);
+                }
+                _lastKey = __instance;
+                _lastOrig = orig;
+            }
 
             if (OptimizerConfig.EnableBloomOptimizer)
             {

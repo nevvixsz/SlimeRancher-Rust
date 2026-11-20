@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -12,14 +11,16 @@ namespace SlimeOptimizer.Patches
 
         private sealed class CachedEffects
         {
-            public bool Initialized;
             public SSAOPro Ssao;
             public Behaviour Bloom;
             public Camera Camera;
         }
 
-        private static readonly ConditionalWeakTable<DisableEffectsOnLowQuality, CachedEffects> Cache =
-            new ConditionalWeakTable<DisableEffectsOnLowQuality, CachedEffects>();
+        private static readonly FastObjCache<DisableEffectsOnLowQuality, CachedEffects> Cache =
+            new FastObjCache<DisableEffectsOnLowQuality, CachedEffects>(8);
+
+        private static DisableEffectsOnLowQuality _lastKey;
+        private static CachedEffects _lastVal;
 
         [HarmonyPrefix]
         private static bool Prefix(DisableEffectsOnLowQuality __instance, ref DepthTextureMode ___lastDepthMode)
@@ -29,18 +30,25 @@ namespace SlimeOptimizer.Patches
                 return true;
             }
 
-            if (!Cache.TryGetValue(__instance, out CachedEffects cached))
+            CachedEffects cached;
+            if (ReferenceEquals(__instance, _lastKey))
             {
-                cached = new CachedEffects();
-                Cache.Add(__instance, cached);
+                cached = _lastVal;
             }
-
-            if (!cached.Initialized)
+            else
             {
-                cached.Ssao = __instance.GetComponent<SSAOPro>();
-                cached.Bloom = BloomType != null ? (__instance.GetComponent(BloomType) as Behaviour) : null;
-                cached.Camera = __instance.GetComponent<Camera>();
-                cached.Initialized = true;
+                if (!Cache.TryGetValue(__instance, out cached))
+                {
+                    cached = new CachedEffects
+                    {
+                        Ssao = __instance.GetComponent<SSAOPro>(),
+                        Bloom = BloomType != null ? (__instance.GetComponent(BloomType) as Behaviour) : null,
+                        Camera = __instance.GetComponent<Camera>()
+                    };
+                    Cache.Set(__instance, cached);
+                }
+                _lastKey = __instance;
+                _lastVal = cached;
             }
 
             bool ao = SRQualitySettings.AmbientOcclusion;

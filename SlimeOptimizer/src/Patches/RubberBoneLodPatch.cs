@@ -21,11 +21,15 @@ namespace SlimeOptimizer.Patches
 
         private sealed class SlimeRenderGroup
         {
+            public Transform Transform;
+            public int Hash;
+            public int NextDistCheckFrame = -1;
+            public byte Tier; // 0 = active/near, 1 = lod, 2 = culled
             public RendererEntry[] Entries;
         }
 
-        private static readonly ConditionalWeakTable<RubberBoneEffect, SlimeRenderGroup> Groups =
-            new ConditionalWeakTable<RubberBoneEffect, SlimeRenderGroup>();
+        private static readonly FastObjCache<RubberBoneEffect, SlimeRenderGroup> Groups =
+            new FastObjCache<RubberBoneEffect, SlimeRenderGroup>(512);
 
         private static readonly List<RendererEntry> BuildBuffer = new List<RendererEntry>(16);
         private static readonly HashSet<Renderer> SeenRenderers = new HashSet<Renderer>();
@@ -79,8 +83,12 @@ namespace SlimeOptimizer.Patches
             {
                 if (!Groups.TryGetValue(rbe, out SlimeRenderGroup group))
                 {
-                    group = new SlimeRenderGroup();
-                    Groups.Add(rbe, group);
+                    group = new SlimeRenderGroup
+                    {
+                        Transform = rbe.transform,
+                        Hash = RuntimeHelpers.GetHashCode(rbe) & 0x7FFFFFFF
+                    };
+                    Groups.Set(rbe, group);
                 }
                 group.Entries = BuildBuffer.ToArray();
             }
@@ -114,7 +122,7 @@ namespace SlimeOptimizer.Patches
             ref bool ___sleeping,
             ref bool ___wasSleeping)
         {
-            bool rubberEnabled = OptimizerConfig.EnableRubberBoneLod && ___verts != null;
+            bool rubberEnabled = OptimizerConfig.EnableRubberBoneLod && !ReferenceEquals(___verts, null);
             bool renderLodEnabled = OptimizerConfig.EnableSlimeRenderLod;
 
             if (!rubberEnabled && !renderLodEnabled)
@@ -122,12 +130,11 @@ namespace SlimeOptimizer.Patches
                 return true;
             }
 
-            bool isHeld = ___vacuumable != null && ___vacuumable.isHeld();
-            if (isHeld)
+            if (___vacuumable != null && ___vacuumable.isHeld())
             {
-                if (renderLodEnabled)
+                if (renderLodEnabled && Groups.TryGetValue(__instance, out SlimeRenderGroup heldGroup) && heldGroup.Entries != null)
                 {
-                    RestoreForEffect(__instance, ___ownRenderer);
+                    RestoreGroup(heldGroup);
                 }
                 if (OptimizerConfig.EnableStatsCollection)
                 {
@@ -136,28 +143,39 @@ namespace SlimeOptimizer.Patches
                 return true;
             }
 
-            CameraCache.EnsureCurrentFrame();
-            bool hasCamera = CameraCache.HasCamera;
-            float sqrDist = 0f;
-            if (hasCamera)
+            if (!Groups.TryGetValue(__instance, out SlimeRenderGroup group))
             {
-                Vector3 pos = __instance.transform.position;
-                Vector3 cam = CameraCache.Position;
-                float dx = pos.x - cam.x;
-                float dy = pos.y - cam.y;
-                float dz = pos.z - cam.z;
-                sqrDist = dx * dx + dy * dy + dz * dz;
+                group = CreateGroup(__instance, ___ownRenderer);
+            }
 
-                if (((__instance.GetInstanceID() + Time.frameCount) & 7) == 0)
+            int frame = CameraCache.FrameCount;
+            if (CameraCache.HasCamera && frame >= group.NextDistCheckFrame)
+            {
+                group.NextDistCheckFrame = frame + 8 + (group.Hash & 3);
+                float sqrDist = CameraCache.SqrDistanceToCamera(group.Transform);
+
+                if (renderLodEnabled)
                 {
-                    if (renderLodEnabled)
-                    {
-                        ApplyForEffect(__instance, ___ownRenderer, sqrDist);
-                    }
-                    else
-                    {
-                        RestoreForEffect(__instance, ___ownRenderer);
-                    }
+                    ApplyRenderLod(group, sqrDist);
+                }
+                else if (group.Entries != null)
+                {
+                    RestoreGroup(group);
+                }
+
+                float disableDist = OptimizerConfig.RubberDisableDistance;
+                float lodDist = OptimizerConfig.RubberLodDistance;
+                if (disableDist > 0f && sqrDist >= disableDist * disableDist)
+                {
+                    group.Tier = 2;
+                }
+                else if (lodDist >= 0f && sqrDist >= lodDist * lodDist)
+                {
+                    group.Tier = 1;
+                }
+                else
+                {
+                    group.Tier = 0;
                 }
             }
 
@@ -166,25 +184,8 @@ namespace SlimeOptimizer.Patches
                 return true;
             }
 
-            bool bodySleeping = ___ownBody != null && ___ownBody.IsSleeping();
-            bool isVisible = ___ownRenderer == null || ___ownRenderer.isVisible;
-
-            if (bodySleeping || !isVisible)
-            {
-                if (!isVisible && OptimizerConfig.EnableStatsCollection)
-                {
-                    OptimizerStats.RubberNotVisibleCalls++;
-                }
-                return true;
-            }
-
-            if (!hasCamera)
-            {
-                return true;
-            }
-
-            float disableDist = OptimizerConfig.RubberDisableDistance;
-            if (disableDist > 0f && sqrDist >= disableDist * disableDist)
+            byte tier = group.Tier;
+            if (tier == 2)
             {
                 if (!___sleeping)
                 {
@@ -197,24 +198,35 @@ namespace SlimeOptimizer.Patches
                 {
                     OptimizerStats.RubberCulledCalls++;
                 }
-
                 return false;
             }
 
-            int interval = OptimizerConfig.RubberLodInterval;
-            float lodDist = OptimizerConfig.RubberLodDistance;
-            if (interval > 1 && lodDist >= 0f && sqrDist >= lodDist * lodDist)
+            if (tier == 1)
             {
-                int phase = (__instance.GetInstanceID() & 0x7FFFFFFF) % interval;
-                if ((Time.frameCount % interval) != phase)
+                int interval = OptimizerConfig.RubberLodInterval;
+                if (interval > 1)
                 {
-                    if (OptimizerConfig.EnableStatsCollection)
+                    int mask = interval >= 4 ? 3 : 1;
+                    if (((frame + group.Hash) & mask) != 0)
                     {
-                        OptimizerStats.RubberSkippedFrames++;
+                        if (OptimizerConfig.EnableStatsCollection)
+                        {
+                            OptimizerStats.RubberSkippedFrames++;
+                        }
+                        return false;
                     }
-
-                    return false;
                 }
+            }
+
+            bool bodySleeping = ___ownBody != null && ___ownBody.IsSleeping();
+            bool isVisible = ___ownRenderer == null || ___ownRenderer.isVisible;
+            if (bodySleeping || !isVisible)
+            {
+                if (!isVisible && OptimizerConfig.EnableStatsCollection)
+                {
+                    OptimizerStats.RubberNotVisibleCalls++;
+                }
+                return true;
             }
 
             if (OptimizerConfig.EnableStatsCollection)
@@ -225,39 +237,39 @@ namespace SlimeOptimizer.Patches
             return true;
         }
 
-        private static SlimeRenderGroup GetOrCreateFallbackGroup(RubberBoneEffect rbe, Renderer fallbackRenderer)
+        private static SlimeRenderGroup CreateGroup(RubberBoneEffect rbe, Renderer fallbackRenderer)
         {
-            if (!Groups.TryGetValue(rbe, out SlimeRenderGroup group))
+            RendererEntry[] entries = null;
+            if (fallbackRenderer != null)
             {
-                if (fallbackRenderer == null)
-                {
-                    return null;
-                }
-
                 SkinnedMeshRenderer smr = fallbackRenderer as SkinnedMeshRenderer;
-                group = new SlimeRenderGroup
+                entries = new[]
                 {
-                    Entries = new[]
+                    new RendererEntry
                     {
-                        new RendererEntry
-                        {
-                            Renderer = fallbackRenderer,
-                            SkinnedRenderer = smr,
-                            OriginalShadowMode = fallbackRenderer.shadowCastingMode,
-                            OriginalSkinQuality = smr != null ? smr.quality : SkinQuality.Auto
-                        }
+                        Renderer = fallbackRenderer,
+                        SkinnedRenderer = smr,
+                        OriginalShadowMode = fallbackRenderer.shadowCastingMode,
+                        OriginalSkinQuality = smr != null ? smr.quality : SkinQuality.Auto
                     }
                 };
-                Groups.Add(rbe, group);
             }
 
+            SlimeRenderGroup group = new SlimeRenderGroup
+            {
+                Transform = rbe.transform,
+                Hash = RuntimeHelpers.GetHashCode(rbe) & 0x7FFFFFFF,
+                NextDistCheckFrame = -1,
+                Entries = entries
+            };
+            Groups.Set(rbe, group);
             return group;
         }
 
-        private static void ApplyForEffect(RubberBoneEffect rbe, Renderer fallbackRenderer, float sqrDist)
+        private static void ApplyRenderLod(SlimeRenderGroup group, float sqrDist)
         {
-            SlimeRenderGroup group = GetOrCreateFallbackGroup(rbe, fallbackRenderer);
-            if (group == null || group.Entries == null)
+            RendererEntry[] entries = group.Entries;
+            if (entries == null)
             {
                 return;
             }
@@ -268,7 +280,6 @@ namespace SlimeOptimizer.Patches
             float skinDist = OptimizerConfig.SlimeSkinLodDistance;
             bool shouldReduceSkin = skinDist > 0f && sqrDist >= skinDist * skinDist;
 
-            RendererEntry[] entries = group.Entries;
             for (int i = 0; i < entries.Length; i++)
             {
                 RendererEntry entry = entries[i];
@@ -299,23 +310,14 @@ namespace SlimeOptimizer.Patches
             }
         }
 
-        private static void RestoreForEffect(RubberBoneEffect rbe, Renderer fallbackRenderer)
-        {
-            if (Groups.TryGetValue(rbe, out SlimeRenderGroup group) && group.Entries != null)
-            {
-                RestoreGroup(group);
-                return;
-            }
-
-            if (fallbackRenderer != null)
-            {
-                // Nothing modified yet if not in Groups
-            }
-        }
-
         private static void RestoreGroup(SlimeRenderGroup group)
         {
             RendererEntry[] entries = group.Entries;
+            if (entries == null)
+            {
+                return;
+            }
+
             for (int i = 0; i < entries.Length; i++)
             {
                 RendererEntry entry = entries[i];

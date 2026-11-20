@@ -1,5 +1,3 @@
-using System;
-using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -17,11 +15,17 @@ namespace SlimeOptimizer
 
         private Canvas _canvas;
         private TextMeshProUGUI _text;
+        private bool _lastShow = true;
         private float _accumTime;
         private int _accumFrames;
         private float _worstFrameMs;
         private float _minResetTimer;
-        private readonly StringBuilder _sb = new StringBuilder(64);
+
+        private int _lastShownFps = -1;
+        private int _lastShownMin = -1;
+        private int _lastShownTenths = -1;
+        private int _lastColorTier = -1;
+        private readonly char[] _charBuf = new char[64];
 
         public static void EnsureCreated()
         {
@@ -74,15 +78,25 @@ namespace SlimeOptimizer
             _text.raycastTarget = false;
             _text.text = "FPS: ...";
 
-            _canvas.enabled = OptimizerConfig.ShowFpsHud;
+            _lastShow = OptimizerConfig.ShowFpsHud;
+            _canvas.enabled = _lastShow;
+        }
+
+        private void FixedUpdate()
+        {
+            CameraCache.EnsureCurrentFrame();
         }
 
         private void Update()
         {
             bool show = OptimizerConfig.ShowFpsHud;
-            if (_canvas != null && _canvas.enabled != show)
+            if (show != _lastShow)
             {
-                _canvas.enabled = show;
+                _lastShow = show;
+                if (_canvas != null)
+                {
+                    _canvas.enabled = show;
+                }
             }
 
             if (!show && !IsOptionsMenuOpen)
@@ -111,37 +125,94 @@ namespace SlimeOptimizer
                 _worstFrameMs = dtMs;
             }
 
-            if (_accumTime >= 0.25f)
+            if (_accumTime >= 0.5f)
             {
-                CurrentFps = Mathf.RoundToInt(_accumFrames / _accumTime);
-                AvgFrameMs = (_accumTime / _accumFrames) * 1000f;
-                MinFps = _worstFrameMs > 0.1f ? Mathf.RoundToInt(1000f / _worstFrameMs) : CurrentFps;
+                int fps = Mathf.RoundToInt(_accumFrames / _accumTime);
+                float avgMs = (_accumTime / _accumFrames) * 1000f;
+                int minFps = _worstFrameMs > 0.1f ? Mathf.RoundToInt(1000f / _worstFrameMs) : fps;
+
+                CurrentFps = fps;
+                AvgFrameMs = avgMs;
+                MinFps = minFps;
 
                 if (show && _text != null)
                 {
-                    if (CurrentFps >= 120)
+                    int tenths = Mathf.RoundToInt(avgMs * 10f);
+                    if (fps != _lastShownFps || minFps != _lastShownMin || tenths != _lastShownTenths)
                     {
-                        _text.color = new Color(0.45f, 0.98f, 0.55f);
-                    }
-                    else if (CurrentFps >= 60)
-                    {
-                        _text.color = new Color(1.0f, 0.88f, 0.35f);
-                    }
-                    else
-                    {
-                        _text.color = new Color(1.0f, 0.42f, 0.42f);
-                    }
+                        _lastShownFps = fps;
+                        _lastShownMin = minFps;
+                        _lastShownTenths = tenths;
 
-                    _sb.Length = 0;
-                    _sb.Append("FPS: ").Append(CurrentFps)
-                       .Append("  |  min ").Append(MinFps)
-                       .Append("  |  ").Append(AvgFrameMs.ToString("0.0")).Append(" ms");
-                    _text.text = _sb.ToString();
+                        int colorTier = fps >= 120 ? 2 : (fps >= 60 ? 1 : 0);
+                        if (colorTier != _lastColorTier)
+                        {
+                            _lastColorTier = colorTier;
+                            _text.color = colorTier == 2
+                                ? new Color(0.45f, 0.98f, 0.55f)
+                                : (colorTier == 1 ? new Color(1.0f, 0.88f, 0.35f) : new Color(1.0f, 0.42f, 0.42f));
+                        }
+
+                        int len = FormatHudChars(fps, minFps, tenths);
+                        _text.SetCharArray(_charBuf, 0, len);
+                    }
                 }
 
                 _accumTime = 0f;
                 _accumFrames = 0;
             }
+        }
+
+        private int FormatHudChars(int fps, int minFps, int avgTenths)
+        {
+            int pos = 0;
+            pos = WriteLiteral(pos, "FPS: ");
+            pos = WriteInt(pos, fps);
+            pos = WriteLiteral(pos, "  |  min ");
+            pos = WriteInt(pos, minFps);
+            pos = WriteLiteral(pos, "  |  ");
+            pos = WriteInt(pos, avgTenths / 10);
+            _charBuf[pos++] = '.';
+            _charBuf[pos++] = (char)('0' + (avgTenths % 10));
+            pos = WriteLiteral(pos, " ms");
+            return pos;
+        }
+
+        private int WriteLiteral(int pos, string s)
+        {
+            for (int i = 0; i < s.Length; i++)
+            {
+                _charBuf[pos++] = s[i];
+            }
+            return pos;
+        }
+
+        private int WriteInt(int pos, int val)
+        {
+            if (val <= 0)
+            {
+                _charBuf[pos++] = '0';
+                return pos;
+            }
+
+            int start = pos;
+            while (val > 0)
+            {
+                _charBuf[pos++] = (char)('0' + (val % 10));
+                val /= 10;
+            }
+
+            int end = pos - 1;
+            while (start < end)
+            {
+                char tmp = _charBuf[start];
+                _charBuf[start] = _charBuf[end];
+                _charBuf[end] = tmp;
+                start++;
+                end--;
+            }
+
+            return pos;
         }
     }
 }
