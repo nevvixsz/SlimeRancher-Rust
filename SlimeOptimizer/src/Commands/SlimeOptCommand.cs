@@ -22,6 +22,9 @@ namespace SlimeOptimizer.Commands
             "rubbereffect",
             "drag",
             "gif",
+            "fog",
+            "sectrshadow",
+            "terrain",
             "renderlod",
             "ailod",
             "facelod",
@@ -61,7 +64,7 @@ namespace SlimeOptimizer.Commands
             "  profile             - Run a 3-second zero-overhead-afterwards frame profiler\n" +
             "  reset               - Reset statistics counters\n" +
             "  preset <name>       - Apply preset: maxfps, balanced, quality, vanilla\n" +
-            "  toggle <module>     - Toggle: rubber, rubbereffect, drag, gif, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, bloom, particles, timers, animcull, physopt, hud, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
+            "  toggle <module>     - Toggle: rubber, rubbereffect, drag, gif, fog, sectrshadow, terrain, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, bloom, particles, timers, animcull, physopt, hud, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
 
         public override List<string> GetAutoComplete(int argIndex, string argText)
         {
@@ -168,6 +171,20 @@ namespace SlimeOptimizer.Commands
                 case "gif":
                     OptimizerConfig.DisableGifRecorder = !OptimizerConfig.DisableGifRecorder;
                     Log("DisableGifRecorder = " + OptimizerConfig.DisableGifRecorder);
+                    return true;
+                case "fog":
+                    OptimizerConfig.DisableStylizedFogAndDepth = !OptimizerConfig.DisableStylizedFogAndDepth;
+                    RenderExtraPatches.SyncCameraDepthAndFog();
+                    Log("DisableStylizedFogAndDepth = " + OptimizerConfig.DisableStylizedFogAndDepth);
+                    return true;
+                case "sectrshadow":
+                    OptimizerConfig.DisableSectrShadowCulling = !OptimizerConfig.DisableSectrShadowCulling;
+                    Log("DisableSectrShadowCulling = " + OptimizerConfig.DisableSectrShadowCulling);
+                    return true;
+                case "terrain":
+                    OptimizerConfig.OptimizeTerrain = !OptimizerConfig.OptimizeTerrain;
+                    TerrainOptPatch.ApplyToAllTerrains();
+                    Log("OptimizeTerrain = " + OptimizerConfig.OptimizeTerrain);
                     return true;
                 case "renderlod":
                     OptimizerConfig.EnableSlimeRenderLod = !OptimizerConfig.EnableSlimeRenderLod;
@@ -283,12 +300,15 @@ namespace SlimeOptimizer.Commands
         private static void LogStatus()
         {
             Log(
-                "SlimeOptimizer v0.9.1 Status:\n" +
+                "SlimeOptimizer v0.9.2 Status:\n" +
                 $"  FpsHudOverlay:      {OptimizerConfig.ShowFpsHud} (limit={(OptimizerConfig.TargetFrameRate <= 0 ? "Unlimited" : OptimizerConfig.TargetFrameRate + " FPS")})\n" +
                 $"  RubberBoneLOD:      {OptimizerConfig.EnableRubberBoneLod} (LOD >= {OptimizerConfig.RubberLodDistance}m every {OptimizerConfig.RubberLodInterval} frames, Cull >= {OptimizerConfig.RubberDisableDistance}m)\n" +
                 $"  RubberEffectLOD:    {OptimizerConfig.EnableRubberEffectLod}\n" +
                 $"  SlimeDragOpt:       {OptimizerConfig.EnableSlimeDragOpt}\n" +
                 $"  DisableGifRecorder: {OptimizerConfig.DisableGifRecorder}\n" +
+                $"  DisableFogAndDepth: {OptimizerConfig.DisableStylizedFogAndDepth}\n" +
+                $"  DisableSectrShadow: {OptimizerConfig.DisableSectrShadowCulling}\n" +
+                $"  OptimizeTerrain:    {OptimizerConfig.OptimizeTerrain}\n" +
                 $"  SlimeRenderLOD:     {OptimizerConfig.EnableSlimeRenderLod} (Skin1 >= {OptimizerConfig.SlimeSkinLodDistance}m, NoShadow >= {OptimizerConfig.SlimeShadowCullDistance}m)\n" +
                 $"  SlimeAiLOD:         {OptimizerConfig.EnableSlimeAiLod} (Far >= {OptimizerConfig.FarAiDistance}m: {OptimizerConfig.FarAiRethinkInterval}s, Ultra >= {OptimizerConfig.UltraFarAiDistance}m: {OptimizerConfig.UltraFarAiRethinkInterval}s)\n" +
                 $"  SlimeFaceEmotLOD:   {OptimizerConfig.EnableSlimeFaceEmotionLod} (>= {OptimizerConfig.FaceEmotionLodDistance}m: /{OptimizerConfig.FaceEmotionLodInterval}, >= {OptimizerConfig.FaceEmotionUltraDistance}m: /{OptimizerConfig.FaceEmotionUltraInterval})\n" +
@@ -340,6 +360,8 @@ namespace SlimeOptimizer.Commands
                 $"  KeepUpright sleeping/far skipped: {OptimizerStats.KeepUprightSkipped}\n" +
                 $"  RubberEffect LOD skipped:         {OptimizerStats.RubberEffectSkipped}\n" +
                 $"  SlimeDrag redundant skipped:      {OptimizerStats.DragUpdatesSkipped}\n" +
+                $"  StylizedFog passes skipped:       {OptimizerStats.FogPassesSkipped}\n" +
+                $"  Terrains optimized:               {OptimizerStats.TerrainsOptimized}\n" +
                 $"  Chicken AI distant skipped:       {OptimizerStats.ChickenAiSkipped}\n" +
                 $"  Cameras layer-culled:             {OptimizerStats.CamerasLayerCulled}\n" +
                 $"  Small actor shadows culled:       {OptimizerStats.SmallActorShadowsCulled}\n" +

@@ -2,6 +2,16 @@
 
 Мод оптимизации производительности и снижения микрофризов (GC) для **Slime Rancher** на базе **SRML** (`0.2.1.0+`) и **Harmony**.
 
+## Что включено (v0.9.2 — Устранение Depth Prepass / StylizedFog / SECTR Shadow + 20-бакетный FrameProfiler)
+
+### Новое в v0.9.2 (удар по 6.49 ms в `Render/PhysX`)
+- **Отключение принудительного `DepthTextureMode.Depth` + `StylizedFog` (`DisableStylizedFogAndDepth`, вкл. в `Макс. FPS`)**:
+  - В ванили `SRQualitySettings.GetDepthTextureMode()` **всегда** включал `DepthTextureMode.Depth` даже при выключенном SSAO, из-за чего Unity Forward Rendering **дважды рендерил всю сцену** каждый кадр (Depth Prepass + Main Pass), а `StylizedFog.OnRenderImage` делал дополнительный fullscreen `Graphics.Blit`. При `DisableStylizedFogAndDepth` убираются оба прохода.
+- **Отключение `SECTR_CullingCamera` Shadow-Cull (`DisableSectrShadowCulling`, вкл. в `Макс. FPS`)**:
+  - Не запускает второй проход куллинга теней в `SECTR_CullingCamera`, когда тени выключены.
+- **Оптимизация рельефа (`OptimizeTerrain`) + агрессивный LOD шейдеров травы (`GrassShaderMaxLod = 200` в `Макс. FPS`, `receiveShadows = false` на траве)**.
+- **Расширенный 20-бакетный `FrameProfiler`**: теперь отдельно замеряет `SECTR_Culling.OnPreCull / OnPostRender`, `StylizedFog`, `SENaturalBloomAndDirtyLens`, `SECTR_AudioSystem`, `UIDetector`, `AmbianceDirector`, `WeaponVacuum`, `HudUI` и выводит Топ-5 в компактную строку прямо в меню!
+
 ## Что включено (v0.9.1 — Ranch Boost + Встроенный 3-секундный FrameProfiler)
 
 ### Новое в v0.9.1 (прицельно против просадок на ранчо)

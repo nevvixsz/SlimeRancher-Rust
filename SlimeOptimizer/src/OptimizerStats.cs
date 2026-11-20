@@ -38,6 +38,8 @@ namespace SlimeOptimizer
         public static long ParticlesCapped;
         public static long RubberEffectSkipped;
         public static long DragUpdatesSkipped;
+        public static long FogPassesSkipped;
+        public static long TerrainsOptimized;
 
         public static void Reset()
         {
@@ -77,6 +79,8 @@ namespace SlimeOptimizer
             ParticlesCapped = 0;
             RubberEffectSkipped = 0;
             DragUpdatesSkipped = 0;
+            FogPassesSkipped = 0;
+            TerrainsOptimized = 0;
         }
     }
 }

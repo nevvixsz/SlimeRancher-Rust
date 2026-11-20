@@ -16,7 +16,7 @@ namespace SlimeOptimizer
             SettingsDatabase.LoadOrCreate();
             HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
             Console.RegisterCommand(new SlimeOptCommand());
-            Logger?.LogSuccess("SlimeOptimizer v0.9.1 pre-loaded (FastCache + Ranch Extra + 3s FrameProfiler). Use 'slimeopt' in console.");
+            Logger?.LogSuccess("SlimeOptimizer v0.9.2 pre-loaded (FastCache + Depth/Fog/Terrain + 20-bucket Profiler). Use 'slimeopt' in console.");
         }
 
         public override void Load()

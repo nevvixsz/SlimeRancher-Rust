@@ -13,6 +13,7 @@ namespace SlimeOptimizer.Patches
         {
             public SSAOPro Ssao;
             public Behaviour Bloom;
+            public StylizedFog Fog;
             public Camera Camera;
         }
 
@@ -43,6 +44,7 @@ namespace SlimeOptimizer.Patches
                     {
                         Ssao = __instance.GetComponent<SSAOPro>(),
                         Bloom = BloomType != null ? (__instance.GetComponent(BloomType) as Behaviour) : null,
+                        Fog = __instance.GetComponent<StylizedFog>(),
                         Camera = __instance.GetComponent<Camera>()
                     };
                     Cache.Set(__instance, cached);
@@ -63,6 +65,12 @@ namespace SlimeOptimizer.Patches
                 cached.Bloom.enabled = bloom;
             }
 
+            bool fogEnabled = !OptimizerConfig.DisableStylizedFogAndDepth;
+            if (cached.Fog != null && cached.Fog.enabled != fogEnabled)
+            {
+                cached.Fog.enabled = fogEnabled;
+            }
+
             DepthTextureMode mode = SRQualitySettings.GetDepthTextureMode();
             if (mode != ___lastDepthMode)
             {
@@ -75,7 +83,7 @@ namespace SlimeOptimizer.Patches
 
             if (OptimizerConfig.EnableStatsCollection)
             {
-                OptimizerStats.EffectsGetComponentsAvoided += 3;
+                OptimizerStats.EffectsGetComponentsAvoided += 4;
             }
 
             return false;

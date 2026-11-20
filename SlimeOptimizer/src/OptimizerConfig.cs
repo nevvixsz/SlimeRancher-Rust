@@ -211,5 +211,14 @@ namespace SlimeOptimizer
 
         [ConfigComment("Physics FixedUpdate tick rate in Hz (50=vanilla 0.02s, 33=fast ranch 0.03s, 25=max FPS 0.04s).")]
         public static int PhysicsTickRate = 50;
+
+        [ConfigComment("Disable StylizedFog post-process and DepthTextureMode.Depth prepass when SSAO is off (eliminates second full-scene geometry pass in Forward rendering).")]
+        public static bool DisableStylizedFogAndDepth = false;
+
+        [ConfigComment("Disable SECTR_CullingCamera shadow-culling second pass when shadows are off.")]
+        public static bool DisableSectrShadowCulling = false;
+
+        [ConfigComment("Optimize Unity Terrain detail distance/density, basemap distance, and pixel error for higher FPS.")]
+        public static bool OptimizeTerrain = true;
     }
 }
