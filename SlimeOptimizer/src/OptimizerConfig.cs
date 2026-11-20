@@ -32,7 +32,7 @@ namespace SlimeOptimizer
         [ConfigComment("Cap ultra-heavy GPU quality extremes (4 shadow cascades -> 2, 150m shadows -> 85m, 8x MSAA -> 2x) while keeping shaders/lighting/SSAO maxed.")]
         public static bool EnableSmartQualityCaps = true;
 
-        [ConfigComment("Maximum shadow cascades allowed when SmartQualityCaps is enabled (recommended: 2 instead of 4).")]
+        [ConfigComment("Maximum shadow cascades allowed when SmartQualityCaps is enabled (Unity supports 0, 2, or 4; recommended: 2 instead of 4).")]
         public static int MaxShadowCascades = 2;
 
         [ConfigComment("Maximum shadow distance in meters when SmartQualityCaps is enabled (recommended: 85 instead of 150).")]
