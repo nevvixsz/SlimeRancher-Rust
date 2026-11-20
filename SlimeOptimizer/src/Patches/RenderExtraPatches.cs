@@ -5,10 +5,26 @@ using UnityEngine;
 
 namespace SlimeOptimizer.Patches
 {
-    [HarmonyPatch(typeof(SRQualitySettings), nameof(SRQualitySettings.GetDepthTextureMode))]
     internal static class DepthModeOptPatch
     {
-        [HarmonyPostfix]
+        private static bool _installed;
+
+        public static void Install(Harmony harmony)
+        {
+            if (_installed || harmony == null)
+            {
+                return;
+            }
+
+            MethodInfo target = AccessTools.Method(typeof(SRQualitySettings), nameof(SRQualitySettings.GetDepthTextureMode));
+            MethodInfo postfix = AccessTools.Method(typeof(DepthModeOptPatch), nameof(Postfix));
+            if (target != null && postfix != null)
+            {
+                harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+                _installed = true;
+            }
+        }
+
         private static void Postfix(ref DepthTextureMode __result)
         {
             if (OptimizerConfig.DisableStylizedFogAndDepth && !SRQualitySettings.AmbientOcclusion)

@@ -22,6 +22,7 @@ namespace SlimeOptimizer
         public override void Load()
         {
             QualityCapsPatch.Install(HarmonyInstance);
+            DepthModeOptPatch.Install(HarmonyInstance);
             BloomFastPatch.Install(HarmonyInstance);
         }
 
@@ -30,6 +31,7 @@ namespace SlimeOptimizer
             QualityCapsPatch.ApplyCapsIfEnabled();
             QualityCapsPatch.ApplyPhysicsSettings();
             QualityCapsPatch.ApplyTargetFrameRate();
+            RenderExtraPatches.SyncCameraDepthAndFog();
             GrassOptimizerPatch.Initialize();
             AnimatorCullingPatch.Initialize();
             CameraCullDistancePatch.MarkDirty();
