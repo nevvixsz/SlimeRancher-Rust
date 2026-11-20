@@ -24,6 +24,10 @@ namespace SlimeOptimizer.Commands
             "grass",
             "grasswind",
             "ssao",
+            "bloom",
+            "animcull",
+            "physopt",
+            "hud",
             "cameracull",
             "smallshadows",
             "qcaps",
@@ -49,7 +53,7 @@ namespace SlimeOptimizer.Commands
             "  stats               - Show saved calls and avoided GC allocations\n" +
             "  reset               - Reset statistics counters\n" +
             "  preset <name>       - Apply preset: maxfps, balanced, quality, vanilla\n" +
-            "  toggle <module>     - Toggle: rubber, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
+            "  toggle <module>     - Toggle: rubber, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, bloom, animcull, physopt, hud, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
 
         public override List<string> GetAutoComplete(int argIndex, string argText)
         {
@@ -85,7 +89,7 @@ namespace SlimeOptimizer.Commands
                 case "toggle":
                     if (args.Length < 2)
                     {
-                        LogWarn("Usage: slimeopt toggle <rubber|renderlod|ailod|facelod|foodsearch|grass|grasswind|ssao|cameracull|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
+                        LogWarn("Usage: slimeopt toggle <rubber|renderlod|ailod|facelod|foodsearch|grass|grasswind|ssao|bloom|animcull|physopt|hud|cameracull|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
                         return false;
                     }
                     bool ok = ToggleModule(args[1].ToLowerInvariant());
@@ -172,6 +176,24 @@ namespace SlimeOptimizer.Commands
                     Log("SsaoOptimizer = " + OptimizerConfig.EnableSsaoOptimizer +
                         $" (downsample={OptimizerConfig.SsaoDownsampling}x, blurDown={OptimizerConfig.SsaoBlurDownsampling}, gaussian={OptimizerConfig.SsaoUseGaussianBlur})");
                     return true;
+                case "bloom":
+                    OptimizerConfig.EnableBloomOptimizer = !OptimizerConfig.EnableBloomOptimizer;
+                    Log("BloomOptimizer = " + OptimizerConfig.EnableBloomOptimizer);
+                    return true;
+                case "animcull":
+                    OptimizerConfig.EnableAnimatorCulling = !OptimizerConfig.EnableAnimatorCulling;
+                    AnimatorCullingPatch.ReapplyAll();
+                    Log("AnimatorCulling = " + OptimizerConfig.EnableAnimatorCulling);
+                    return true;
+                case "physopt":
+                    OptimizerConfig.EnablePhysicsOpt = !OptimizerConfig.EnablePhysicsOpt;
+                    QualityCapsPatch.ApplyPhysicsSettings();
+                    Log("PhysicsOpt = " + OptimizerConfig.EnablePhysicsOpt + " (solverIter=" + UnityEngine.Physics.defaultSolverIterations + ")");
+                    return true;
+                case "hud":
+                    OptimizerConfig.ShowFpsHud = !OptimizerConfig.ShowFpsHud;
+                    Log("ShowFpsHud = " + OptimizerConfig.ShowFpsHud);
+                    return true;
                 case "cameracull":
                     OptimizerConfig.EnableCameraLayerCull = !OptimizerConfig.EnableCameraLayerCull;
                     CameraCullDistancePatch.MarkDirty();
@@ -229,17 +251,21 @@ namespace SlimeOptimizer.Commands
         private static void LogStatus()
         {
             Log(
-                "SlimeOptimizer v0.6.0 Status:\n" +
+                "SlimeOptimizer v0.7.0 Status:\n" +
+                $"  FpsHudOverlay:      {OptimizerConfig.ShowFpsHud}\n" +
                 $"  RubberBoneLOD:      {OptimizerConfig.EnableRubberBoneLod} (LOD >= {OptimizerConfig.RubberLodDistance}m every {OptimizerConfig.RubberLodInterval} frames, Cull >= {OptimizerConfig.RubberDisableDistance}m)\n" +
                 $"  SlimeRenderLOD:     {OptimizerConfig.EnableSlimeRenderLod} (Skin1 >= {OptimizerConfig.SlimeSkinLodDistance}m, NoShadow >= {OptimizerConfig.SlimeShadowCullDistance}m)\n" +
                 $"  SlimeAiLOD:         {OptimizerConfig.EnableSlimeAiLod} (Far >= {OptimizerConfig.FarAiDistance}m: {OptimizerConfig.FarAiRethinkInterval}s, Ultra >= {OptimizerConfig.UltraFarAiDistance}m: {OptimizerConfig.UltraFarAiRethinkInterval}s)\n" +
                 $"  SlimeFaceEmotLOD:   {OptimizerConfig.EnableSlimeFaceEmotionLod} (>= {OptimizerConfig.FaceEmotionLodDistance}m: /{OptimizerConfig.FaceEmotionLodInterval}, >= {OptimizerConfig.FaceEmotionUltraDistance}m: /{OptimizerConfig.FaceEmotionUltraInterval})\n" +
+                $"  AnimatorCulling:    {OptimizerConfig.EnableAnimatorCulling}\n" +
+                $"  RanchPhysicsOpt:    {OptimizerConfig.EnablePhysicsOpt} (solverIter={UnityEngine.Physics.defaultSolverIterations}, keepUpright={OptimizerConfig.EnableKeepUprightOpt}, chickenLod={OptimizerConfig.EnableChickenAiLod})\n" +
                 $"  FastFoodSearch:     {OptimizerConfig.EnableFastFoodSearch}\n" +
                 $"  GrassOptimizer:     {OptimizerConfig.EnableGrassOptimizer} (noShadows={OptimizerConfig.DisableGrassShadows}, lodMult={OptimizerConfig.GrassLodMultiplier:0.00}x, windCap={OptimizerConfig.DisableGrassWindShader}@{OptimizerConfig.GrassShaderMaxLod}, shaders=[{GrassOptimizerPatch.GetSeenShadersSummary()}])\n" +
                 $"  SsaoOptimizer:      {OptimizerConfig.EnableSsaoOptimizer} (downsample={OptimizerConfig.SsaoDownsampling}x, blurDown={OptimizerConfig.SsaoBlurDownsampling}, gaussian={OptimizerConfig.SsaoUseGaussianBlur})\n" +
+                $"  BloomOptimizer:     {OptimizerConfig.EnableBloomOptimizer}\n" +
                 $"  CameraLayerCull:    {OptimizerConfig.EnableCameraLayerCull} (actors={OptimizerConfig.LayerActorCullDistance}m, maxFar={OptimizerConfig.MaxFarClipPlane}m)\n" +
                 $"  SmallShadowCull:    {OptimizerConfig.EnableSmallObjectShadowCull}\n" +
-                $"  SmartQualityCaps:   {OptimizerConfig.EnableSmartQualityCaps} (now: cascades={UnityEngine.QualitySettings.shadowCascades}, res={UnityEngine.QualitySettings.shadowResolution}, dist={UnityEngine.QualitySettings.shadowDistance}m, MSAA={UnityEngine.QualitySettings.antiAliasing}x, lights={UnityEngine.QualitySettings.pixelLightCount}, lodBias={UnityEngine.QualitySettings.lodBias:0.00}, shaderLOD={UnityEngine.Shader.globalMaximumLOD})\n" +
+                $"  SmartQualityCaps:   {OptimizerConfig.EnableSmartQualityCaps} (now: cascades={UnityEngine.QualitySettings.shadowCascades}, res={UnityEngine.QualitySettings.shadowResolution}, dist={UnityEngine.QualitySettings.shadowDistance}m, MSAA={UnityEngine.QualitySettings.antiAliasing}x, lights={UnityEngine.QualitySettings.pixelLightCount}, softParticles={UnityEngine.QualitySettings.softParticles}, lodBias={UnityEngine.QualitySettings.lodBias:0.00}, shaderLOD={UnityEngine.Shader.globalMaximumLOD})\n" +
                 $"  ExpressionCache:    {OptimizerConfig.EnableExpressionCache}\n" +
                 $"  PlortCollectorPool: {OptimizerConfig.EnablePlortCollectorPool}\n" +
                 $"  CellDirectorCount:  {OptimizerConfig.EnableCellDirectorFastCount}\n" +
@@ -270,6 +296,10 @@ namespace SlimeOptimizer.Commands
                 $"  Grass LODGroups tightened:        {OptimizerStats.GrassLodGroupsAdjusted}\n" +
                 $"  Grass shaders LOD-capped:         {OptimizerStats.GrassShadersCapped}\n" +
                 $"  SSAO downsampled frames:          {OptimizerStats.SsaoDownsampledFrames} (keyword resets avoided: {OptimizerStats.SsaoKeywordResetsAvoided})\n" +
+                $"  Bloom frames optimized:           {OptimizerStats.BloomFramesOptimized}\n" +
+                $"  Animators culled off-screen:      {OptimizerStats.AnimatorsCulled}\n" +
+                $"  KeepUpright sleeping/far skipped: {OptimizerStats.KeepUprightSkipped}\n" +
+                $"  Chicken AI distant skipped:       {OptimizerStats.ChickenAiSkipped}\n" +
                 $"  Cameras layer-culled:             {OptimizerStats.CamerasLayerCulled}\n" +
                 $"  Small actor shadows culled:       {OptimizerStats.SmallActorShadowsCulled}\n" +
                 $"  Expression no-ops skipped:        {OptimizerStats.ExpressionNoOpsAvoided}\n" +

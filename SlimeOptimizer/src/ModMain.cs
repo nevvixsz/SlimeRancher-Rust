@@ -22,13 +22,17 @@ namespace SlimeOptimizer
         public override void Load()
         {
             QualityCapsPatch.Install(HarmonyInstance);
+            BloomFastPatch.Install(HarmonyInstance);
         }
 
         public override void PostLoad()
         {
             QualityCapsPatch.ApplyCapsIfEnabled();
+            QualityCapsPatch.ApplyPhysicsSettings();
             GrassOptimizerPatch.Initialize();
+            AnimatorCullingPatch.Initialize();
             CameraCullDistancePatch.MarkDirty();
+            FpsHudOverlay.EnsureCreated();
         }
 
         public override void Update()

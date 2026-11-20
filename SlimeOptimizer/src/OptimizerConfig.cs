@@ -53,6 +53,36 @@ namespace SlimeOptimizer
         [ConfigComment("Maximum global Shader.globalMaximumLOD when SmartQualityCaps is enabled (-1 = unchanged; 900=High, 700=Medium, 400=Low).")]
         public static int MaxGlobalShaderLod = -1;
 
+        [ConfigComment("Disable Unity softParticles depth-buffer blending when SmartQualityCaps is enabled (big GPU win around slime/geyser VFX).")]
+        public static bool DisableSoftParticles = true;
+
+        [ConfigComment("Maximum particle collision raycast budget when SmartQualityCaps is enabled (vanilla High=1024; recommended: 128).")]
+        public static int MaxParticleRaycastBudget = 128;
+
+        [ConfigComment("Maximum anisotropic filtering mode when SmartQualityCaps is enabled (0=Disable, 1=Enable/PerTexture, 2=ForceEnable).")]
+        public static int MaxAnisoMode = 1;
+
+        [ConfigComment("Optimize Unity Bloom post-processing (1 blur pass, Low resolution, Cheap quality) when Bloom is enabled in Video settings.")]
+        public static bool EnableBloomOptimizer = true;
+
+        [ConfigComment("Set non-player world/actor Animators to CullUpdateTransforms so off-screen skeletons skip bone evaluation.")]
+        public static bool EnableAnimatorCulling = true;
+
+        [ConfigComment("Tune PhysX solver iterations for faster multi-slime corral physics (default Unity=6; recommended=4, MaxFPS=3).")]
+        public static bool EnablePhysicsOpt = true;
+
+        [ConfigComment("PhysX defaultSolverIterations when EnablePhysicsOpt is true (2..6; lower = faster physics in full corrals).")]
+        public static int PhysicsSolverIterations = 4;
+
+        [ConfigComment("Skip KeepUpright torque work for sleeping Rigidbodies and throttle distant KeepUpright updates (>= 25m).")]
+        public static bool EnableKeepUprightOpt = true;
+
+        [ConfigComment("Throttle ChickenRandomMove AI updates for distant chickens (>= 20m / >= 40m).")]
+        public static bool EnableChickenAiLod = true;
+
+        [ConfigComment("Show a lightweight Sodium-style FPS / min-FPS / frametime ms overlay at the top of the screen.")]
+        public static bool ShowFpsHud = true;
+
         [ConfigComment("Apply per-layer camera cull distances and a smart farClipPlane cap to skip rendering distant small actors.")]
         public static bool EnableCameraLayerCull = true;
 

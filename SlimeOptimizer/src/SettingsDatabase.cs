@@ -157,52 +157,84 @@ namespace SlimeOptimizer
             switch (preset)
             {
                 case OptimizerPreset.Balanced:
+                    if (IsGameContextReady() &&
+                        (SRQualitySettings.CurrentLevel == SRQualitySettings.Level.LOWEST ||
+                         (SRQualitySettings.Shadows == SRQualitySettings.ShadowsLevel.NONE &&
+                          !SRQualitySettings.AmbientOcclusion && !SRQualitySettings.Bloom)))
+                    {
+                        SRQualitySettings.CurrentLevel = SRQualitySettings.Level.HIGH;
+                    }
                     break;
 
                 case OptimizerPreset.MaxFps:
+                    if (IsGameContextReady())
+                    {
+                        SRQualitySettings.CurrentLevel = SRQualitySettings.Level.LOWEST;
+                        SRQualitySettings.Shadows = SRQualitySettings.ShadowsLevel.NONE;
+                        SRQualitySettings.AmbientOcclusion = false;
+                        SRQualitySettings.Bloom = false;
+                    }
+
                     OptimizerConfig.EnableSmartQualityCaps = true;
                     OptimizerConfig.MaxShadowCascades = 0;
                     OptimizerConfig.MaxShadowResolution = 0;
-                    OptimizerConfig.MaxShadowDistance = 45f;
+                    OptimizerConfig.MaxShadowDistance = 20f;
                     OptimizerConfig.MaxAntiAliasing = 0;
-                    OptimizerConfig.MaxPixelLightCount = 1;
-                    OptimizerConfig.MaxLodBias = 0.85f;
+                    OptimizerConfig.MaxPixelLightCount = 0;
+                    OptimizerConfig.MaxLodBias = 0.5f;
                     OptimizerConfig.MaxGlobalShaderLod = 400;
+                    OptimizerConfig.DisableSoftParticles = true;
+                    OptimizerConfig.MaxParticleRaycastBudget = 16;
+                    OptimizerConfig.MaxAnisoMode = 0;
 
                     OptimizerConfig.EnableCameraLayerCull = true;
-                    OptimizerConfig.LayerActorCullDistance = 65f;
-                    OptimizerConfig.MaxFarClipPlane = 320f;
+                    OptimizerConfig.LayerActorCullDistance = 45f;
+                    OptimizerConfig.MaxFarClipPlane = 220f;
 
                     OptimizerConfig.EnableSsaoOptimizer = true;
-                    OptimizerConfig.SsaoDownsampling = 2;
+                    OptimizerConfig.SsaoDownsampling = 4;
                     OptimizerConfig.SsaoBlurDownsampling = true;
                     OptimizerConfig.SsaoUseGaussianBlur = true;
+
+                    OptimizerConfig.EnableBloomOptimizer = true;
 
                     OptimizerConfig.EnableGrassOptimizer = true;
                     OptimizerConfig.DisableGrassShadows = true;
                     OptimizerConfig.DisableGrassWindShader = true;
                     OptimizerConfig.GrassShaderMaxLod = 400;
-                    OptimizerConfig.GrassLodMultiplier = 2.0f;
+                    OptimizerConfig.GrassLodMultiplier = 2.5f;
 
                     OptimizerConfig.EnableSlimeRenderLod = true;
-                    OptimizerConfig.SlimeSkinLodDistance = 12f;
-                    OptimizerConfig.SlimeShadowCullDistance = 16f;
+                    OptimizerConfig.SlimeSkinLodDistance = 8f;
+                    OptimizerConfig.SlimeShadowCullDistance = 10f;
 
                     OptimizerConfig.EnableRubberBoneLod = true;
-                    OptimizerConfig.RubberLodDistance = 7f;
-                    OptimizerConfig.RubberDisableDistance = 15f;
+                    OptimizerConfig.RubberLodDistance = 5f;
+                    OptimizerConfig.RubberDisableDistance = 12f;
                     OptimizerConfig.RubberLodInterval = 4;
 
                     OptimizerConfig.EnableSlimeAiLod = true;
-                    OptimizerConfig.FarAiDistance = 18f;
-                    OptimizerConfig.UltraFarAiDistance = 36f;
+                    OptimizerConfig.FarAiDistance = 14f;
+                    OptimizerConfig.UltraFarAiDistance = 28f;
 
                     OptimizerConfig.EnableSlimeFaceEmotionLod = true;
-                    OptimizerConfig.FaceEmotionLodDistance = 15f;
-                    OptimizerConfig.FaceEmotionUltraDistance = 32f;
+                    OptimizerConfig.FaceEmotionLodDistance = 12f;
+                    OptimizerConfig.FaceEmotionUltraDistance = 24f;
+
+                    OptimizerConfig.EnableAnimatorCulling = true;
+                    OptimizerConfig.EnablePhysicsOpt = true;
+                    OptimizerConfig.PhysicsSolverIterations = 3;
+                    OptimizerConfig.EnableKeepUprightOpt = true;
+                    OptimizerConfig.EnableChickenAiLod = true;
+                    OptimizerConfig.EnableSmallObjectShadowCull = true;
                     break;
 
                 case OptimizerPreset.HighQuality:
+                    if (IsGameContextReady())
+                    {
+                        SRQualitySettings.CurrentLevel = SRQualitySettings.Level.VERY_HIGH;
+                    }
+
                     OptimizerConfig.EnableSmartQualityCaps = false;
                     OptimizerConfig.MaxShadowCascades = 4;
                     OptimizerConfig.MaxShadowResolution = 3;
@@ -211,6 +243,9 @@ namespace SlimeOptimizer
                     OptimizerConfig.MaxPixelLightCount = 4;
                     OptimizerConfig.MaxLodBias = 2.0f;
                     OptimizerConfig.MaxGlobalShaderLod = -1;
+                    OptimizerConfig.DisableSoftParticles = false;
+                    OptimizerConfig.MaxParticleRaycastBudget = 1024;
+                    OptimizerConfig.MaxAnisoMode = 2;
 
                     OptimizerConfig.EnableCameraLayerCull = false;
                     OptimizerConfig.EnableSmallObjectShadowCull = false;
@@ -219,6 +254,7 @@ namespace SlimeOptimizer
                     OptimizerConfig.SsaoDownsampling = 1;
                     OptimizerConfig.SsaoBlurDownsampling = false;
                     OptimizerConfig.SsaoUseGaussianBlur = false;
+                    OptimizerConfig.EnableBloomOptimizer = false;
 
                     OptimizerConfig.EnableGrassOptimizer = true;
                     OptimizerConfig.DisableGrassShadows = true;
@@ -228,9 +264,17 @@ namespace SlimeOptimizer
                     OptimizerConfig.EnableSlimeRenderLod = true;
                     OptimizerConfig.SlimeSkinLodDistance = 24f;
                     OptimizerConfig.SlimeShadowCullDistance = 36f;
+
+                    OptimizerConfig.EnablePhysicsOpt = false;
+                    OptimizerConfig.PhysicsSolverIterations = 6;
                     break;
 
                 case OptimizerPreset.VanillaOff:
+                    if (IsGameContextReady() && SRQualitySettings.CurrentLevel == SRQualitySettings.Level.LOWEST)
+                    {
+                        SRQualitySettings.CurrentLevel = SRQualitySettings.Level.HIGH;
+                    }
+
                     OptimizerConfig.EnableRubberBoneLod = false;
                     OptimizerConfig.EnableSlimeRenderLod = false;
                     OptimizerConfig.EnableSmallObjectShadowCull = false;
@@ -242,6 +286,11 @@ namespace SlimeOptimizer
                     OptimizerConfig.DisableGrassShadows = false;
                     OptimizerConfig.DisableGrassWindShader = false;
                     OptimizerConfig.EnableSsaoOptimizer = false;
+                    OptimizerConfig.EnableBloomOptimizer = false;
+                    OptimizerConfig.EnableAnimatorCulling = false;
+                    OptimizerConfig.EnablePhysicsOpt = false;
+                    OptimizerConfig.EnableKeepUprightOpt = false;
+                    OptimizerConfig.EnableChickenAiLod = false;
                     OptimizerConfig.EnableSlimeFaceEmotionLod = false;
                     OptimizerConfig.EnableExpressionCache = false;
                     OptimizerConfig.EnablePlortCollectorPool = false;
@@ -255,6 +304,12 @@ namespace SlimeOptimizer
 
             ApplyRuntimeEffects();
             Save();
+        }
+
+        private static bool IsGameContextReady()
+        {
+            return SRSingleton<GameContext>.Instance != null &&
+                   SRSingleton<GameContext>.Instance.OptionsDirector != null;
         }
 
         public static void ApplyQualityCapsOnly()
@@ -272,6 +327,7 @@ namespace SlimeOptimizer
         {
             Patches.QualityCapsPatch.ReapplyQualitySettings();
             Patches.GrassOptimizerPatch.ReapplyAllScenes();
+            Patches.AnimatorCullingPatch.ReapplyAll();
             Patches.CameraCullDistancePatch.MarkDirty();
             Patches.CameraCullDistancePatch.UpdateActiveCamera();
         }
