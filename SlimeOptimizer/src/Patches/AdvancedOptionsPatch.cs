@@ -412,6 +412,14 @@ namespace SlimeOptimizer.Patches
                 () => OptimizerConfig.DisableRealtimeReflections,
                 v => { OptimizerConfig.DisableRealtimeReflections = v; SettingsDatabase.ApplyQualityCapsOnly(); });
             AddToggle(ui, state, catGpu, font, fontMat,
+                T("Убрать Depth-проход (х2 рендер) и StylizedFog", "Disable Depth Prepass & StylizedFog"),
+                () => OptimizerConfig.DisableStylizedFogAndDepth,
+                v => { OptimizerConfig.DisableStylizedFogAndDepth = v; RenderExtraPatches.SyncCameraDepthAndFog(); });
+            AddToggle(ui, state, catGpu, font, fontMat,
+                T("Откл. теневой проход SECTR при выкл. тенях", "Disable SECTR Shadow Cull Pass"),
+                () => OptimizerConfig.DisableSectrShadowCulling,
+                v => OptimizerConfig.DisableSectrShadowCulling = v);
+            AddToggle(ui, state, catGpu, font, fontMat,
                 T("Лимит частиц FX (защита min FPS в замесах)", "FX Particle Count Cap"),
                 () => OptimizerConfig.EnableParticleCap,
                 v => OptimizerConfig.EnableParticleCap = v);
@@ -436,6 +444,16 @@ namespace SlimeOptimizer.Patches
                 T("Отключить тяжёлый ветер в шейдере травы", "Disable Heavy Grass Wind Shader"),
                 () => OptimizerConfig.DisableGrassWindShader,
                 v => { OptimizerConfig.DisableGrassWindShader = v; GrassOptimizerPatch.ReapplyAllScenes(); });
+            AddIntSlider(ui, state, catWorld, font, fontMat,
+                T("LOD шейдеров травы (меньше = быстрее)", "Grass Shader Max LOD"),
+                100, 400,
+                () => OptimizerConfig.GrassShaderMaxLod,
+                v => { OptimizerConfig.GrassShaderMaxLod = (v / 100) * 100; GrassOptimizerPatch.ReapplyAllScenes(); },
+                v => ((v / 100) * 100).ToString(CultureInfo.InvariantCulture));
+            AddToggle(ui, state, catWorld, font, fontMat,
+                T("Оптимизация рельефа (Terrain detail/error)", "Optimize Terrain Detail & Error"),
+                () => OptimizerConfig.OptimizeTerrain,
+                v => { OptimizerConfig.OptimizeTerrain = v; TerrainOptPatch.ApplyToAllTerrains(); });
             AddFloatSlider(ui, state, catWorld, font, fontMat,
                 T("Сдвиг LOD травы", "Grass LOD Multiplier"),
                 1.0f, 2.5f, false,

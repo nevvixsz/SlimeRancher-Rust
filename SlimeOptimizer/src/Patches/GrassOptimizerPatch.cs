@@ -13,7 +13,9 @@ namespace SlimeOptimizer.Patches
         {
             public MeshRenderer Renderer;
             public ShadowCastingMode OriginalShadowMode;
+            public bool OriginalReceiveShadows;
             public bool ShadowsDisabled;
+            public bool ReceiveShadowsDisabled;
         }
 
         private sealed class GrassLodRecord
@@ -71,6 +73,7 @@ namespace SlimeOptimizer.Patches
             SceneGrassCache cache = GetOrBuildCache(scene);
             ApplyToCache(cache, OptimizerConfig.EnableGrassOptimizer);
             ApplyGrassShaders();
+            TerrainOptPatch.ApplyToAllTerrains();
         }
 
         private static void OnSceneUnloaded(Scene scene)
@@ -98,6 +101,7 @@ namespace SlimeOptimizer.Patches
             }
 
             ApplyGrassShaders();
+            TerrainOptPatch.ApplyToAllTerrains();
         }
 
         public static string GetSeenShadersSummary()
@@ -122,6 +126,10 @@ namespace SlimeOptimizer.Patches
                 else if (rec.IsGeneric)
                 {
                     sb.Append("[generic]");
+                }
+                else if (rec.Shader != null && rec.Shader.maximumLOD < 10000)
+                {
+                    sb.Append("[orig=").Append(rec.Shader.maximumLOD).Append(']');
                 }
             }
             return sb.ToString();
@@ -158,7 +166,8 @@ namespace SlimeOptimizer.Patches
                         TempRendererRecords.Add(new GrassRendererRecord
                         {
                             Renderer = mr,
-                            OriginalShadowMode = mr.shadowCastingMode
+                            OriginalShadowMode = mr.shadowCastingMode,
+                            OriginalReceiveShadows = mr.receiveShadows
                         });
                         TrackRendererShaders(mr);
                     }
@@ -294,6 +303,7 @@ namespace SlimeOptimizer.Patches
             }
 
             bool disableShadows = enabled && OptimizerConfig.DisableGrassShadows;
+            bool disableReceiveShadows = disableShadows && OptimizerConfig.GrassLodMultiplier >= 1.8f;
             GrassRendererRecord[] renderers = cache.Renderers;
             if (renderers != null)
             {
@@ -321,6 +331,20 @@ namespace SlimeOptimizer.Patches
                     {
                         rec.Renderer.shadowCastingMode = rec.OriginalShadowMode;
                         rec.ShadowsDisabled = false;
+                    }
+
+                    if (disableReceiveShadows)
+                    {
+                        if (!rec.ReceiveShadowsDisabled && rec.Renderer.receiveShadows)
+                        {
+                            rec.Renderer.receiveShadows = false;
+                            rec.ReceiveShadowsDisabled = true;
+                        }
+                    }
+                    else if (rec.ReceiveShadowsDisabled)
+                    {
+                        rec.Renderer.receiveShadows = rec.OriginalReceiveShadows;
+                        rec.ReceiveShadowsDisabled = false;
                     }
                 }
             }

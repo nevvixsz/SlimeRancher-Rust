@@ -196,6 +196,9 @@ namespace SlimeOptimizer
                     OptimizerConfig.EnableBloomOptimizer = true;
                     OptimizerConfig.DisableGifRecorder = true;
                     OptimizerConfig.DisableRealtimeReflections = true;
+                    OptimizerConfig.DisableStylizedFogAndDepth = true;
+                    OptimizerConfig.DisableSectrShadowCulling = true;
+                    OptimizerConfig.OptimizeTerrain = true;
                     OptimizerConfig.EnableParticleCap = true;
                     OptimizerConfig.MaxParticlesPerSystem = 30;
                     OptimizerConfig.TargetFrameRate = 0;
@@ -203,7 +206,7 @@ namespace SlimeOptimizer
                     OptimizerConfig.EnableGrassOptimizer = true;
                     OptimizerConfig.DisableGrassShadows = true;
                     OptimizerConfig.DisableGrassWindShader = true;
-                    OptimizerConfig.GrassShaderMaxLod = 400;
+                    OptimizerConfig.GrassShaderMaxLod = 200;
                     OptimizerConfig.GrassLodMultiplier = 2.5f;
 
                     OptimizerConfig.EnableSlimeRenderLod = true;
@@ -280,6 +283,9 @@ namespace SlimeOptimizer
                     OptimizerConfig.PhysicsTickRate = 50;
                     OptimizerConfig.DisableGifRecorder = false;
                     OptimizerConfig.DisableRealtimeReflections = false;
+                    OptimizerConfig.DisableStylizedFogAndDepth = false;
+                    OptimizerConfig.DisableSectrShadowCulling = false;
+                    OptimizerConfig.OptimizeTerrain = false;
                     break;
 
                 case OptimizerPreset.VanillaOff:
@@ -302,6 +308,9 @@ namespace SlimeOptimizer
                     OptimizerConfig.EnableBloomOptimizer = false;
                     OptimizerConfig.DisableGifRecorder = false;
                     OptimizerConfig.DisableRealtimeReflections = false;
+                    OptimizerConfig.DisableStylizedFogAndDepth = false;
+                    OptimizerConfig.DisableSectrShadowCulling = false;
+                    OptimizerConfig.OptimizeTerrain = false;
                     OptimizerConfig.EnableParticleCap = false;
                     OptimizerConfig.EnableRanchTimersLod = false;
                     OptimizerConfig.TargetFrameRate = 0;
@@ -354,6 +363,7 @@ namespace SlimeOptimizer
         public static void ApplyRuntimeEffects()
         {
             Patches.QualityCapsPatch.ReapplyQualitySettings();
+            Patches.RenderExtraPatches.SyncCameraDepthAndFog();
             Patches.GrassOptimizerPatch.ReapplyAllScenes();
             Patches.AnimatorCullingPatch.ReapplyAll();
             Patches.CameraCullDistancePatch.MarkDirty();
@@ -365,6 +375,7 @@ namespace SlimeOptimizer
             Patches.QualityCapsPatch.ApplyCapsIfEnabled();
             Patches.QualityCapsPatch.ApplyPhysicsSettings();
             Patches.QualityCapsPatch.ApplyTargetFrameRate();
+            Patches.RenderExtraPatches.SyncCameraDepthAndFog();
             Patches.GrassOptimizerPatch.ReapplyAllScenes();
             Patches.AnimatorCullingPatch.ReapplyAll();
             Patches.CameraCullDistancePatch.MarkDirty();

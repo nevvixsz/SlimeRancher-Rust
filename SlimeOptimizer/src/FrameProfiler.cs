@@ -17,14 +17,23 @@ namespace SlimeOptimizer
             ActorUpdate = 1,
             ActorLate = 2,
             RaycastBatcher = 3,
-            SlimePlexer = 4,
+            SlimePlexer = 4, // nested inside ActorFixed
             RubberBone = 5,
             RubberEffect = 6,
             PlortCollector = 7,
             GifRecorder = 8,
             AudioProp = 9,
             Ssao = 10,
-            Count = 11
+            SectrPreCull = 11,
+            SectrPostRender = 12,
+            StylizedFog = 13,
+            NaturalBloom = 14,
+            AudioSystem = 15,
+            UiDetector = 16,
+            AmbianceDir = 17,
+            WeaponVac = 18,
+            HudUi = 19,
+            Count = 20
         }
 
         private static readonly string[] BucketNames =
@@ -39,7 +48,40 @@ namespace SlimeOptimizer
             "PlortCollector.Update",
             "GifRecorder.Update",
             "SECTR_Propagation.Update",
-            "SSAOPro.OnRenderImage"
+            "SSAOPro.OnRenderImage",
+            "SECTR_Culling.OnPreCull",
+            "SECTR_Culling.OnPostRender",
+            "StylizedFog.OnRenderImage",
+            "NaturalBloom.OnRenderImage",
+            "SECTR_AudioSys.LateUpdate",
+            "UIDetector.Update",
+            "AmbianceDir.Update",
+            "WeaponVacuum.Update",
+            "HudUI.Update"
+        };
+
+        private static readonly string[] ShortNames =
+        {
+            "ActF",
+            "ActU",
+            "ActL",
+            "Ray",
+            "Plexer",
+            "RubBone",
+            "RubEff",
+            "Plort",
+            "Gif",
+            "Prop",
+            "SSAO",
+            "SectrPre",
+            "SectrPost",
+            "Fog",
+            "Bloom",
+            "Audio",
+            "UIDet",
+            "Amb",
+            "Vac",
+            "Hud"
         };
 
         private static readonly long[] Ticks = new long[(int)Bucket.Count];
@@ -85,6 +127,15 @@ namespace SlimeOptimizer
             Hook(Bucket.GifRecorder, typeof(GifRecorder), "Update", nameof(Pre8), nameof(Post8));
             Hook(Bucket.AudioProp, typeof(SECTR_PropagationSource), "Update", nameof(Pre9), nameof(Post9));
             Hook(Bucket.Ssao, typeof(SSAOPro), "OnRenderImage", nameof(Pre10), nameof(Post10));
+            Hook(Bucket.SectrPreCull, typeof(SECTR_CullingCamera), "OnPreCull", nameof(Pre11), nameof(Post11));
+            Hook(Bucket.SectrPostRender, typeof(SECTR_CullingCamera), "OnPostRender", nameof(Pre12), nameof(Post12));
+            Hook(Bucket.StylizedFog, typeof(StylizedFog), "OnRenderImage", nameof(Pre13), nameof(Post13));
+            Hook(Bucket.NaturalBloom, typeof(SENaturalBloomAndDirtyLens), "OnRenderImage", nameof(Pre14), nameof(Post14));
+            Hook(Bucket.AudioSystem, typeof(SECTR_AudioSystem), "LateUpdate", nameof(Pre15), nameof(Post15));
+            Hook(Bucket.UiDetector, typeof(UIDetector), "Update", nameof(Pre16), nameof(Post16));
+            Hook(Bucket.AmbianceDir, typeof(AmbianceDirector), "Update", nameof(Pre17), nameof(Post17));
+            Hook(Bucket.WeaponVac, typeof(WeaponVacuum), "Update", nameof(Pre18), nameof(Post18));
+            Hook(Bucket.HudUi, typeof(HudUI), "Update", nameof(Pre19), nameof(Post19));
 
             IsRunning = true;
             LastSummary = "Profiling for " + _remainingSeconds.ToString("0.0") + "s...";
@@ -142,43 +193,50 @@ namespace SlimeOptimizer
             float avgFps = _elapsedSeconds > 0.001f ? frames / _elapsedSeconds : 0f;
             double ticksToMs = 1000.0 / Stopwatch.Frequency;
 
+            double[] msValues = new double[(int)Bucket.Count];
             double sumTopLevelMs = 0.0;
-            for (int i = 0; i <= 3; i++)
+            for (int i = 0; i < (int)Bucket.Count; i++)
             {
-                sumTopLevelMs += (Ticks[i] * ticksToMs) / frames;
-            }
-            for (int i = 5; i < (int)Bucket.Count; i++)
-            {
-                sumTopLevelMs += (Ticks[i] * ticksToMs) / frames;
+                msValues[i] = (Ticks[i] * ticksToMs) / frames;
+                if (i != (int)Bucket.SlimePlexer)
+                {
+                    sumTopLevelMs += msValues[i];
+                }
             }
 
             double otherMs = Math.Max(0.0, avgFrameMs - sumTopLevelMs);
 
-            StringBuilder sb = new StringBuilder(512);
+            StringBuilder sb = new StringBuilder(1024);
             sb.AppendLine(string.Format(
                 "=== FrameProfiler ({0} frames / {1:0.00}s => {2:0.0} FPS, {3:0.00} ms/frame) ===",
                 frames, _elapsedSeconds, avgFps, avgFrameMs));
 
             for (int i = 0; i < (int)Bucket.Count; i++)
             {
-                double msPerFrame = (Ticks[i] * ticksToMs) / frames;
                 float callsPerFrame = (float)Calls[i] / frames;
-                sb.AppendLine(string.Format("  {0,-28} {1,6:0.00} ms/f  ({2,6:0.1} calls/f)", BucketNames[i], msPerFrame, callsPerFrame));
+                sb.AppendLine(string.Format("  {0,-28} {1,6:0.00} ms/f  ({2,6:0.1} calls/f)", BucketNames[i], msValues[i], callsPerFrame));
             }
-            sb.AppendLine(string.Format("  {0,-28} {1,6:0.00} ms/f", "PhysX/Render/UnityEngine", otherMs));
+            sb.AppendLine(string.Format("  {0,-28} {1,6:0.00} ms/f", "UnityRender/GPU/PhysX", otherMs));
 
-            LastSummary = string.Format(
-                "Avg {0:0.0} FPS ({1:0.00} ms) | ActorF={2:0.00} U={3:0.00} L={4:0.00} | Plexer={5:0.00} | Rubber={6:0.00} | Ray={7:0.00} | Gif={8:0.00} | Render/PhysX={9:0.00} ms",
-                avgFps,
-                avgFrameMs,
-                (Ticks[(int)Bucket.ActorFixed] * ticksToMs) / frames,
-                (Ticks[(int)Bucket.ActorUpdate] * ticksToMs) / frames,
-                (Ticks[(int)Bucket.ActorLate] * ticksToMs) / frames,
-                (Ticks[(int)Bucket.SlimePlexer] * ticksToMs) / frames,
-                (Ticks[(int)Bucket.RubberBone] * ticksToMs) / frames,
-                (Ticks[(int)Bucket.RaycastBatcher] * ticksToMs) / frames,
-                (Ticks[(int)Bucket.GifRecorder] * ticksToMs) / frames,
-                otherMs);
+            // Pick top 5 heaviest buckets for compact UI summary
+            int[] order = new int[(int)Bucket.Count];
+            for (int i = 0; i < order.Length; i++) order[i] = i;
+            Array.Sort(order, (a, b) => msValues[b].CompareTo(msValues[a]));
+
+            StringBuilder sumSb = new StringBuilder(192);
+            sumSb.Append(string.Format("Avg {0:0.0} FPS ({1:0.00} ms)", avgFps, avgFrameMs));
+            int shown = 0;
+            for (int k = 0; k < order.Length && shown < 5; k++)
+            {
+                int idx = order[k];
+                if (msValues[idx] >= 0.01 || shown < 2)
+                {
+                    sumSb.Append(" | ").Append(ShortNames[idx]).Append('=').Append(msValues[idx].ToString("0.00"));
+                    shown++;
+                }
+            }
+            sumSb.Append(string.Format(" | GPU/PhysX={0:0.00} ms", otherMs));
+            LastSummary = sumSb.ToString();
 
             ModMain.Logger?.LogSuccess(sb.ToString());
         }
@@ -216,5 +274,23 @@ namespace SlimeOptimizer
         private static void Post9() => End(9);
         private static void Pre10() => Begin(10);
         private static void Post10() => End(10);
+        private static void Pre11() => Begin(11);
+        private static void Post11() => End(11);
+        private static void Pre12() => Begin(12);
+        private static void Post12() => End(12);
+        private static void Pre13() => Begin(13);
+        private static void Post13() => End(13);
+        private static void Pre14() => Begin(14);
+        private static void Post14() => End(14);
+        private static void Pre15() => Begin(15);
+        private static void Post15() => End(15);
+        private static void Pre16() => Begin(16);
+        private static void Post16() => End(16);
+        private static void Pre17() => Begin(17);
+        private static void Post17() => End(17);
+        private static void Pre18() => Begin(18);
+        private static void Post18() => End(18);
+        private static void Pre19() => Begin(19);
+        private static void Post19() => End(19);
     }
 }
