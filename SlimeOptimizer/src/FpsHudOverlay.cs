@@ -99,13 +99,23 @@ namespace SlimeOptimizer
                 }
             }
 
-            if (!show && !IsOptionsMenuOpen)
+            if (!show && !IsOptionsMenuOpen && !FrameProfiler.IsRunning)
             {
                 return;
             }
 
             float dt = Time.unscaledDeltaTime;
             if (dt <= 0f || dt > 1f)
+            {
+                return;
+            }
+
+            if (FrameProfiler.IsRunning)
+            {
+                FrameProfiler.TickFrame(dt);
+            }
+
+            if (!show && !IsOptionsMenuOpen)
             {
                 return;
             }

@@ -194,6 +194,8 @@ namespace SlimeOptimizer
                     OptimizerConfig.SsaoUseGaussianBlur = true;
 
                     OptimizerConfig.EnableBloomOptimizer = true;
+                    OptimizerConfig.DisableGifRecorder = true;
+                    OptimizerConfig.DisableRealtimeReflections = true;
                     OptimizerConfig.EnableParticleCap = true;
                     OptimizerConfig.MaxParticlesPerSystem = 30;
                     OptimizerConfig.TargetFrameRate = 0;
@@ -224,8 +226,11 @@ namespace SlimeOptimizer
                     OptimizerConfig.EnableAnimatorCulling = true;
                     OptimizerConfig.EnablePhysicsOpt = true;
                     OptimizerConfig.PhysicsSolverIterations = 3;
+                    OptimizerConfig.PhysicsTickRate = 33;
                     OptimizerConfig.EnableKeepUprightOpt = true;
                     OptimizerConfig.EnableChickenAiLod = true;
+                    OptimizerConfig.EnableRubberEffectLod = true;
+                    OptimizerConfig.EnableSlimeDragOpt = true;
                     OptimizerConfig.EnableRanchTimersLod = true;
                     OptimizerConfig.RanchTimersLodInterval = 16;
                     OptimizerConfig.EnableSmallObjectShadowCull = true;
@@ -272,6 +277,9 @@ namespace SlimeOptimizer
 
                     OptimizerConfig.EnablePhysicsOpt = false;
                     OptimizerConfig.PhysicsSolverIterations = 6;
+                    OptimizerConfig.PhysicsTickRate = 50;
+                    OptimizerConfig.DisableGifRecorder = false;
+                    OptimizerConfig.DisableRealtimeReflections = false;
                     break;
 
                 case OptimizerPreset.VanillaOff:
@@ -292,13 +300,18 @@ namespace SlimeOptimizer
                     OptimizerConfig.DisableGrassWindShader = false;
                     OptimizerConfig.EnableSsaoOptimizer = false;
                     OptimizerConfig.EnableBloomOptimizer = false;
+                    OptimizerConfig.DisableGifRecorder = false;
+                    OptimizerConfig.DisableRealtimeReflections = false;
                     OptimizerConfig.EnableParticleCap = false;
                     OptimizerConfig.EnableRanchTimersLod = false;
                     OptimizerConfig.TargetFrameRate = 0;
                     OptimizerConfig.EnableAnimatorCulling = false;
                     OptimizerConfig.EnablePhysicsOpt = false;
+                    OptimizerConfig.PhysicsTickRate = 50;
                     OptimizerConfig.EnableKeepUprightOpt = false;
                     OptimizerConfig.EnableChickenAiLod = false;
+                    OptimizerConfig.EnableRubberEffectLod = false;
+                    OptimizerConfig.EnableSlimeDragOpt = false;
                     OptimizerConfig.EnableSlimeFaceEmotionLod = false;
                     OptimizerConfig.EnableExpressionCache = false;
                     OptimizerConfig.EnablePlortCollectorPool = false;

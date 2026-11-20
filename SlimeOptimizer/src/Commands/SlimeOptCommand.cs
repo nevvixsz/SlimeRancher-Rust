@@ -10,13 +10,18 @@ namespace SlimeOptimizer.Commands
         {
             "status",
             "stats",
+            "profile",
             "reset",
+            "preset",
             "toggle"
         };
 
         private static readonly List<string> Modules = new List<string>
         {
             "rubber",
+            "rubbereffect",
+            "drag",
+            "gif",
             "renderlod",
             "ailod",
             "facelod",
@@ -45,17 +50,18 @@ namespace SlimeOptimizer.Commands
 
         public override string ID => "slimeopt";
 
-        public override string Usage => "slimeopt <status|stats|reset|preset <name>|toggle <module>>";
+        public override string Usage => "slimeopt <status|stats|profile|reset|preset <name>|toggle <module>>";
 
-        public override string Description => "Shows SlimeOptimizer status/stats or toggles optimization modules at runtime.";
+        public override string Description => "Shows SlimeOptimizer status/stats, runs 3s profiler, or toggles optimization modules.";
 
         public override string ExtendedDescription =>
             "Subcommands:\n" +
             "  status              - Show active modules and LOD/quality thresholds\n" +
             "  stats               - Show saved calls and avoided GC allocations\n" +
+            "  profile             - Run a 3-second zero-overhead-afterwards frame profiler\n" +
             "  reset               - Reset statistics counters\n" +
             "  preset <name>       - Apply preset: maxfps, balanced, quality, vanilla\n" +
-            "  toggle <module>     - Toggle: rubber, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, bloom, particles, timers, animcull, physopt, hud, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
+            "  toggle <module>     - Toggle: rubber, rubbereffect, drag, gif, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, bloom, particles, timers, animcull, physopt, hud, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
 
         public override List<string> GetAutoComplete(int argIndex, string argText)
         {
@@ -83,6 +89,10 @@ namespace SlimeOptimizer.Commands
             {
                 case "stats":
                     LogStats();
+                    return true;
+                case "profile":
+                    FrameProfiler.Start(3.0f);
+                    Log("Started 3-second frame profiler. Results will print here when done.");
                     return true;
                 case "reset":
                     OptimizerStats.Reset();
@@ -146,6 +156,18 @@ namespace SlimeOptimizer.Commands
                 case "rubber":
                     OptimizerConfig.EnableRubberBoneLod = !OptimizerConfig.EnableRubberBoneLod;
                     Log("RubberBoneLod = " + OptimizerConfig.EnableRubberBoneLod);
+                    return true;
+                case "rubbereffect":
+                    OptimizerConfig.EnableRubberEffectLod = !OptimizerConfig.EnableRubberEffectLod;
+                    Log("RubberEffectLod = " + OptimizerConfig.EnableRubberEffectLod);
+                    return true;
+                case "drag":
+                    OptimizerConfig.EnableSlimeDragOpt = !OptimizerConfig.EnableSlimeDragOpt;
+                    Log("SlimeDragOpt = " + OptimizerConfig.EnableSlimeDragOpt);
+                    return true;
+                case "gif":
+                    OptimizerConfig.DisableGifRecorder = !OptimizerConfig.DisableGifRecorder;
+                    Log("DisableGifRecorder = " + OptimizerConfig.DisableGifRecorder);
                     return true;
                 case "renderlod":
                     OptimizerConfig.EnableSlimeRenderLod = !OptimizerConfig.EnableSlimeRenderLod;
@@ -261,14 +283,17 @@ namespace SlimeOptimizer.Commands
         private static void LogStatus()
         {
             Log(
-                "SlimeOptimizer v0.8.0 Status:\n" +
+                "SlimeOptimizer v0.9.1 Status:\n" +
                 $"  FpsHudOverlay:      {OptimizerConfig.ShowFpsHud} (limit={(OptimizerConfig.TargetFrameRate <= 0 ? "Unlimited" : OptimizerConfig.TargetFrameRate + " FPS")})\n" +
                 $"  RubberBoneLOD:      {OptimizerConfig.EnableRubberBoneLod} (LOD >= {OptimizerConfig.RubberLodDistance}m every {OptimizerConfig.RubberLodInterval} frames, Cull >= {OptimizerConfig.RubberDisableDistance}m)\n" +
+                $"  RubberEffectLOD:    {OptimizerConfig.EnableRubberEffectLod}\n" +
+                $"  SlimeDragOpt:       {OptimizerConfig.EnableSlimeDragOpt}\n" +
+                $"  DisableGifRecorder: {OptimizerConfig.DisableGifRecorder}\n" +
                 $"  SlimeRenderLOD:     {OptimizerConfig.EnableSlimeRenderLod} (Skin1 >= {OptimizerConfig.SlimeSkinLodDistance}m, NoShadow >= {OptimizerConfig.SlimeShadowCullDistance}m)\n" +
                 $"  SlimeAiLOD:         {OptimizerConfig.EnableSlimeAiLod} (Far >= {OptimizerConfig.FarAiDistance}m: {OptimizerConfig.FarAiRethinkInterval}s, Ultra >= {OptimizerConfig.UltraFarAiDistance}m: {OptimizerConfig.UltraFarAiRethinkInterval}s)\n" +
                 $"  SlimeFaceEmotLOD:   {OptimizerConfig.EnableSlimeFaceEmotionLod} (>= {OptimizerConfig.FaceEmotionLodDistance}m: /{OptimizerConfig.FaceEmotionLodInterval}, >= {OptimizerConfig.FaceEmotionUltraDistance}m: /{OptimizerConfig.FaceEmotionUltraInterval})\n" +
                 $"  AnimatorCulling:    {OptimizerConfig.EnableAnimatorCulling}\n" +
-                $"  RanchPhysicsOpt:    {OptimizerConfig.EnablePhysicsOpt} (solverIter={UnityEngine.Physics.defaultSolverIterations}, keepUpright={OptimizerConfig.EnableKeepUprightOpt}, chickenLod={OptimizerConfig.EnableChickenAiLod})\n" +
+                $"  RanchPhysicsOpt:    {OptimizerConfig.EnablePhysicsOpt} (solverIter={UnityEngine.Physics.defaultSolverIterations}, tickHz={OptimizerConfig.PhysicsTickRate}, keepUpright={OptimizerConfig.EnableKeepUprightOpt}, chickenLod={OptimizerConfig.EnableChickenAiLod})\n" +
                 $"  RanchTimersLOD:     {OptimizerConfig.EnableRanchTimersLod} (interval={OptimizerConfig.RanchTimersLodInterval})\n" +
                 $"  ParticleCap:        {OptimizerConfig.EnableParticleCap} (max={OptimizerConfig.MaxParticlesPerSystem})\n" +
                 $"  FastFoodSearch:     {OptimizerConfig.EnableFastFoodSearch}\n" +
@@ -313,6 +338,8 @@ namespace SlimeOptimizer.Commands
                 $"  Ranch timers skipped:             {OptimizerStats.RanchTimersSkipped}\n" +
                 $"  Animators culled off-screen:      {OptimizerStats.AnimatorsCulled}\n" +
                 $"  KeepUpright sleeping/far skipped: {OptimizerStats.KeepUprightSkipped}\n" +
+                $"  RubberEffect LOD skipped:         {OptimizerStats.RubberEffectSkipped}\n" +
+                $"  SlimeDrag redundant skipped:      {OptimizerStats.DragUpdatesSkipped}\n" +
                 $"  Chicken AI distant skipped:       {OptimizerStats.ChickenAiSkipped}\n" +
                 $"  Cameras layer-culled:             {OptimizerStats.CamerasLayerCulled}\n" +
                 $"  Small actor shadows culled:       {OptimizerStats.SmallActorShadowsCulled}\n" +

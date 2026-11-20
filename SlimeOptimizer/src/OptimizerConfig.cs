@@ -196,5 +196,20 @@ namespace SlimeOptimizer
 
         [ConfigComment("Collect counters for the 'slimeopt stats' console command.")]
         public static bool EnableStatsCollection = true;
+
+        [ConfigComment("Disable background GifRecorder RenderTexture blits/allocations (free GPU boost when not recording GIFs).")]
+        public static bool DisableGifRecorder = false;
+
+        [ConfigComment("Disable Unity realtime reflection probes when SmartQualityCaps is enabled.")]
+        public static bool DisableRealtimeReflections = false;
+
+        [ConfigComment("Enable distance-based LOD and sleep culling for vertex RubberEffect meshes.")]
+        public static bool EnableRubberEffectLod = true;
+
+        [ConfigComment("Skip redundant Rigidbody.drag assignments in SlimeDragUpdater when captive state has not changed.")]
+        public static bool EnableSlimeDragOpt = true;
+
+        [ConfigComment("Physics FixedUpdate tick rate in Hz (50=vanilla 0.02s, 33=fast ranch 0.03s, 25=max FPS 0.04s).")]
+        public static int PhysicsTickRate = 50;
     }
 }

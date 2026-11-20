@@ -2,6 +2,6 @@
   "id": "slimeoptimizer",
   "name": "SlimeOptimizer",
   "author": "nevvixsz",
-        "version": "0.9.0",
+        "version": "0.9.1",
   "description": "High-impact FPS, AI, foliage, SECTR culling, camera layer cull, and GPU shadow/MSAA optimizations for Slime Rancher."
 }
