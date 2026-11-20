@@ -25,6 +25,8 @@ namespace SlimeOptimizer.Commands
             "grasswind",
             "ssao",
             "bloom",
+            "particles",
+            "timers",
             "animcull",
             "physopt",
             "hud",
@@ -53,7 +55,7 @@ namespace SlimeOptimizer.Commands
             "  stats               - Show saved calls and avoided GC allocations\n" +
             "  reset               - Reset statistics counters\n" +
             "  preset <name>       - Apply preset: maxfps, balanced, quality, vanilla\n" +
-            "  toggle <module>     - Toggle: rubber, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, bloom, animcull, physopt, hud, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
+            "  toggle <module>     - Toggle: rubber, renderlod, ailod, facelod, foodsearch, grass, grasswind, ssao, bloom, particles, timers, animcull, physopt, hud, cameracull, smallshadows, qcaps, expr, plort, cell, collisions, billboard, effects, plexer, stats";
 
         public override List<string> GetAutoComplete(int argIndex, string argText)
         {
@@ -89,7 +91,7 @@ namespace SlimeOptimizer.Commands
                 case "toggle":
                     if (args.Length < 2)
                     {
-                        LogWarn("Usage: slimeopt toggle <rubber|renderlod|ailod|facelod|foodsearch|grass|grasswind|ssao|bloom|animcull|physopt|hud|cameracull|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
+                        LogWarn("Usage: slimeopt toggle <rubber|renderlod|ailod|facelod|foodsearch|grass|grasswind|ssao|bloom|particles|timers|animcull|physopt|hud|cameracull|smallshadows|qcaps|expr|plort|cell|collisions|billboard|effects|plexer|stats>");
                         return false;
                     }
                     bool ok = ToggleModule(args[1].ToLowerInvariant());
@@ -180,6 +182,14 @@ namespace SlimeOptimizer.Commands
                     OptimizerConfig.EnableBloomOptimizer = !OptimizerConfig.EnableBloomOptimizer;
                     Log("BloomOptimizer = " + OptimizerConfig.EnableBloomOptimizer);
                     return true;
+                case "particles":
+                    OptimizerConfig.EnableParticleCap = !OptimizerConfig.EnableParticleCap;
+                    Log("ParticleCap = " + OptimizerConfig.EnableParticleCap + " (max=" + OptimizerConfig.MaxParticlesPerSystem + ")");
+                    return true;
+                case "timers":
+                    OptimizerConfig.EnableRanchTimersLod = !OptimizerConfig.EnableRanchTimersLod;
+                    Log("RanchTimersLOD = " + OptimizerConfig.EnableRanchTimersLod + " (interval=" + OptimizerConfig.RanchTimersLodInterval + ")");
+                    return true;
                 case "animcull":
                     OptimizerConfig.EnableAnimatorCulling = !OptimizerConfig.EnableAnimatorCulling;
                     AnimatorCullingPatch.ReapplyAll();
@@ -251,14 +261,16 @@ namespace SlimeOptimizer.Commands
         private static void LogStatus()
         {
             Log(
-                "SlimeOptimizer v0.7.0 Status:\n" +
-                $"  FpsHudOverlay:      {OptimizerConfig.ShowFpsHud}\n" +
+                "SlimeOptimizer v0.8.0 Status:\n" +
+                $"  FpsHudOverlay:      {OptimizerConfig.ShowFpsHud} (limit={(OptimizerConfig.TargetFrameRate <= 0 ? "Unlimited" : OptimizerConfig.TargetFrameRate + " FPS")})\n" +
                 $"  RubberBoneLOD:      {OptimizerConfig.EnableRubberBoneLod} (LOD >= {OptimizerConfig.RubberLodDistance}m every {OptimizerConfig.RubberLodInterval} frames, Cull >= {OptimizerConfig.RubberDisableDistance}m)\n" +
                 $"  SlimeRenderLOD:     {OptimizerConfig.EnableSlimeRenderLod} (Skin1 >= {OptimizerConfig.SlimeSkinLodDistance}m, NoShadow >= {OptimizerConfig.SlimeShadowCullDistance}m)\n" +
                 $"  SlimeAiLOD:         {OptimizerConfig.EnableSlimeAiLod} (Far >= {OptimizerConfig.FarAiDistance}m: {OptimizerConfig.FarAiRethinkInterval}s, Ultra >= {OptimizerConfig.UltraFarAiDistance}m: {OptimizerConfig.UltraFarAiRethinkInterval}s)\n" +
                 $"  SlimeFaceEmotLOD:   {OptimizerConfig.EnableSlimeFaceEmotionLod} (>= {OptimizerConfig.FaceEmotionLodDistance}m: /{OptimizerConfig.FaceEmotionLodInterval}, >= {OptimizerConfig.FaceEmotionUltraDistance}m: /{OptimizerConfig.FaceEmotionUltraInterval})\n" +
                 $"  AnimatorCulling:    {OptimizerConfig.EnableAnimatorCulling}\n" +
                 $"  RanchPhysicsOpt:    {OptimizerConfig.EnablePhysicsOpt} (solverIter={UnityEngine.Physics.defaultSolverIterations}, keepUpright={OptimizerConfig.EnableKeepUprightOpt}, chickenLod={OptimizerConfig.EnableChickenAiLod})\n" +
+                $"  RanchTimersLOD:     {OptimizerConfig.EnableRanchTimersLod} (interval={OptimizerConfig.RanchTimersLodInterval})\n" +
+                $"  ParticleCap:        {OptimizerConfig.EnableParticleCap} (max={OptimizerConfig.MaxParticlesPerSystem})\n" +
                 $"  FastFoodSearch:     {OptimizerConfig.EnableFastFoodSearch}\n" +
                 $"  GrassOptimizer:     {OptimizerConfig.EnableGrassOptimizer} (noShadows={OptimizerConfig.DisableGrassShadows}, lodMult={OptimizerConfig.GrassLodMultiplier:0.00}x, windCap={OptimizerConfig.DisableGrassWindShader}@{OptimizerConfig.GrassShaderMaxLod}, shaders=[{GrassOptimizerPatch.GetSeenShadersSummary()}])\n" +
                 $"  SsaoOptimizer:      {OptimizerConfig.EnableSsaoOptimizer} (downsample={OptimizerConfig.SsaoDownsampling}x, blurDown={OptimizerConfig.SsaoBlurDownsampling}, gaussian={OptimizerConfig.SsaoUseGaussianBlur})\n" +
@@ -297,6 +309,8 @@ namespace SlimeOptimizer.Commands
                 $"  Grass shaders LOD-capped:         {OptimizerStats.GrassShadersCapped}\n" +
                 $"  SSAO downsampled frames:          {OptimizerStats.SsaoDownsampledFrames} (keyword resets avoided: {OptimizerStats.SsaoKeywordResetsAvoided})\n" +
                 $"  Bloom frames optimized:           {OptimizerStats.BloomFramesOptimized}\n" +
+                $"  FX particles capped:              {OptimizerStats.ParticlesCapped}\n" +
+                $"  Ranch timers skipped:             {OptimizerStats.RanchTimersSkipped}\n" +
                 $"  Animators culled off-screen:      {OptimizerStats.AnimatorsCulled}\n" +
                 $"  KeepUpright sleeping/far skipped: {OptimizerStats.KeepUprightSkipped}\n" +
                 $"  Chicken AI distant skipped:       {OptimizerStats.ChickenAiSkipped}\n" +

@@ -197,6 +197,9 @@ namespace SlimeOptimizer
                     OptimizerConfig.SsaoUseGaussianBlur = true;
 
                     OptimizerConfig.EnableBloomOptimizer = true;
+                    OptimizerConfig.EnableParticleCap = true;
+                    OptimizerConfig.MaxParticlesPerSystem = 30;
+                    OptimizerConfig.TargetFrameRate = 0;
 
                     OptimizerConfig.EnableGrassOptimizer = true;
                     OptimizerConfig.DisableGrassShadows = true;
@@ -226,6 +229,8 @@ namespace SlimeOptimizer
                     OptimizerConfig.PhysicsSolverIterations = 3;
                     OptimizerConfig.EnableKeepUprightOpt = true;
                     OptimizerConfig.EnableChickenAiLod = true;
+                    OptimizerConfig.EnableRanchTimersLod = true;
+                    OptimizerConfig.RanchTimersLodInterval = 15;
                     OptimizerConfig.EnableSmallObjectShadowCull = true;
                     break;
 
@@ -255,6 +260,8 @@ namespace SlimeOptimizer
                     OptimizerConfig.SsaoBlurDownsampling = false;
                     OptimizerConfig.SsaoUseGaussianBlur = false;
                     OptimizerConfig.EnableBloomOptimizer = false;
+                    OptimizerConfig.EnableParticleCap = false;
+                    OptimizerConfig.EnableRanchTimersLod = false;
 
                     OptimizerConfig.EnableGrassOptimizer = true;
                     OptimizerConfig.DisableGrassShadows = true;
@@ -287,6 +294,9 @@ namespace SlimeOptimizer
                     OptimizerConfig.DisableGrassWindShader = false;
                     OptimizerConfig.EnableSsaoOptimizer = false;
                     OptimizerConfig.EnableBloomOptimizer = false;
+                    OptimizerConfig.EnableParticleCap = false;
+                    OptimizerConfig.EnableRanchTimersLod = false;
+                    OptimizerConfig.TargetFrameRate = 0;
                     OptimizerConfig.EnableAnimatorCulling = false;
                     OptimizerConfig.EnablePhysicsOpt = false;
                     OptimizerConfig.EnableKeepUprightOpt = false;

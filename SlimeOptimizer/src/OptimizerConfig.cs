@@ -83,6 +83,21 @@ namespace SlimeOptimizer
         [ConfigComment("Show a lightweight Sodium-style FPS / min-FPS / frametime ms overlay at the top of the screen.")]
         public static bool ShowFpsHud = true;
 
+        [ConfigComment("Application.targetFrameRate cap when VSync is off (0 = unlimited, or 30..300 FPS).")]
+        public static int TargetFrameRate = 0;
+
+        [ConfigComment("Cap maximum active particles per ParticleSystem played via FX pool to prevent min-FPS drops during explosions/vacuums.")]
+        public static bool EnableParticleCap = true;
+
+        [ConfigComment("Maximum particles allowed per ParticleSystem when EnableParticleCap is true (recommended: 80, MaxFPS: 30).")]
+        public static int MaxParticlesPerSystem = 80;
+
+        [ConfigComment("Throttle background timer checks on plorts, food, timed objects, and slime glints (ResourceCycle, DestroyPlortAfterTime, DestroyAfterTime, GlintController).")]
+        public static bool EnableRanchTimersLod = true;
+
+        [ConfigComment("Update interval (every N frames) for background ranch timers when EnableRanchTimersLod is true.")]
+        public static int RanchTimersLodInterval = 10;
+
         [ConfigComment("Apply per-layer camera cull distances and a smart farClipPlane cap to skip rendering distant small actors.")]
         public static bool EnableCameraLayerCull = true;
 

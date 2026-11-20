@@ -10,13 +10,17 @@ namespace SlimeOptimizer
     {
         private static FpsHudOverlay _instance;
 
+        public static int CurrentFps { get; private set; }
+        public static int MinFps { get; private set; }
+        public static float AvgFrameMs { get; private set; }
+        public static bool IsOptionsMenuOpen { get; set; }
+
         private Canvas _canvas;
         private TextMeshProUGUI _text;
         private float _accumTime;
         private int _accumFrames;
         private float _worstFrameMs;
         private float _minResetTimer;
-        private int _displayMinFps;
         private readonly StringBuilder _sb = new StringBuilder(64);
 
         public static void EnsureCreated()
@@ -81,7 +85,7 @@ namespace SlimeOptimizer
                 _canvas.enabled = show;
             }
 
-            if (!show || _text == null)
+            if (!show && !IsOptionsMenuOpen)
             {
                 return;
             }
@@ -109,28 +113,31 @@ namespace SlimeOptimizer
 
             if (_accumTime >= 0.25f)
             {
-                int fps = Mathf.RoundToInt(_accumFrames / _accumTime);
-                float avgMs = (_accumTime / _accumFrames) * 1000f;
-                _displayMinFps = _worstFrameMs > 0.1f ? Mathf.RoundToInt(1000f / _worstFrameMs) : fps;
+                CurrentFps = Mathf.RoundToInt(_accumFrames / _accumTime);
+                AvgFrameMs = (_accumTime / _accumFrames) * 1000f;
+                MinFps = _worstFrameMs > 0.1f ? Mathf.RoundToInt(1000f / _worstFrameMs) : CurrentFps;
 
-                if (fps >= 120)
+                if (show && _text != null)
                 {
-                    _text.color = new Color(0.45f, 0.98f, 0.55f);
-                }
-                else if (fps >= 60)
-                {
-                    _text.color = new Color(1.0f, 0.88f, 0.35f);
-                }
-                else
-                {
-                    _text.color = new Color(1.0f, 0.42f, 0.42f);
-                }
+                    if (CurrentFps >= 120)
+                    {
+                        _text.color = new Color(0.45f, 0.98f, 0.55f);
+                    }
+                    else if (CurrentFps >= 60)
+                    {
+                        _text.color = new Color(1.0f, 0.88f, 0.35f);
+                    }
+                    else
+                    {
+                        _text.color = new Color(1.0f, 0.42f, 0.42f);
+                    }
 
-                _sb.Length = 0;
-                _sb.Append("FPS: ").Append(fps)
-                   .Append("  |  min ").Append(_displayMinFps)
-                   .Append("  |  ").Append(avgMs.ToString("0.0")).Append(" ms");
-                _text.text = _sb.ToString();
+                    _sb.Length = 0;
+                    _sb.Append("FPS: ").Append(CurrentFps)
+                       .Append("  |  min ").Append(MinFps)
+                       .Append("  |  ").Append(AvgFrameMs.ToString("0.0")).Append(" ms");
+                    _text.text = _sb.ToString();
+                }
 
                 _accumTime = 0f;
                 _accumFrames = 0;

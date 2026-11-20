@@ -16,7 +16,7 @@ namespace SlimeOptimizer
             SettingsDatabase.LoadOrCreate();
             HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
             Console.RegisterCommand(new SlimeOptCommand());
-            Logger?.LogSuccess("SlimeOptimizer v0.6.0 pre-loaded (Options -> Advanced tab + DB ready). Use 'slimeopt' in console.");
+            Logger?.LogSuccess("SlimeOptimizer v0.8.0 pre-loaded (Sodium-style Options -> Advanced + DB ready). Use 'slimeopt' in console.");
         }
 
         public override void Load()
@@ -29,6 +29,7 @@ namespace SlimeOptimizer
         {
             QualityCapsPatch.ApplyCapsIfEnabled();
             QualityCapsPatch.ApplyPhysicsSettings();
+            QualityCapsPatch.ApplyTargetFrameRate();
             GrassOptimizerPatch.Initialize();
             AnimatorCullingPatch.Initialize();
             CameraCullDistancePatch.MarkDirty();
