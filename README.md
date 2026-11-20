@@ -2,6 +2,16 @@
 
 Мод оптимизации производительности и снижения микрофризов (GC) для **Slime Rancher** на базе **SRML** (`0.2.1.0+`) и **Harmony**.
 
+## Что включено (v0.9.1 — Ranch Boost + Встроенный 3-секундный FrameProfiler)
+
+### Новое в v0.9.1 (прицельно против просадок на ранчо)
+- **Встроенный 3-секундный `FrameProfiler` (`slimeopt profile` или кнопка «Диагностика FPS (3с)» в `Расширенное → Общее`)**: динамически замеряет точные миллисекунды на кадр (`ActorRegistry`, `SlimePlexer`, `RubberBone`, `RubberEffect`, `RaycastBatcher`, `GifRecorder`, `SECTR_Propagation`, `SSAO`, `PhysX/Render`), после чего **полностью снимает свои хуки** (0% оверхеда в обычной игре).
+- **Отключение фонового `GifRecorder` (`DisableGifRecorder`, вкл. в `Макс. FPS`)**: убирает фоновые `Graphics.Blit` и аллокации `RenderTexture` на камерах (которые в Slime Rancher включены по умолчанию!).
+- **Регулируемая частота тиков физики (`PhysicsTickRate`: `50 / 33 / 25 Hz`)**: в `Макс. FPS` ставит `33 Hz` (`0.03s`), в 1.5 раза разгружая PhysX и `FixedUpdate` в загонах.
+- **`RubberEffectLodPatch`**: кэширует/усыпляет деформацию вершин `RubberEffect` на расстоянии.
+- **`SlimeDragOptPatch`**: убирает еже-тиковый native `Rigidbody.drag = ...` в `SlimeDragUpdater`.
+- **`DisableRealtimeReflections`**: отключает `QualitySettings.realtimeReflectionProbes` в `Макс. FPS`.
+
 ## Что включено (v0.9.0 — Zero-GC / Zero-Icall FastCache Engine)
 
 ### Архитектурная оптимизация самого мода (`v0.9.0`)
@@ -63,7 +73,8 @@ dotnet build SlimeOptimizer\SlimeOptimizer.csproj -c Release -p:SlimeRancherDir=
 - `slimeopt status` — активные модули, пороги и текущие `QualitySettings` (`cascades`, `dist`, `MSAA`)
 - `slimeopt stats` — статистика сэкономленных вызовов и аллокаций
 - `slimeopt preset <maxfps|balanced|quality|vanilla>` — мгновенно применить пресет настроек и сохранить в базу
-- `slimeopt toggle <module>` — включить/выключить на лету и сохранить в базу (`rubber`, `renderlod`, `ailod`, `facelod`, `foodsearch`, `grass`, `grasswind`, `ssao`, `bloom`, `particles`, `timers`, `animcull`, `physopt`, `hud`, `cameracull`, `smallshadows`, `qcaps`, `expr`, `plort`, `cell`, `collisions`, `billboard`, `effects`, `plexer`, `stats`)
+- `slimeopt profile` — запустить 3-секундную диагностику FPS по системам (показывает, что именно тормозит на ранчо, затем полностью снимает хуки)
+- `slimeopt toggle <module>` — включить/выключить на лету и сохранить в базу (`rubber`, `rubbereffect`, `drag`, `gif`, `renderlod`, `ailod`, `facelod`, `foodsearch`, `grass`, `grasswind`, `ssao`, `bloom`, `particles`, `timers`, `animcull`, `physopt`, `hud`, `cameracull`, `smallshadows`, `qcaps`, `expr`, `plort`, `cell`, `collisions`, `billboard`, `effects`, `plexer`, `stats`)
 - `slimeopt reset` — обнулить счётчики
 
 Файл конфигурации:

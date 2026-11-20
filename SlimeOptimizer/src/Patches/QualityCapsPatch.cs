@@ -100,6 +100,11 @@ namespace SlimeOptimizer.Patches
             {
                 QualitySettings.anisotropicFiltering = (AnisotropicFiltering)maxAniso;
             }
+
+            if (OptimizerConfig.DisableRealtimeReflections && QualitySettings.realtimeReflectionProbes)
+            {
+                QualitySettings.realtimeReflectionProbes = false;
+            }
         }
 
         public static void ApplyPhysicsSettings()
@@ -115,10 +120,24 @@ namespace SlimeOptimizer.Patches
                 {
                     Physics.defaultSolverVelocityIterations = 1;
                 }
+
+                int hz = Mathf.Clamp(OptimizerConfig.PhysicsTickRate, 20, 60);
+                float desiredDt = hz == 50 ? 0.02f : (1f / hz);
+                if (Mathf.Abs(Time.fixedDeltaTime - desiredDt) > 0.0005f)
+                {
+                    Time.fixedDeltaTime = desiredDt;
+                }
             }
-            else if (Physics.defaultSolverIterations != 6)
+            else
             {
-                Physics.defaultSolverIterations = 6;
+                if (Physics.defaultSolverIterations != 6)
+                {
+                    Physics.defaultSolverIterations = 6;
+                }
+                if (Mathf.Abs(Time.fixedDeltaTime - 0.02f) > 0.0005f)
+                {
+                    Time.fixedDeltaTime = 0.02f;
+                }
             }
         }
 

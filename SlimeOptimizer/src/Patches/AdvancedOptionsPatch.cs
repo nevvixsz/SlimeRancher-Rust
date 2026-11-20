@@ -197,8 +197,8 @@ namespace SlimeOptimizer.Patches
             if (state.InfoText != null)
             {
                 state.InfoText.text = T(
-                    "База настроек: " + SettingsDatabase.DatabasePath + "\nШейдеры травы: " + GrassOptimizerPatch.GetSeenShadersSummary(),
-                    "Settings DB: " + SettingsDatabase.DatabasePath + "\nGrass shaders: " + GrassOptimizerPatch.GetSeenShadersSummary());
+                    "Профайлер: " + FrameProfiler.LastSummary + "\nБаза: " + SettingsDatabase.DatabasePath + " | Шейдеры: " + GrassOptimizerPatch.GetSeenShadersSummary(),
+                    "Profiler: " + FrameProfiler.LastSummary + "\nDB: " + SettingsDatabase.DatabasePath + " | Shaders: " + GrassOptimizerPatch.GetSeenShadersSummary());
             }
         }
 
@@ -313,7 +313,7 @@ namespace SlimeOptimizer.Patches
                 new Color(0.8f, 0.88f, 0.96f, 0.9f), TextAlignmentOptions.TopLeft);
             state.InfoText.enableWordWrapping = true;
             LayoutElement infoLe = state.InfoText.gameObject.AddComponent<LayoutElement>();
-            infoLe.minHeight = 46f;
+            infoLe.minHeight = 74f;
 
             // --- Category 1: GPU, Shadows, SSAO, Bloom, Particles ---
             AddSectionHeader(catGpu, font, fontMat, T("Тени, Свет, Сглаживание и Шейдеры", "Shadows, Lighting, AA & Shaders"));
@@ -403,6 +403,14 @@ namespace SlimeOptimizer.Patches
                 T("Ускорение Bloom (1 проход / Low Res)", "Fast Bloom Optimizer"),
                 () => OptimizerConfig.EnableBloomOptimizer,
                 v => OptimizerConfig.EnableBloomOptimizer = v);
+            AddToggle(ui, state, catGpu, font, fontMat,
+                T("Откл. фоновый GIF-рекордер (экономит GPU)", "Disable Background GIF Recorder"),
+                () => OptimizerConfig.DisableGifRecorder,
+                v => OptimizerConfig.DisableGifRecorder = v);
+            AddToggle(ui, state, catGpu, font, fontMat,
+                T("Откл. Realtime Reflection Probes", "Disable Realtime Reflection Probes"),
+                () => OptimizerConfig.DisableRealtimeReflections,
+                v => { OptimizerConfig.DisableRealtimeReflections = v; SettingsDatabase.ApplyQualityCapsOnly(); });
             AddToggle(ui, state, catGpu, font, fontMat,
                 T("Лимит частиц FX (защита min FPS в замесах)", "FX Particle Count Cap"),
                 () => OptimizerConfig.EnableParticleCap,
@@ -521,6 +529,20 @@ namespace SlimeOptimizer.Patches
                 () => OptimizerConfig.PhysicsSolverIterations,
                 v => { OptimizerConfig.PhysicsSolverIterations = v; QualityCapsPatch.ApplyPhysicsSettings(); },
                 v => v.ToString(CultureInfo.InvariantCulture));
+            AddIntSlider(ui, state, catSlimes, font, fontMat,
+                T("Частота тиков физики (50=ваниль, 33=быстро, 25=макс)", "Physics Tick Rate (Hz)"),
+                25, 50,
+                () => OptimizerConfig.PhysicsTickRate,
+                v => { OptimizerConfig.PhysicsTickRate = v; QualityCapsPatch.ApplyPhysicsSettings(); },
+                v => v + " Hz");
+            AddToggle(ui, state, catSlimes, font, fontMat,
+                T("LOD деформации мешей (RubberEffect)", "RubberEffect Mesh LOD"),
+                () => OptimizerConfig.EnableRubberEffectLod,
+                v => OptimizerConfig.EnableRubberEffectLod = v);
+            AddToggle(ui, state, catSlimes, font, fontMat,
+                T("Кэш трения слаймов (SlimeDragUpdater)", "Optimize Slime Drag Updates"),
+                () => OptimizerConfig.EnableSlimeDragOpt,
+                v => OptimizerConfig.EnableSlimeDragOpt = v);
             AddToggle(ui, state, catSlimes, font, fontMat,
                 T("Усыплять KeepUpright у спящих/дальних тел", "Skip Sleeping/Far KeepUpright"),
                 () => OptimizerConfig.EnableKeepUprightOpt,
@@ -533,7 +555,7 @@ namespace SlimeOptimizer.Patches
             // --- Category 4: Engine, Timers & GC ---
             AddSectionHeader(catEngine, font, fontMat, T("Таймеры, Кэши и Память (GC)", "Timers, Caches & Memory (GC)"));
             AddToggle(ui, state, catEngine, font, fontMat,
-                T("LOD таймеров плортов, еды и блёсток", "Ranch Timers & Glint LOD"),
+                T("LOD таймера созревания (ResourceCycle)", "ResourceCycle Timer LOD"),
                 () => OptimizerConfig.EnableRanchTimersLod,
                 v => OptimizerConfig.EnableRanchTimersLod = v);
             AddIntSlider(ui, state, catEngine, font, fontMat,
@@ -832,6 +854,11 @@ namespace SlimeOptimizer.Patches
             row.GetComponent<LayoutElement>().minHeight = 36f;
             row.GetComponent<LayoutElement>().preferredHeight = 36f;
 
+            CreateActionButton(ui, row.transform, font, fontMat, T("Диагностика FPS (3с)", "Run 3s Profiler"), new Color(0.70f, 0.42f, 0.18f), () =>
+            {
+                FrameProfiler.Start(3.0f);
+                RefreshState(state);
+            });
             CreateActionButton(ui, row.transform, font, fontMat, T("Сбросить настройки по умолчанию", "Reset To Defaults"), new Color(0.28f, 0.45f, 0.66f), () =>
             {
                 SettingsDatabase.ApplyPreset(OptimizerPreset.Balanced);

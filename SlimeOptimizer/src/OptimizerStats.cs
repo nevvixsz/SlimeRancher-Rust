@@ -36,6 +36,8 @@ namespace SlimeOptimizer
         public static long ChickenAiSkipped;
         public static long RanchTimersSkipped;
         public static long ParticlesCapped;
+        public static long RubberEffectSkipped;
+        public static long DragUpdatesSkipped;
 
         public static void Reset()
         {
@@ -73,6 +75,8 @@ namespace SlimeOptimizer
             ChickenAiSkipped = 0;
             RanchTimersSkipped = 0;
             ParticlesCapped = 0;
+            RubberEffectSkipped = 0;
+            DragUpdatesSkipped = 0;
         }
     }
 }
