@@ -24,10 +24,7 @@ namespace SlimeCoop
         public string Name;
         public int ColorIndex;
         public ZoneDirector.Zone CurrentZone = ZoneDirector.Zone.RANCH;
-        public int PingMs;
         public long LastHeardTicks;
-        public long LastPingSentTicks;
-        public string PendingChallenge;
         public bool Authenticated;
     }
 
