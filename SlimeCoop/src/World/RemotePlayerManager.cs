@@ -46,6 +46,7 @@ namespace SlimeCoop.World
         private static TMP_FontAsset _cachedFont;
         private static Material _cachedFontMat;
         private static Shader _standardShader;
+        private static Camera _cachedCam;
 
         public static void ClearAll()
         {
@@ -110,7 +111,11 @@ namespace SlimeCoop.World
         {
             if (Visuals.Count == 0) return;
 
-            Camera cam = Camera.main;
+            if (_cachedCam == null || !_cachedCam.isActiveAndEnabled)
+            {
+                _cachedCam = Camera.main;
+            }
+            Camera cam = _cachedCam;
             float lerpT = Mathf.Clamp01(Time.unscaledDeltaTime * 16f);
 
             foreach (RemotePlayerVisual v in Visuals.Values)

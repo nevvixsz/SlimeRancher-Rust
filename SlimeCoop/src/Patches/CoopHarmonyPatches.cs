@@ -359,10 +359,14 @@ namespace SlimeCoop.Patches
         {
             private static void Prefix(GameObject gameObj)
             {
-                if (!CoopSession.IsHost || NetSyncGuard.IsApplyingRemote || gameObj == null) return;
-                long actorId = Identifiable.GetActorId(gameObj);
+                if (gameObj == null) return;
+                long actorId = 0;
+                if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote && CoopSession.ConnectedPeers.Count > 0)
+                {
+                    CoopWorldSync.TryGetActorId(gameObj, out actorId);
+                }
                 CoopWorldSync.UnregisterActor(gameObj);
-                if (actorId <= 0 || CoopSession.ConnectedPeers.Count == 0) return;
+                if (actorId <= 0) return;
 
                 SyncWriter.Reset();
                 SyncWriter.WriteLong(actorId);
@@ -383,13 +387,20 @@ namespace SlimeCoop.Patches
                 }
             }
 
-            private static void Postfix(bool __result, long __state)
+            private static void Postfix(Vacuumable __instance, bool __result, long __state)
             {
-                if (__result && __state > 0 && CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                if (__result && CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
                 {
-                    SyncWriter.Reset();
-                    SyncWriter.WriteLong(__state);
-                    CoopSession.SendToHostReliable(PacketType.ClientVacCapture, SyncWriter);
+                    if (__instance != null)
+                    {
+                        CoopWorldSync.UnregisterActor(__instance.gameObject);
+                    }
+                    if (__state > 0)
+                    {
+                        SyncWriter.Reset();
+                        SyncWriter.WriteLong(__state);
+                        CoopSession.SendToHostReliable(PacketType.ClientVacCapture, SyncWriter);
+                    }
                 }
             }
         }

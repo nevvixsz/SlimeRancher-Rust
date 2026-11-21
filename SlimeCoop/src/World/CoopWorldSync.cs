@@ -37,7 +37,15 @@ namespace SlimeCoop.World
         private static readonly System.Reflection.MethodInfo GordoReachedTargetMethod =
             AccessTools.Method(typeof(GordoEat), "ReachedTarget");
 
-        private static readonly Dictionary<long, GameObject> NetActors = new Dictionary<long, GameObject>(512);
+        private struct CachedNetActor
+        {
+            public GameObject Go;
+            public Transform Tr;
+            public Rigidbody Rb;
+            public Vacuumable Vac;
+        }
+
+        private static readonly Dictionary<long, CachedNetActor> NetActors = new Dictionary<long, CachedNetActor>(512);
         private static readonly Dictionary<GameObject, long> ReverseActors = new Dictionary<GameObject, long>(512);
 
         private static readonly Dictionary<string, LandPlotLocation> PlotCache =
@@ -61,7 +69,7 @@ namespace SlimeCoop.World
         private struct ActiveSyncItem
         {
             public long Id;
-            public GameObject Go;
+            public CachedNetActor Actor;
         }
 
         private static readonly List<ActiveSyncItem> PendingHostSyncActors = new List<ActiveSyncItem>(128);
@@ -106,7 +114,13 @@ namespace SlimeCoop.World
                 {
                     if (toRemove[i] != null)
                     {
-                        Destroyer.DestroyActor(toRemove[i], "SlimeCoop.SnapshotClear", true);
+                        try
+                        {
+                            Destroyer.DestroyActor(toRemove[i], "SlimeCoop.SnapshotClear", true);
+                        }
+                        catch
+                        {
+                        }
                     }
                 }
             }
@@ -123,7 +137,13 @@ namespace SlimeCoop.World
         public static void RegisterActor(long actorId, GameObject go)
         {
             if (actorId <= 0 || go == null) return;
-            NetActors[actorId] = go;
+            NetActors[actorId] = new CachedNetActor
+            {
+                Go = go,
+                Tr = go.transform,
+                Rb = go.GetComponent<Rigidbody>(),
+                Vac = go.GetComponent<Vacuumable>()
+            };
             ReverseActors[go] = actorId;
         }
 
@@ -133,7 +153,7 @@ namespace SlimeCoop.World
             if (ReverseActors.TryGetValue(go, out long id))
             {
                 ReverseActors.Remove(go);
-                if (NetActors.TryGetValue(id, out GameObject cur) && ReferenceEquals(cur, go))
+                if (NetActors.TryGetValue(id, out CachedNetActor cur) && ReferenceEquals(cur.Go, go))
                 {
                     NetActors.Remove(id);
                 }
@@ -151,7 +171,14 @@ namespace SlimeCoop.World
             {
                 return true;
             }
-            actorId = Identifiable.GetActorId(go);
+            try
+            {
+                actorId = Identifiable.GetActorId(go);
+            }
+            catch
+            {
+                actorId = 0;
+            }
             if (actorId > 0)
             {
                 RegisterActor(actorId, go);
@@ -162,8 +189,9 @@ namespace SlimeCoop.World
 
         public static bool TryGetActorObject(long actorId, out GameObject go)
         {
-            if (NetActors.TryGetValue(actorId, out go) && go != null)
+            if (NetActors.TryGetValue(actorId, out CachedNetActor cached) && cached.Go != null)
             {
+                go = cached.Go;
                 return true;
             }
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
@@ -178,6 +206,20 @@ namespace SlimeCoop.World
                 }
             }
             go = null;
+            return false;
+        }
+
+        private static bool TryGetCachedActor(long actorId, out CachedNetActor cached)
+        {
+            if (NetActors.TryGetValue(actorId, out cached) && cached.Go != null)
+            {
+                return true;
+            }
+            if (TryGetActorObject(actorId, out GameObject _) && NetActors.TryGetValue(actorId, out cached) && cached.Go != null)
+            {
+                return true;
+            }
+            cached = default(CachedNetActor);
             return false;
         }
 
@@ -641,6 +683,10 @@ namespace SlimeCoop.World
                 GameObject go = ctx.GameModel.InstantiateActorWithoutNotify(actorId, prefab, setId, pos, rot);
                 if (go != null)
                 {
+                    if (ctx.GameModel.AllActors().TryGetValue(actorId, out ActorModel am) && am != null)
+                    {
+                        am.NotifyParticipants(go);
+                    }
                     RegisterActor(actorId, go);
                     Rigidbody rb = go.GetComponent<Rigidbody>();
                     if (rb != null)
@@ -686,29 +732,28 @@ namespace SlimeCoop.World
                 Vector3 pos = r.ReadVector3();
                 Vector3 vel = r.ReadVector3();
 
-                if (TryGetActorObject(actorId, out GameObject go) && go != null)
+                if (TryGetCachedActor(actorId, out CachedNetActor entry))
                 {
-                    Vacuumable vac = go.GetComponent<Vacuumable>();
-                    if (vac != null && vac.isHeld())
+                    if (!entry.Go.activeInHierarchy) continue;
+                    if (entry.Vac != null && (entry.Vac.isHeld() || entry.Vac.isCaptive()))
                     {
-                        continue; // local player is holding it
+                        continue; // local player is holding or vacuuming it
                     }
 
-                    Vector3 diff = pos - go.transform.position;
+                    Vector3 diff = pos - entry.Tr.position;
                     float sqr = diff.sqrMagnitude;
                     if (sqr > 16f)
                     {
-                        go.transform.position = pos;
+                        entry.Tr.position = pos;
                     }
                     else if (sqr > 0.0025f)
                     {
-                        go.transform.position = Vector3.Lerp(go.transform.position, pos, 0.35f);
+                        entry.Tr.position = Vector3.Lerp(entry.Tr.position, pos, 0.35f);
                     }
 
-                    Rigidbody rb = go.GetComponent<Rigidbody>();
-                    if (rb != null)
+                    if (entry.Rb != null)
                     {
-                        rb.velocity = vel;
+                        entry.Rb.velocity = vel;
                     }
                 }
             }
@@ -941,16 +986,15 @@ namespace SlimeCoop.World
                 return;
             }
 
-            foreach (KeyValuePair<long, GameObject> kv in NetActors)
+            foreach (KeyValuePair<long, CachedNetActor> kv in NetActors)
             {
-                GameObject go = kv.Value;
-                if (go == null || !go.activeInHierarchy) continue;
-                if ((go.transform.position - refPos).sqrMagnitude > 85f * 85f) continue;
+                CachedNetActor actor = kv.Value;
+                if (actor.Go == null || !actor.Go.activeInHierarchy) continue;
+                if ((actor.Tr.position - refPos).sqrMagnitude > 85f * 85f) continue;
 
-                Rigidbody rb = go.GetComponent<Rigidbody>();
-                if (rb != null && rb.IsSleeping() && rb.velocity.sqrMagnitude < 0.01f) continue;
+                if (actor.Rb != null && actor.Rb.IsSleeping() && actor.Rb.velocity.sqrMagnitude < 0.01f) continue;
 
-                PendingHostSyncActors.Add(new ActiveSyncItem { Id = kv.Key, Go = go });
+                PendingHostSyncActors.Add(new ActiveSyncItem { Id = kv.Key, Actor = actor });
             }
 
             int total = PendingHostSyncActors.Count;
@@ -966,10 +1010,9 @@ namespace SlimeCoop.World
             {
                 int idx = (_actorBatchCursor + i) % total;
                 ActiveSyncItem item = PendingHostSyncActors[idx];
-                Rigidbody rb = item.Go.GetComponent<Rigidbody>();
                 w.WriteLong(item.Id);
-                w.WriteVector3(item.Go.transform.position);
-                w.WriteVector3(rb != null ? rb.velocity : Vector3.zero);
+                w.WriteVector3(item.Actor.Tr.position);
+                w.WriteVector3(item.Actor.Rb != null ? item.Actor.Rb.velocity : Vector3.zero);
             }
             _actorBatchCursor = (_actorBatchCursor + sendCount) % total;
             PendingHostSyncActors.Clear();
