@@ -156,22 +156,45 @@ namespace SlimeCoop.Patches
         }
 
         // --- Shared Ranch: Silo Storage ---
+        private static void SyncSiloSlot(SiloStorage silo, int slotIdx)
+        {
+            if (!CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || silo == null) return;
+            LandPlotLocation loc = silo.GetComponentInParent<LandPlotLocation>();
+            Ammo ammo = silo.GetRelevantAmmo();
+            if (loc == null || ammo == null || slotIdx < 0 || slotIdx >= ammo.GetUsableSlotCount()) return;
+
+            SyncWriter.Reset();
+            SyncWriter.WriteString(loc.id);
+            SyncWriter.WriteByte((byte)slotIdx);
+            SyncWriter.WriteInt((int)ammo.GetSlotName(slotIdx));
+            SyncWriter.WriteInt(ammo.GetSlotCount(slotIdx));
+
+            if (CoopSession.IsHost) CoopSession.BroadcastReliable(PacketType.SiloSlotSync, SyncWriter);
+            else CoopSession.SendToHostReliable(PacketType.SiloSlotSync, SyncWriter);
+        }
+
         [HarmonyPatch(typeof(SiloStorage), nameof(SiloStorage.MaybeAddIdentifiable), new[] { typeof(Identifiable.Id), typeof(int), typeof(int), typeof(bool) })]
         internal static class SiloAddSyncPatch
         {
             private static void Postfix(SiloStorage __instance, int slotIdx, bool __result)
             {
-                if (!__result || !CoopSession.IsHost || NetSyncGuard.IsApplyingRemote || __instance == null) return;
-                LandPlotLocation loc = __instance.GetComponentInParent<LandPlotLocation>();
-                Ammo ammo = __instance.GetRelevantAmmo();
-                if (loc == null || ammo == null) return;
+                if (__result) SyncSiloSlot(__instance, slotIdx);
+            }
+        }
 
-                SyncWriter.Reset();
-                SyncWriter.WriteString(loc.id);
-                SyncWriter.WriteByte((byte)slotIdx);
-                SyncWriter.WriteInt((int)ammo.GetSlotName(slotIdx));
-                SyncWriter.WriteInt(ammo.GetSlotCount(slotIdx));
-                CoopSession.BroadcastReliable(PacketType.SiloSlotSync, SyncWriter);
+        [HarmonyPatch(typeof(SiloStorage), nameof(SiloStorage.MaybeAddIdentifiable), new[] { typeof(Identifiable.Id) })]
+        internal static class SiloAddAnySyncPatch
+        {
+            private static void Postfix(SiloStorage __instance, bool __result)
+            {
+                if (!__result || !CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || __instance == null) return;
+                Ammo ammo = __instance.GetRelevantAmmo();
+                if (ammo == null) return;
+                int count = ammo.GetUsableSlotCount();
+                for (int i = 0; i < count; i++)
+                {
+                    SyncSiloSlot(__instance, i);
+                }
             }
         }
 
@@ -243,7 +266,7 @@ namespace SlimeCoop.Patches
         }
 
         // --- Shared World: Gadgets ---
-        [HarmonyPatch(typeof(GameModel), nameof(GameModel.InstantiateGadget))]
+        [HarmonyPatch(typeof(GameModel), nameof(GameModel.InstantiateGadget), new[] { typeof(GameObject), typeof(GadgetSiteModel) })]
         internal static class GadgetPlaceSyncPatch
         {
             private static void Postfix(GadgetSiteModel site, GameObject __result)
