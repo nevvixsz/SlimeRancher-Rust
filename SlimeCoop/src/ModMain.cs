@@ -1,6 +1,7 @@
 using SlimeCoop.Commands;
 using SlimeCoop.Patches;
 using SlimeCoop.UI;
+using SlimeCoop.World;
 using SRML;
 using SRML.Console;
 using UnityEngine;
@@ -31,6 +32,7 @@ namespace SlimeCoop
         public override void PostLoad()
         {
             LogConsole = ConsoleInstance;
+            ClientProfileStore.LoadLocalPrefs();
             EnsureDriver();
             SceneManager.sceneLoaded += OnSceneLoaded;
             LogConsole?.Log("SlimeCoop v1.0.0 загружен! Нажмите F9 для меню мультиплеера или введите 'coop'.");
