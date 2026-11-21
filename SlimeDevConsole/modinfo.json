@@ -1,0 +1,7 @@
+{
+  "id": "slimedevconsole",
+  "name": "SlimeDevConsole",
+  "author": "nevvixsz",
+  "version": "1.0.0",
+  "description": "Bilingual (RU/EN) developer & debug console mod: spawn unspawnable actors (Gordos, custom Largos, gadgets, phase lemons, crates), teleports, godmode, infinite vac/energy, time/world control, and object inspector."
+}
