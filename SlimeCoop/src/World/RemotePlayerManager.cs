@@ -14,8 +14,10 @@ namespace SlimeCoop.World
         public Transform HeadTransform;
         public Transform VacTransform;
         public GameObject JetpackGlow;
+        public GameObject VacGlow;
         public Transform LabelCanvasTransform;
         public TMP_Text NameText;
+        public bool IsRealBeatrixModel;
 
         public Vector3 TargetPos;
         public float TargetYaw;
@@ -47,6 +49,8 @@ namespace SlimeCoop.World
         private static Material _cachedFontMat;
         private static Shader _standardShader;
         private static Camera _cachedCam;
+        private static GameObject _cachedBeatrixPrefab;
+        private static bool _beatrixSearchLogged;
 
         public static void ClearAll()
         {
@@ -58,6 +62,8 @@ namespace SlimeCoop.World
                 }
             }
             Visuals.Clear();
+            _cachedBeatrixPrefab = null;
+            _beatrixSearchLogged = false;
         }
 
         public static void RemovePlayer(int playerId)
@@ -126,24 +132,78 @@ namespace SlimeCoop.World
                 Quaternion bodyRot = Quaternion.Euler(0f, v.TargetYaw, 0f);
                 v.Root.transform.rotation = Quaternion.Slerp(v.Root.transform.rotation, bodyRot, lerpT);
 
-                if (v.HeadTransform != null)
+                if (!v.IsRealBeatrixModel)
                 {
-                    v.HeadTransform.localRotation = Quaternion.Euler(Mathf.Clamp(v.TargetPitch, -75f, 75f), 0f, 0f);
+                    if (v.HeadTransform != null)
+                    {
+                        v.HeadTransform.localRotation = Quaternion.Euler(Mathf.Clamp(v.TargetPitch, -75f, 75f), 0f, 0f);
+                    }
+                    if (v.VacTransform != null)
+                    {
+                        float vacShake = v.IsVacActive ? Mathf.Sin(Time.unscaledTime * 32f) * 0.03f : 0f;
+                        v.VacTransform.localPosition = new Vector3(0.42f + vacShake, 0.92f, 0.35f);
+                    }
                 }
-                if (v.VacTransform != null)
-                {
-                    float vacShake = v.IsVacActive ? Mathf.Sin(Time.unscaledTime * 32f) * 0.03f : 0f;
-                    v.VacTransform.localPosition = new Vector3(0.42f + vacShake, 0.92f, 0.35f);
-                }
+
                 if (v.JetpackGlow != null && v.JetpackGlow.activeSelf != v.IsJetpacking)
                 {
                     v.JetpackGlow.SetActive(v.IsJetpacking);
+                }
+                if (v.VacGlow != null && v.VacGlow.activeSelf != v.IsVacActive)
+                {
+                    v.VacGlow.SetActive(v.IsVacActive);
                 }
                 if (v.LabelCanvasTransform != null && cam != null)
                 {
                     v.LabelCanvasTransform.rotation = cam.transform.rotation;
                 }
             }
+        }
+
+        private static GameObject ResolveBeatrixPrefab()
+        {
+            if (_cachedBeatrixPrefab != null) return _cachedBeatrixPrefab;
+
+            try
+            {
+                RanchHouseUI[] houseUis = Resources.FindObjectsOfTypeAll<RanchHouseUI>();
+                for (int i = 0; i < houseUis.Length; i++)
+                {
+                    if (houseUis[i] != null && houseUis[i].beatrixPrefab != null)
+                    {
+                        _cachedBeatrixPrefab = houseUis[i].beatrixPrefab;
+                        break;
+                    }
+                }
+
+                if (_cachedBeatrixPrefab == null)
+                {
+                    UIActivator[] activators = Resources.FindObjectsOfTypeAll<UIActivator>();
+                    for (int i = 0; i < activators.Length; i++)
+                    {
+                        UIActivator act = activators[i];
+                        if (act == null || act.uiPrefab == null) continue;
+                        RanchHouseUI ui = act.uiPrefab.GetComponent<RanchHouseUI>();
+                        if (ui != null && ui.beatrixPrefab != null)
+                        {
+                            _cachedBeatrixPrefab = ui.beatrixPrefab;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                CoopLog.Warn("ResolveBeatrixPrefab failed: " + ex.Message);
+            }
+
+            if (!_beatrixSearchLogged)
+            {
+                _beatrixSearchLogged = true;
+                CoopLog.Info("ResolveBeatrixPrefab result: " + (_cachedBeatrixPrefab != null ? _cachedBeatrixPrefab.name : "not found (using fallback visual)"));
+            }
+
+            return _cachedBeatrixPrefab;
         }
 
         private static RemotePlayerVisual CreateVisual(int playerId, string name, int colorIdx, Vector3 pos)
@@ -158,39 +218,40 @@ namespace SlimeCoop.World
             Object.DontDestroyOnLoad(root);
             root.transform.position = pos;
 
-            // Body capsule (no collider so it doesn't interfere with player/slime physics)
-            GameObject body = CreatePart("Body", PrimitiveType.Capsule, root.transform,
-                new Vector3(0f, 0.85f, 0f), new Vector3(0.68f, 0.62f, 0.68f), accent);
+            Transform headTransform = null;
+            Transform vacTransform = null;
+            bool isRealBeatrix = false;
+            float labelY = 2.15f;
 
-            // Backpack
-            CreatePart("Backpack", PrimitiveType.Cube, root.transform,
-                new Vector3(0f, 0.98f, -0.34f), new Vector3(0.46f, 0.56f, 0.24f), new Color(0.22f, 0.26f, 0.34f));
+            GameObject beatrixPrefab = ResolveBeatrixPrefab();
+            if (beatrixPrefab != null)
+            {
+                isRealBeatrix = TryBuildBeatrixVisual(beatrixPrefab, root.transform, out labelY);
+            }
 
-            // Jetpack glow
+            if (!isRealBeatrix)
+            {
+                BuildFallbackVisual(root.transform, accent, out headTransform, out vacTransform);
+                labelY = 2.25f;
+            }
+
+            // Jetpack glow (visible when flying)
+            Vector3 jetPos = isRealBeatrix ? new Vector3(0f, 0.72f, -0.32f) : new Vector3(0f, 0.58f, -0.36f);
             GameObject jetGlow = CreatePart("JetpackGlow", PrimitiveType.Sphere, root.transform,
-                new Vector3(0f, 0.58f, -0.38f), new Vector3(0.32f, 0.42f, 0.32f), new Color(1.0f, 0.65f, 0.15f));
+                jetPos, new Vector3(0.30f, 0.38f, 0.30f), new Color(1.0f, 0.65f, 0.15f));
             jetGlow.SetActive(false);
 
-            // Head
-            GameObject head = CreatePart("Head", PrimitiveType.Sphere, root.transform,
-                new Vector3(0f, 1.56f, 0f), new Vector3(0.62f, 0.58f, 0.62f), Color.Lerp(accent, Color.white, 0.2f));
-
-            // Cute slime eyes on head
-            CreatePart("EyeL", PrimitiveType.Sphere, head.transform,
-                new Vector3(-0.20f, 0.08f, 0.44f), new Vector3(0.16f, 0.20f, 0.12f), new Color(0.08f, 0.08f, 0.12f));
-            CreatePart("EyeR", PrimitiveType.Sphere, head.transform,
-                new Vector3(0.20f, 0.08f, 0.44f), new Vector3(0.16f, 0.20f, 0.12f), new Color(0.08f, 0.08f, 0.12f));
-
-            // Vacpack gun
-            GameObject vac = CreatePart("VacPack", PrimitiveType.Cylinder, root.transform,
-                new Vector3(0.42f, 0.92f, 0.35f), new Vector3(0.20f, 0.45f, 0.20f), new Color(0.20f, 0.24f, 0.30f));
-            vac.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            // Vacpack active glow
+            Vector3 vacPos = isRealBeatrix ? new Vector3(0.28f, 0.96f, 0.64f) : new Vector3(0.36f, 0.96f, 0.66f);
+            GameObject vacGlow = CreatePart("VacGlow", PrimitiveType.Sphere, root.transform,
+                vacPos, new Vector3(0.20f, 0.20f, 0.20f), new Color(0.35f, 0.88f, 1.0f));
+            vacGlow.SetActive(false);
 
             // World-space name tag
             TMP_Text nameText = null;
             GameObject labelGo = new GameObject("NameTag");
             labelGo.transform.SetParent(root.transform, false);
-            labelGo.transform.localPosition = new Vector3(0f, 2.25f, 0f);
+            labelGo.transform.localPosition = new Vector3(0f, labelY, 0f);
             labelGo.transform.localScale = new Vector3(0.014f, 0.014f, 0.014f);
 
             Canvas canvas = labelGo.AddComponent<Canvas>();
@@ -201,7 +262,7 @@ namespace SlimeCoop.World
             GameObject bgGo = new GameObject("Bg");
             bgGo.transform.SetParent(labelGo.transform, false);
             Image bg = bgGo.AddComponent<Image>();
-            bg.color = new Color(0.03f, 0.05f, 0.09f, 0.70f);
+            bg.color = new Color(0.03f, 0.05f, 0.09f, 0.72f);
             RectTransform bgRt = bgGo.GetComponent<RectTransform>();
             bgRt.anchorMin = Vector2.zero;
             bgRt.anchorMax = Vector2.one;
@@ -232,14 +293,222 @@ namespace SlimeCoop.World
                 Name = name,
                 ColorIndex = colorIdx,
                 Root = root,
-                HeadTransform = head.transform,
-                VacTransform = vac.transform,
+                HeadTransform = headTransform,
+                VacTransform = vacTransform,
                 JetpackGlow = jetGlow,
+                VacGlow = vacGlow,
                 LabelCanvasTransform = labelGo.transform,
                 NameText = nameText,
+                IsRealBeatrixModel = isRealBeatrix,
                 TargetPos = pos,
                 LastPacketTime = Time.unscaledTime
             };
+        }
+
+        private static bool TryBuildBeatrixVisual(GameObject beatrixPrefab, Transform parentRoot, out float labelY)
+        {
+            labelY = 2.10f;
+            GameObject pivot = new GameObject("BeatrixPivot");
+            pivot.transform.SetParent(parentRoot, false);
+            pivot.transform.localPosition = Vector3.zero;
+            pivot.transform.localRotation = Quaternion.identity;
+            pivot.transform.localScale = Vector3.one;
+
+            GameObject clone = null;
+            try
+            {
+                clone = Object.Instantiate(beatrixPrefab, pivot.transform, false);
+                clone.SetActive(true);
+
+                // Determine which direction Beatrix faces using the portrait camera before removing it
+                Camera portraitCam = clone.GetComponentInChildren<Camera>(true);
+                Vector3 camPos = Vector3.zero;
+                Vector3 camForward = Vector3.forward;
+                bool hasPortraitCam = portraitCam != null;
+                if (hasPortraitCam)
+                {
+                    camPos = portraitCam.transform.position;
+                    camForward = portraitCam.transform.forward;
+                }
+
+                // Strip portrait cameras, lights, audio listeners, colliders, rigidbodies, canvases, and non-Animator scripts
+                Camera[] cams = clone.GetComponentsInChildren<Camera>(true);
+                for (int i = 0; i < cams.Length; i++) Object.Destroy(cams[i]);
+
+                Light[] lights = clone.GetComponentsInChildren<Light>(true);
+                for (int i = 0; i < lights.Length; i++) Object.Destroy(lights[i]);
+
+                Canvas[] canvases = clone.GetComponentsInChildren<Canvas>(true);
+                for (int i = 0; i < canvases.Length; i++) Object.Destroy(canvases[i]);
+
+                Collider[] cols = clone.GetComponentsInChildren<Collider>(true);
+                for (int i = 0; i < cols.Length; i++) Object.Destroy(cols[i]);
+
+                Rigidbody[] rbs = clone.GetComponentsInChildren<Rigidbody>(true);
+                for (int i = 0; i < rbs.Length; i++) Object.Destroy(rbs[i]);
+
+                MonoBehaviour[] behaviours = clone.GetComponentsInChildren<MonoBehaviour>(true);
+                for (int i = 0; i < behaviours.Length; i++)
+                {
+                    if (behaviours[i] != null) Object.Destroy(behaviours[i]);
+                }
+
+                Component[] allComponents = clone.GetComponentsInChildren<Component>(true);
+                for (int i = 0; i < allComponents.Length; i++)
+                {
+                    Component c = allComponents[i];
+                    if (c == null) continue;
+                    string typeName = c.GetType().Name;
+                    if (typeName == "AudioListener")
+                    {
+                        Object.Destroy(c);
+                    }
+                    else if (typeName == "Animator")
+                    {
+                        System.Type t = c.GetType();
+                        System.Reflection.PropertyInfo pRoot = t.GetProperty("applyRootMotion");
+                        if (pRoot != null) pRoot.SetValue(c, false, null);
+                        System.Reflection.PropertyInfo pUpdate = t.GetProperty("updateMode");
+                        if (pUpdate != null && pUpdate.PropertyType.IsEnum)
+                        {
+                            pUpdate.SetValue(c, System.Enum.ToObject(pUpdate.PropertyType, 0), null);
+                        }
+                        System.Reflection.PropertyInfo pCull = t.GetProperty("cullingMode");
+                        if (pCull != null && pCull.PropertyType.IsEnum)
+                        {
+                            pCull.SetValue(c, System.Enum.ToObject(pCull.PropertyType, 0), null);
+                        }
+                    }
+                }
+
+                // Move all transforms to Default layer (0) so main camera renders Beatrix instead of hidden layer 17
+                Transform[] allTransforms = clone.GetComponentsInChildren<Transform>(true);
+                for (int i = 0; i < allTransforms.Length; i++)
+                {
+                    if (allTransforms[i] != null)
+                    {
+                        allTransforms[i].gameObject.layer = 0;
+                    }
+                }
+
+                Renderer[] renderers = clone.GetComponentsInChildren<Renderer>(true);
+                Bounds totalBounds = new Bounds();
+                bool hasBounds = false;
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    Renderer r = renderers[i];
+                    if (r == null || r.GetType().Name == "ParticleSystemRenderer" || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+
+                    SkinnedMeshRenderer smr = r as SkinnedMeshRenderer;
+                    if (smr != null)
+                    {
+                        smr.updateWhenOffscreen = true;
+                    }
+
+                    Bounds b = r.bounds;
+                    if (b.size.sqrMagnitude < 0.0001f) continue;
+
+                    if (!hasBounds)
+                    {
+                        totalBounds = b;
+                        hasBounds = true;
+                    }
+                    else
+                    {
+                        totalBounds.Encapsulate(b);
+                    }
+                }
+
+                if (!hasBounds)
+                {
+                    Object.Destroy(pivot);
+                    return false;
+                }
+
+                // Align facing direction to +Z of parentRoot
+                if (hasPortraitCam)
+                {
+                    Vector3 toCam = camPos - totalBounds.center;
+                    toCam.y = 0f;
+                    if (toCam.sqrMagnitude < 0.001f)
+                    {
+                        toCam = -camForward;
+                        toCam.y = 0f;
+                    }
+                    if (toCam.sqrMagnitude > 0.001f)
+                    {
+                        float faceYaw = Quaternion.LookRotation(toCam.normalized).eulerAngles.y;
+                        pivot.transform.rotation = Quaternion.Euler(0f, parentRoot.eulerAngles.y - faceYaw, 0f);
+                    }
+                }
+
+                // Re-measure bounds after rotation and normalize height to ~1.68m standing on y=0
+                hasBounds = false;
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    Renderer r = renderers[i];
+                    if (r == null || r.GetType().Name == "ParticleSystemRenderer" || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                    Bounds b = r.bounds;
+                    if (b.size.sqrMagnitude < 0.0001f) continue;
+                    if (!hasBounds)
+                    {
+                        totalBounds = b;
+                        hasBounds = true;
+                    }
+                    else
+                    {
+                        totalBounds.Encapsulate(b);
+                    }
+                }
+
+                if (hasBounds && totalBounds.size.y > 0.05f)
+                {
+                    float targetHeight = 1.68f;
+                    float scale = Mathf.Clamp(targetHeight / totalBounds.size.y, 0.05f, 20f);
+                    pivot.transform.localScale = new Vector3(scale, scale, scale);
+
+                    Vector3 feetLocal = parentRoot.InverseTransformPoint(
+                        new Vector3(totalBounds.center.x, totalBounds.min.y, totalBounds.center.z)) * scale;
+                    pivot.transform.localPosition = -feetLocal;
+                    labelY = targetHeight + 0.36f;
+                }
+
+                return true;
+            }
+            catch (System.Exception ex)
+            {
+                CoopLog.Warn("TryBuildBeatrixVisual exception: " + ex.Message);
+                if (pivot != null) Object.Destroy(pivot);
+                return false;
+            }
+        }
+
+        private static void BuildFallbackVisual(Transform parentRoot, Color accent, out Transform headTransform, out Transform vacTransform)
+        {
+            // Body capsule (no collider so it doesn't interfere with player/slime physics)
+            CreatePart("Body", PrimitiveType.Capsule, parentRoot,
+                new Vector3(0f, 0.85f, 0f), new Vector3(0.68f, 0.62f, 0.68f), accent);
+
+            // Backpack
+            CreatePart("Backpack", PrimitiveType.Cube, parentRoot,
+                new Vector3(0f, 0.98f, -0.34f), new Vector3(0.46f, 0.56f, 0.24f), new Color(0.22f, 0.26f, 0.34f));
+
+            // Head
+            GameObject head = CreatePart("Head", PrimitiveType.Sphere, parentRoot,
+                new Vector3(0f, 1.56f, 0f), new Vector3(0.62f, 0.58f, 0.62f), Color.Lerp(accent, Color.white, 0.2f));
+            headTransform = head.transform;
+
+            // Cute slime eyes on head
+            CreatePart("EyeL", PrimitiveType.Sphere, head.transform,
+                new Vector3(-0.20f, 0.08f, 0.44f), new Vector3(0.16f, 0.20f, 0.12f), new Color(0.08f, 0.08f, 0.12f));
+            CreatePart("EyeR", PrimitiveType.Sphere, head.transform,
+                new Vector3(0.20f, 0.08f, 0.44f), new Vector3(0.16f, 0.20f, 0.12f), new Color(0.08f, 0.08f, 0.12f));
+
+            // Vacpack gun
+            GameObject vac = CreatePart("VacPack", PrimitiveType.Cylinder, parentRoot,
+                new Vector3(0.42f, 0.92f, 0.35f), new Vector3(0.20f, 0.45f, 0.20f), new Color(0.20f, 0.24f, 0.30f));
+            vac.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            vacTransform = vac.transform;
         }
 
         private static GameObject CreatePart(string name, PrimitiveType type, Transform parent, Vector3 localPos, Vector3 localScale, Color color)
