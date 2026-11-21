@@ -81,6 +81,45 @@ namespace SlimeCoop.World
             _actorBatchCursor = 0;
         }
 
+        public static void ClearLocalActorsBeforeSnapshot()
+        {
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.GameModel == null) return;
+
+            List<GameObject> toRemove = new List<GameObject>(128);
+            foreach (KeyValuePair<long, ActorModel> kv in ctx.GameModel.AllActors())
+            {
+                ActorModel am = kv.Value;
+                if (am == null || am.ident == Identifiable.Id.NONE || am.ident == Identifiable.Id.PLAYER) continue;
+                Transform tr = ActorTransformRef(am);
+                if (tr != null && tr.gameObject != null)
+                {
+                    toRemove.Add(tr.gameObject);
+                }
+            }
+
+            NetSyncGuard.ApplyingRemoteDepth++;
+            NetSyncGuard.SuppressPersonalProgressDepth++;
+            try
+            {
+                for (int i = 0; i < toRemove.Count; i++)
+                {
+                    if (toRemove[i] != null)
+                    {
+                        Destroyer.DestroyActor(toRemove[i], "SlimeCoop.SnapshotClear", true);
+                    }
+                }
+            }
+            finally
+            {
+                NetSyncGuard.SuppressPersonalProgressDepth--;
+                NetSyncGuard.ApplyingRemoteDepth--;
+            }
+
+            NetActors.Clear();
+            ReverseActors.Clear();
+        }
+
         public static void RegisterActor(long actorId, GameObject go)
         {
             if (actorId <= 0 || go == null) return;

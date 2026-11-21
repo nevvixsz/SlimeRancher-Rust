@@ -63,13 +63,20 @@ namespace SlimeCoop
     {
         private void Update()
         {
+            if (!CoopSession.IsInGameSession())
+            {
+                if (CoopOverlayUI.IsOpen)
+                {
+                    CoopOverlayUI.SetOpen(false);
+                }
+            }
             CoopSession.TickPerFrame();
         }
 
         private void OnGUI()
         {
             Event ev = Event.current;
-            if (ev != null && ev.type == EventType.KeyDown && ev.keyCode == KeyCode.F9)
+            if (ev != null && ev.type == EventType.KeyDown && ev.keyCode == KeyCode.F9 && CoopSession.IsInGameSession())
             {
                 CoopOverlayUI.Toggle();
                 ev.Use();

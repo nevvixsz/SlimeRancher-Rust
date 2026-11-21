@@ -49,6 +49,10 @@ namespace SlimeCoop.UI
 
         public static void SetOpen(bool open)
         {
+            if (open && !CoopSession.IsInGameSession())
+            {
+                return;
+            }
             if (_isOpen == open) return;
             _isOpen = open;
 
@@ -146,7 +150,7 @@ namespace SlimeCoop.UI
 
         public static void Draw()
         {
-            if (!_isOpen) return;
+            if (!_isOpen || !CoopSession.IsInGameSession()) return;
 
             EnsureStyles();
 

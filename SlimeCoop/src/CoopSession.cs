@@ -87,6 +87,14 @@ namespace SlimeCoop
         private static float _lastDiscoveryTime;
         private static PlayerZoneTracker _cachedZoneTracker;
 
+        public static bool IsInGameSession()
+        {
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.Player == null) return false;
+            string sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+            return !string.Equals(sceneName, "MainMenu", StringComparison.OrdinalIgnoreCase);
+        }
+
         public static bool CanClientSendGameplaySync =>
             IsClient && _clientHandshakeDone && !WaitingWorldLoad && _clientSnapshotDone;
 
@@ -320,6 +328,7 @@ namespace SlimeCoop
 
             if (_serverEp != null)
             {
+                CoopWorldSync.ClearLocalActorsBeforeSnapshot();
                 CoopLog.Info("Client sending RequestSnapshot to " + _serverEp);
                 SharedWriter.Reset();
                 Transport.SendReliable(_serverEp, PacketType.RequestSnapshot, SharedWriter);
@@ -744,7 +753,17 @@ namespace SlimeCoop
                         chunkCount++;
                         Transport.SendReliable(sender, PacketType.WorldSnapshotChunk, chunk);
                     });
+
+                    SceneContext hctx = SRSingleton<SceneContext>.Instance;
+                    bool hasHostPos = hctx != null && hctx.Player != null;
+                    Vector3 hostSpawnPos = hasHostPos ? hctx.Player.transform.position : Vector3.zero;
+                    RegionMember hrm = hasHostPos ? hctx.Player.GetComponent<RegionMember>() : null;
+                    RegionRegistry.RegionSetId hSet = hrm != null ? hrm.setId : RegionRegistry.RegionSetId.HOME;
+
                     SharedWriter.Reset();
+                    SharedWriter.WriteBool(hasHostPos);
+                    SharedWriter.WriteVector3(hostSpawnPos);
+                    SharedWriter.WriteByte((byte)hSet);
                     Transport.SendReliable(sender, PacketType.WorldSnapshotEnd, SharedWriter);
                     CoopLog.Info("Host sent WorldSnapshot (" + chunkCount + " chunks) to " + peer.Name);
                     break;
@@ -1065,8 +1084,28 @@ namespace SlimeCoop
 
                 case PacketType.WorldSnapshotEnd:
                     _clientSnapshotDone = true;
-                    CoopLog.Info("Client received WorldSnapshotEnd (ranch synced).");
-                    AddChat("Система", "Общее ранчо синхронизировано!", true);
+                    bool hasHostSpawn = r.Remaining > 0 && r.ReadBool();
+                    Vector3 hostSpawn = hasHostSpawn ? r.ReadVector3() : Vector3.zero;
+                    RegionRegistry.RegionSetId hostSet = hasHostSpawn ? (RegionRegistry.RegionSetId)r.ReadByte() : RegionRegistry.RegionSetId.HOME;
+                    CoopLog.Info("Client received WorldSnapshotEnd (ranch synced, hasHostSpawn=" + hasHostSpawn + ", pos=" + hostSpawn + ").");
+                    if (hasHostSpawn)
+                    {
+                        SceneContext cctx = SRSingleton<SceneContext>.Instance;
+                        if (cctx != null && cctx.Player != null)
+                        {
+                            Vector3 targetPos = hostSpawn + new Vector3(1.8f, 0.8f, 0f);
+                            TeleportablePlayer tp = cctx.Player.GetComponent<TeleportablePlayer>();
+                            if (tp != null)
+                            {
+                                tp.TeleportTo(targetPos, hostSet, null, false, true);
+                            }
+                            else
+                            {
+                                cctx.Player.transform.position = targetPos;
+                            }
+                        }
+                    }
+                    AddChat("Система", "Вы в мире хоста! Общее ранчо синхронизировано.", true);
                     break;
 
                 case PacketType.TimeWeatherSync:
