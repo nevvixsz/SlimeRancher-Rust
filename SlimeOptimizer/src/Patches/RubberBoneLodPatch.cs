@@ -86,7 +86,7 @@ namespace SlimeOptimizer.Patches
                     group = new SlimeRenderGroup
                     {
                         Transform = rbe.transform,
-                        Hash = RuntimeHelpers.GetHashCode(rbe) & 0x7FFFFFFF
+                        Hash = FastObjCache<RubberBoneEffect, SlimeRenderGroup>.MixHash(rbe)
                     };
                     Groups.Set(rbe, group);
                 }
@@ -258,7 +258,7 @@ namespace SlimeOptimizer.Patches
             SlimeRenderGroup group = new SlimeRenderGroup
             {
                 Transform = rbe.transform,
-                Hash = RuntimeHelpers.GetHashCode(rbe) & 0x7FFFFFFF,
+                Hash = FastObjCache<RubberBoneEffect, SlimeRenderGroup>.MixHash(rbe),
                 NextDistCheckFrame = -1,
                 Entries = entries
             };

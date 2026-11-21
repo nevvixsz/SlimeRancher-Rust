@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -13,16 +12,16 @@ namespace SlimeOptimizer.Patches
             public float Ground;
         }
 
-        private static TimeDirector _cachedTimeDir;
-
-        private static bool IsFastForwarding()
+        private sealed class AiLodEntry
         {
-            if (_cachedTimeDir == null && SRSingleton<SceneContext>.Instance != null)
-            {
-                _cachedTimeDir = SRSingleton<SceneContext>.Instance.TimeDirector;
-            }
-            return _cachedTimeDir != null && _cachedTimeDir.IsFastForwarding();
+            public Transform Transform;
+            public int Hash;
+            public int NextCheckFrame = -1;
+            public byte Tier; // 0 = near, 1 = far, 2 = ultra
         }
+
+        private static readonly FastObjCache<SlimeSubbehaviourPlexer, AiLodEntry> Cache =
+            new FastObjCache<SlimeSubbehaviourPlexer, AiLodEntry>(512);
 
         [HarmonyPrefix]
         private static void Prefix(
@@ -42,7 +41,7 @@ namespace SlimeOptimizer.Patches
             ref float ___nextGroundCheckTime,
             PrevTimes __state)
         {
-            if (!OptimizerConfig.EnableSlimeAiLod)
+            if (!OptimizerConfig.EnableSlimeAiLod || !CameraCache.HasCamera)
             {
                 return;
             }
@@ -54,50 +53,61 @@ namespace SlimeOptimizer.Patches
                 return;
             }
 
-            if ((___vacuumable != null && ___vacuumable.isHeld()) || IsFastForwarding())
+            if ((!ReferenceEquals(___vacuumable, null) && ___vacuumable.isHeld()) || CameraCache.IsFastForwarding)
             {
                 return;
             }
 
-            if (!CameraCache.HasCamera)
+            if (!Cache.TryGetValue(__instance, out AiLodEntry entry))
+            {
+                entry = new AiLodEntry
+                {
+                    Transform = __instance.transform,
+                    Hash = FastObjCache<SlimeSubbehaviourPlexer, AiLodEntry>.MixHash(__instance),
+                    NextCheckFrame = -1
+                };
+                Cache.Set(__instance, entry);
+            }
+
+            int frame = CameraCache.FrameCount;
+            if (frame >= entry.NextCheckFrame)
+            {
+                entry.NextCheckFrame = frame + 16 + (entry.Hash & 7);
+                float sqrDist = CameraCache.SqrDistanceToCamera(entry.Transform);
+                float ultraDist = OptimizerConfig.UltraFarAiDistance;
+                float farDist = OptimizerConfig.FarAiDistance;
+
+                if (ultraDist > 0f && sqrDist >= ultraDist * ultraDist)
+                {
+                    entry.Tier = 2;
+                }
+                else if (farDist > 0f && sqrDist >= farDist * farDist)
+                {
+                    entry.Tier = 1;
+                }
+                else
+                {
+                    entry.Tier = 0;
+                }
+            }
+
+            byte tier = entry.Tier;
+            if (tier == 0)
             {
                 return;
             }
 
-            Vector3 pos = __instance.transform.position;
-            float dx = pos.x - CameraCache.CamX;
-            float dy = pos.y - CameraCache.CamY;
-            float dz = pos.z - CameraCache.CamZ;
-            float sqrDist = dx * dx + dy * dy + dz * dz;
+            float rethinkInterval = tier == 2 ? OptimizerConfig.UltraFarAiRethinkInterval : OptimizerConfig.FarAiRethinkInterval;
+            float groundInterval = tier == 2 ? OptimizerConfig.UltraFarGroundCheckInterval : OptimizerConfig.FarGroundCheckInterval;
 
-            float ultraDist = OptimizerConfig.UltraFarAiDistance;
-            float farDist = OptimizerConfig.FarAiDistance;
-
-            float rethinkInterval;
-            float groundInterval;
-
-            if (ultraDist > 0f && sqrDist >= ultraDist * ultraDist)
-            {
-                rethinkInterval = OptimizerConfig.UltraFarAiRethinkInterval;
-                groundInterval = OptimizerConfig.UltraFarGroundCheckInterval;
-            }
-            else if (farDist > 0f && sqrDist >= farDist * farDist)
-            {
-                rethinkInterval = OptimizerConfig.FarAiRethinkInterval;
-                groundInterval = OptimizerConfig.FarGroundCheckInterval;
-            }
-            else
-            {
-                return;
-            }
-
-            float jitter = (RuntimeHelpers.GetHashCode(__instance) & 3) * 0.05f;
-            float now = Time.fixedTime;
+            float jitter = (entry.Hash & 3) * 0.05f;
+            float now = CameraCache.FixedTime;
+            bool collectStats = OptimizerConfig.EnableStatsCollection;
 
             if (rethinkUpdated && rethinkInterval > 1f)
             {
                 ___nextRethinkTime = now + rethinkInterval + jitter;
-                if (OptimizerConfig.EnableStatsCollection)
+                if (collectStats)
                 {
                     OptimizerStats.SlimeAiSlowedRethinks++;
                 }
@@ -106,7 +116,7 @@ namespace SlimeOptimizer.Patches
             if (groundUpdated && groundInterval > 0.25f)
             {
                 ___nextGroundCheckTime = now + groundInterval + jitter * 0.5f;
-                if (OptimizerConfig.EnableStatsCollection)
+                if (collectStats)
                 {
                     OptimizerStats.SlimeAiSlowedGroundChecks++;
                 }

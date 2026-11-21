@@ -1,6 +1,4 @@
 using System.Collections;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -62,7 +60,8 @@ namespace SlimeOptimizer.Patches
         private static readonly FastObjCache<RubberEffect, EffectEntry> Cache =
             new FastObjCache<RubberEffect, EffectEntry>(256);
 
-        private static readonly Dictionary<int, bool> SavedRendererNotice = new Dictionary<int, bool>(1);
+        private static readonly FastObjCache<Mesh, Vector3[]> OrigMeshVertsCache =
+            new FastObjCache<Mesh, Vector3[]>(64);
 
         [HarmonyPrefix]
         private static bool Prefix(
@@ -78,7 +77,7 @@ namespace SlimeOptimizer.Patches
                 return true;
             }
 
-            if (___vacuumable != null && ___vacuumable.isHeld())
+            if (!ReferenceEquals(___vacuumable, null) && ___vacuumable.isHeld())
             {
                 return true;
             }
@@ -88,7 +87,7 @@ namespace SlimeOptimizer.Patches
                 entry = new EffectEntry
                 {
                     Transform = __instance.transform,
-                    Hash = RuntimeHelpers.GetHashCode(__instance) & 0x7FFFFFFF,
+                    Hash = FastObjCache<RubberEffect, EffectEntry>.MixHash(__instance),
                     NextCheckFrame = -1
                 };
                 Cache.Set(__instance, entry);
@@ -121,10 +120,18 @@ namespace SlimeOptimizer.Patches
             {
                 if (!___sleeping)
                 {
-                    if (___workingMesh != null && ___originalMesh != null)
+                    if (!ReferenceEquals(___workingMesh, null) && !ReferenceEquals(___originalMesh, null))
                     {
-                        ___workingMesh.vertices = ___originalMesh.vertices;
-                        ___workingMesh.RecalculateBounds();
+                        if (!OrigMeshVertsCache.TryGetValue(___originalMesh, out Vector3[] origVerts))
+                        {
+                            origVerts = ___originalMesh.vertices;
+                            OrigMeshVertsCache.Set(___originalMesh, origVerts);
+                        }
+                        if (origVerts != null)
+                        {
+                            ___workingMesh.vertices = origVerts;
+                            ___workingMesh.RecalculateBounds();
+                        }
                     }
                     ___sleeping = true;
                 }
@@ -175,12 +182,12 @@ namespace SlimeOptimizer.Patches
             Vacuumable ___vacuumable,
             Rigidbody ___body)
         {
-            if (!OptimizerConfig.EnableSlimeDragOpt || ___body == null)
+            if (!OptimizerConfig.EnableSlimeDragOpt || ReferenceEquals(___body, null))
             {
                 return true;
             }
 
-            bool isCaptive = ___vacuumable != null && ___vacuumable.isCaptive();
+            bool isCaptive = !ReferenceEquals(___vacuumable, null) && ___vacuumable.isCaptive();
 
             if (!Cache.TryGetValue(__instance, out DragState state))
             {

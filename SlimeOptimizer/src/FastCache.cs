@@ -20,6 +20,10 @@ namespace SlimeOptimizer
         private int _resizeThreshold;
         private readonly bool _isUnityObject;
 
+        // 1-slot MRU fast path for repeated single-object hits (e.g. Camera, singleton, pooled FX)
+        private TKey _mruKey;
+        private TVal _mruVal;
+
         public FastObjCache(int initialCapacity = 256)
         {
             int cap = 16;
@@ -35,6 +39,17 @@ namespace SlimeOptimizer
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static int MixHash(object key)
+        {
+            // Mono RuntimeHelpers.GetHashCode is often 8/16-byte aligned; mix bits to avoid low-bit clustering
+            uint h = (uint)RuntimeHelpers.GetHashCode(key);
+            h ^= h >> 16;
+            h *= 0x85EBCA6Bu;
+            h ^= h >> 13;
+            return (int)(h & 0x7FFFFFFFu);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetValue(TKey key, out TVal value)
         {
             if (ReferenceEquals(key, null))
@@ -43,7 +58,13 @@ namespace SlimeOptimizer
                 return false;
             }
 
-            int hash = RuntimeHelpers.GetHashCode(key) & 0x7FFFFFFF;
+            if (ReferenceEquals(key, _mruKey))
+            {
+                value = _mruVal;
+                return true;
+            }
+
+            int hash = MixHash(key);
             Entry[] entries = _entries;
             int mask = _mask;
             int idx = hash & mask;
@@ -59,7 +80,10 @@ namespace SlimeOptimizer
 
                 if (entries[idx].Hash == hash && ReferenceEquals(k, key))
                 {
-                    value = entries[idx].Value;
+                    TVal v = entries[idx].Value;
+                    _mruKey = key;
+                    _mruVal = v;
+                    value = v;
                     return true;
                 }
 
@@ -91,8 +115,18 @@ namespace SlimeOptimizer
                 PruneOrGrow();
             }
 
-            int hash = RuntimeHelpers.GetHashCode(key) & 0x7FFFFFFF;
+            int hash = MixHash(key);
             InsertRaw(_entries, _mask, hash, key, value, ref _count);
+            _mruKey = key;
+            _mruVal = value;
+        }
+
+        public void Clear()
+        {
+            Array.Clear(_entries, 0, _entries.Length);
+            _count = 0;
+            _mruKey = null;
+            _mruVal = null;
         }
 
         private static void InsertRaw(Entry[] entries, int mask, int hash, TKey key, TVal value, ref int count)
@@ -139,7 +173,6 @@ namespace SlimeOptimizer
 
                 if (alive * 2 < old.Length)
                 {
-                    // Rehash in-place to new same-size table without growing memory
                     Rehash(newCap);
                     return;
                 }
@@ -175,6 +208,8 @@ namespace SlimeOptimizer
             _mask = mask;
             _count = count;
             _resizeThreshold = (newCap * 3) >> 2;
+            _mruKey = null;
+            _mruVal = null;
         }
     }
 }

@@ -31,7 +31,7 @@ namespace SlimeOptimizer.Patches
                 entry = new LodEntry
                 {
                     Transform = component.transform,
-                    Hash = RuntimeHelpers.GetHashCode(component) & 0x7FFFFFFF,
+                    Hash = FastObjCache<Component, LodEntry>.MixHash(component),
                     NextCheckFrame = -1,
                     Tier = 0
                 };

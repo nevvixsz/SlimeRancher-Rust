@@ -135,25 +135,29 @@ namespace SlimeDevConsole
 
         public static void TickPerFrame()
         {
-            SceneContext ctx = SRSingleton<SceneContext>.Instance;
-            if (ctx == null || ctx.PlayerState == null)
+            bool customWalk = Math.Abs(WalkSpeedMultiplier - 1.0f) > 0.01f;
+            bool customScale = Math.Abs(WorldTimeScale - 1.0f) > 0.01f;
+            if (!GodMode && !InfiniteEnergy && !customWalk && !customScale && !FlyMode)
             {
                 return;
             }
 
-            if (ctx.Player != null && !ReferenceEquals(_lastPlayerObj, ctx.Player))
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ReferenceEquals(ctx, null) || ReferenceEquals(ctx.PlayerState, null))
+            {
+                return;
+            }
+
+            if (customWalk && !ReferenceEquals(ctx.Player, null) && !ReferenceEquals(_lastPlayerObj, ctx.Player))
             {
                 _lastPlayerObj = ctx.Player;
                 _capturedMoveDefaults = false;
                 _savedPlayerLayer = -1;
                 FlyMode = false;
-                if (Math.Abs(WalkSpeedMultiplier - 1.0f) > 0.01f)
+                vp_FPController ctrl = ctx.Player.GetComponentInChildren<vp_FPController>();
+                if (!ReferenceEquals(ctrl, null))
                 {
-                    vp_FPController ctrl = ctx.Player.GetComponentInChildren<vp_FPController>();
-                    if (ctrl != null)
-                    {
-                        ApplyMovementSpeed(ctrl);
-                    }
+                    ApplyMovementSpeed(ctrl);
                 }
             }
 
@@ -179,7 +183,7 @@ namespace SlimeDevConsole
                 }
             }
 
-            if (Math.Abs(WorldTimeScale - 1.0f) > 0.01f && Time.timeScale > 0.0f)
+            if (customScale && Time.timeScale > 0.0f)
             {
                 if (Math.Abs(Time.timeScale - WorldTimeScale) > 0.01f)
                 {
