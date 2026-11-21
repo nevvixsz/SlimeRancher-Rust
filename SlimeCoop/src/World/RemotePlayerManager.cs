@@ -1,7 +1,11 @@
+using System;
 using System.Collections.Generic;
+using System.Reflection;
+using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using Object = UnityEngine.Object;
 
 namespace SlimeCoop.World
 {
@@ -51,6 +55,7 @@ namespace SlimeCoop.World
         private static Camera _cachedCam;
         private static GameObject _cachedBeatrixPrefab;
         private static bool _beatrixSearchLogged;
+        private static bool _beatrixDumpLogged;
 
         public static void ClearAll()
         {
@@ -64,6 +69,7 @@ namespace SlimeCoop.World
             Visuals.Clear();
             _cachedBeatrixPrefab = null;
             _beatrixSearchLogged = false;
+            _beatrixDumpLogged = false;
         }
 
         public static void RemovePlayer(int playerId)
@@ -192,7 +198,7 @@ namespace SlimeCoop.World
                     }
                 }
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 CoopLog.Warn("ResolveBeatrixPrefab failed: " + ex.Message);
             }
@@ -206,13 +212,40 @@ namespace SlimeCoop.World
             return _cachedBeatrixPrefab;
         }
 
+        private static Shader ResolveSafeShader()
+        {
+            if (_standardShader != null && _standardShader.isSupported && _standardShader.name != "Hidden/InternalErrorShader")
+            {
+                return _standardShader;
+            }
+
+            string[] candidates =
+            {
+                "Diffuse",
+                "Legacy Shaders/Diffuse",
+                "Standard",
+                "Transparent/Diffuse",
+                "Unlit/Color",
+                "Sprites/Default"
+            };
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                Shader s = Shader.Find(candidates[i]);
+                if (s != null && s.isSupported && s.name != "Hidden/InternalErrorShader")
+                {
+                    _standardShader = s;
+                    CoopLog.Info("RemotePlayerManager ResolveSafeShader -> " + s.name);
+                    return _standardShader;
+                }
+            }
+
+            return _standardShader;
+        }
+
         private static RemotePlayerVisual CreateVisual(int playerId, string name, int colorIdx, Vector3 pos)
         {
             Color accent = PlayerColors[Mathf.Abs(colorIdx) % PlayerColors.Length];
-            if (_standardShader == null)
-            {
-                _standardShader = Shader.Find("Standard") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
-            }
+            ResolveSafeShader();
 
             GameObject root = new GameObject("SlimeCoop_Player_" + playerId);
             Object.DontDestroyOnLoad(root);
@@ -320,7 +353,7 @@ namespace SlimeCoop.World
                 clone = Object.Instantiate(beatrixPrefab, pivot.transform, false);
                 clone.SetActive(true);
 
-                // Determine which direction Beatrix faces using the portrait camera before removing it
+                // Determine portrait camera facing direction before removing cameras
                 Camera portraitCam = clone.GetComponentInChildren<Camera>(true);
                 Vector3 camPos = Vector3.zero;
                 Vector3 camForward = Vector3.forward;
@@ -331,26 +364,79 @@ namespace SlimeCoop.World
                     camForward = portraitCam.transform.forward;
                 }
 
-                // Strip portrait cameras, lights, audio listeners, colliders, rigidbodies, canvases, and non-Animator scripts
+                StringBuilder dump = !_beatrixDumpLogged ? new StringBuilder() : null;
+                if (dump != null)
+                {
+                    dump.Append("BeatrixPrefab dump '").Append(beatrixPrefab.name).Append("': ");
+                }
+
+                // Disable & strip non-visual/physics/camera/distortion components immediately
                 Camera[] cams = clone.GetComponentsInChildren<Camera>(true);
-                for (int i = 0; i < cams.Length; i++) Object.Destroy(cams[i]);
+                for (int i = 0; i < cams.Length; i++)
+                {
+                    if (cams[i] != null)
+                    {
+                        cams[i].enabled = false;
+                        Object.Destroy(cams[i]);
+                    }
+                }
 
                 Light[] lights = clone.GetComponentsInChildren<Light>(true);
-                for (int i = 0; i < lights.Length; i++) Object.Destroy(lights[i]);
+                for (int i = 0; i < lights.Length; i++)
+                {
+                    if (lights[i] != null)
+                    {
+                        lights[i].enabled = false;
+                        Object.Destroy(lights[i]);
+                    }
+                }
 
                 Canvas[] canvases = clone.GetComponentsInChildren<Canvas>(true);
-                for (int i = 0; i < canvases.Length; i++) Object.Destroy(canvases[i]);
+                for (int i = 0; i < canvases.Length; i++)
+                {
+                    if (canvases[i] != null)
+                    {
+                        canvases[i].enabled = false;
+                        Object.Destroy(canvases[i]);
+                    }
+                }
 
                 Collider[] cols = clone.GetComponentsInChildren<Collider>(true);
-                for (int i = 0; i < cols.Length; i++) Object.Destroy(cols[i]);
+                for (int i = 0; i < cols.Length; i++)
+                {
+                    if (cols[i] != null)
+                    {
+                        cols[i].enabled = false;
+                        Object.Destroy(cols[i]);
+                    }
+                }
 
                 Rigidbody[] rbs = clone.GetComponentsInChildren<Rigidbody>(true);
-                for (int i = 0; i < rbs.Length; i++) Object.Destroy(rbs[i]);
+                for (int i = 0; i < rbs.Length; i++)
+                {
+                    if (rbs[i] != null)
+                    {
+                        rbs[i].isKinematic = true;
+                        Object.Destroy(rbs[i]);
+                    }
+                }
 
                 MonoBehaviour[] behaviours = clone.GetComponentsInChildren<MonoBehaviour>(true);
                 for (int i = 0; i < behaviours.Length; i++)
                 {
-                    if (behaviours[i] != null) Object.Destroy(behaviours[i]);
+                    MonoBehaviour mb = behaviours[i];
+                    if (mb == null) continue;
+                    string mbName = mb.GetType().Name;
+                    if (dump != null) dump.Append("[MB:").Append(mbName).Append(" on ").Append(mb.gameObject.name).Append("] ");
+
+                    // Keep Recolorizer & UpdateMaterialUnscaledTime so Beatrix/vac materials get proper colors!
+                    if (mbName == "Recolorizer" || mbName == "UpdateMaterialUnscaledTime")
+                    {
+                        continue;
+                    }
+
+                    mb.enabled = false;
+                    Object.Destroy(mb);
                 }
 
                 Component[] allComponents = clone.GetComponentsInChildren<Component>(true);
@@ -359,24 +445,26 @@ namespace SlimeCoop.World
                     Component c = allComponents[i];
                     if (c == null) continue;
                     string typeName = c.GetType().Name;
-                    if (typeName == "AudioListener")
+
+                    if (typeName == "AudioListener" || typeName == "Cloth" || typeName == "TrailRenderer" || typeName == "LineRenderer" || typeName == "ParticleSystem")
                     {
+                        DisableComponentIfPossible(c);
                         Object.Destroy(c);
                     }
                     else if (typeName == "Animator")
                     {
-                        System.Type t = c.GetType();
-                        System.Reflection.PropertyInfo pRoot = t.GetProperty("applyRootMotion");
+                        Type t = c.GetType();
+                        PropertyInfo pRoot = t.GetProperty("applyRootMotion");
                         if (pRoot != null) pRoot.SetValue(c, false, null);
-                        System.Reflection.PropertyInfo pUpdate = t.GetProperty("updateMode");
+                        PropertyInfo pUpdate = t.GetProperty("updateMode");
                         if (pUpdate != null && pUpdate.PropertyType.IsEnum)
                         {
-                            pUpdate.SetValue(c, System.Enum.ToObject(pUpdate.PropertyType, 0), null);
+                            pUpdate.SetValue(c, Enum.ToObject(pUpdate.PropertyType, 0), null);
                         }
-                        System.Reflection.PropertyInfo pCull = t.GetProperty("cullingMode");
+                        PropertyInfo pCull = t.GetProperty("cullingMode");
                         if (pCull != null && pCull.PropertyType.IsEnum)
                         {
-                            pCull.SetValue(c, System.Enum.ToObject(pCull.PropertyType, 0), null);
+                            pCull.SetValue(c, Enum.ToObject(pCull.PropertyType, 0), null);
                         }
                     }
                 }
@@ -391,13 +479,26 @@ namespace SlimeCoop.World
                     }
                 }
 
+                // Inspect & fix materials/renderers and compute world bounds
+                RanchDirector ranchDir = SRSingleton<SceneContext>.Instance != null
+                    ? SRSingleton<SceneContext>.Instance.RanchDirector
+                    : null;
+                Shader fallbackShader = ResolveSafeShader();
+
                 Renderer[] renderers = clone.GetComponentsInChildren<Renderer>(true);
                 Bounds totalBounds = new Bounds();
                 bool hasBounds = false;
                 for (int i = 0; i < renderers.Length; i++)
                 {
                     Renderer r = renderers[i];
-                    if (r == null || r.GetType().Name == "ParticleSystemRenderer" || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                    if (r == null) continue;
+                    string rTypeName = r.GetType().Name;
+                    if (rTypeName == "ParticleSystemRenderer" || rTypeName == "TrailRenderer" || rTypeName == "LineRenderer")
+                    {
+                        r.enabled = false;
+                        continue;
+                    }
+                    if (!r.enabled || !r.gameObject.activeInHierarchy) continue;
 
                     SkinnedMeshRenderer smr = r as SkinnedMeshRenderer;
                     if (smr != null)
@@ -405,7 +506,57 @@ namespace SlimeCoop.World
                         smr.updateWhenOffscreen = true;
                     }
 
+                    // Ensure materials are valid and recolored if applicable
+                    Material[] mats = r.sharedMaterials;
+                    bool matChanged = false;
+                    for (int m = 0; m < mats.Length; m++)
+                    {
+                        Material mat = mats[m];
+                        if (mat == null) continue;
+
+                        if (dump != null)
+                        {
+                            string shName = mat.shader != null ? mat.shader.name : "NULL";
+                            bool sup = mat.shader != null && mat.shader.isSupported;
+                            dump.Append("[R:").Append(r.gameObject.name).Append("(").Append(rTypeName).Append(") mat=").Append(mat.name)
+                                .Append(" sh=").Append(shName).Append(" sup=").Append(sup).Append("] ");
+                        }
+
+                        if (ranchDir != null)
+                        {
+                            Material recolored = ranchDir.GetRecolorMaterial(mat, ZoneDirector.Zone.RANCH);
+                            if (recolored != null && recolored != mat)
+                            {
+                                mats[m] = recolored;
+                                mat = recolored;
+                                matChanged = true;
+                            }
+                        }
+
+                        if (mat.shader == null || !mat.shader.isSupported || mat.shader.name == "Hidden/InternalErrorShader")
+                        {
+                            if (fallbackShader != null)
+                            {
+                                Material repaired = new Material(mat);
+                                repaired.shader = fallbackShader;
+                                mats[m] = repaired;
+                                matChanged = true;
+                            }
+                        }
+                    }
+                    if (matChanged)
+                    {
+                        r.sharedMaterials = mats;
+                    }
+
                     Bounds b = r.bounds;
+                    if (b.size.sqrMagnitude < 0.0001f && smr != null && smr.sharedMesh != null)
+                    {
+                        Bounds localB = smr.sharedMesh.bounds;
+                        Vector3 worldCenter = r.transform.TransformPoint(localB.center);
+                        Vector3 worldSize = Vector3.Scale(localB.size, r.transform.lossyScale);
+                        b = new Bounds(worldCenter, new Vector3(Mathf.Abs(worldSize.x), Mathf.Abs(worldSize.y), Mathf.Abs(worldSize.z)));
+                    }
                     if (b.size.sqrMagnitude < 0.0001f) continue;
 
                     if (!hasBounds)
@@ -421,6 +572,11 @@ namespace SlimeCoop.World
 
                 if (!hasBounds)
                 {
+                    if (dump != null && !_beatrixDumpLogged)
+                    {
+                        _beatrixDumpLogged = true;
+                        CoopLog.Warn(dump.ToString() + " -> NO BOUNDS");
+                    }
                     Object.Destroy(pivot);
                     return false;
                 }
@@ -447,9 +603,21 @@ namespace SlimeCoop.World
                 for (int i = 0; i < renderers.Length; i++)
                 {
                     Renderer r = renderers[i];
-                    if (r == null || r.GetType().Name == "ParticleSystemRenderer" || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                    if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                    string rTypeName = r.GetType().Name;
+                    if (rTypeName == "ParticleSystemRenderer" || rTypeName == "TrailRenderer" || rTypeName == "LineRenderer") continue;
+
                     Bounds b = r.bounds;
+                    SkinnedMeshRenderer smr = r as SkinnedMeshRenderer;
+                    if (b.size.sqrMagnitude < 0.0001f && smr != null && smr.sharedMesh != null)
+                    {
+                        Bounds localB = smr.sharedMesh.bounds;
+                        Vector3 worldCenter = r.transform.TransformPoint(localB.center);
+                        Vector3 worldSize = Vector3.Scale(localB.size, r.transform.lossyScale);
+                        b = new Bounds(worldCenter, new Vector3(Mathf.Abs(worldSize.x), Mathf.Abs(worldSize.y), Mathf.Abs(worldSize.z)));
+                    }
                     if (b.size.sqrMagnitude < 0.0001f) continue;
+
                     if (!hasBounds)
                     {
                         totalBounds = b;
@@ -461,10 +629,11 @@ namespace SlimeCoop.World
                     }
                 }
 
+                float scale = 1f;
                 if (hasBounds && totalBounds.size.y > 0.05f)
                 {
                     float targetHeight = 1.68f;
-                    float scale = Mathf.Clamp(targetHeight / totalBounds.size.y, 0.05f, 20f);
+                    scale = Mathf.Clamp(targetHeight / totalBounds.size.y, 0.25f, 4.0f);
                     pivot.transform.localScale = new Vector3(scale, scale, scale);
 
                     Vector3 feetLocal = parentRoot.InverseTransformPoint(
@@ -473,13 +642,44 @@ namespace SlimeCoop.World
                     labelY = targetHeight + 0.36f;
                 }
 
+                if (dump != null && !_beatrixDumpLogged)
+                {
+                    _beatrixDumpLogged = true;
+                    dump.Append("hasCam=").Append(hasPortraitCam)
+                        .Append(" boundsSize=").Append(totalBounds.size.ToString("F2"))
+                        .Append(" scale=").Append(scale.ToString("F2"));
+                    CoopLog.Info(dump.ToString());
+                }
+
                 return true;
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 CoopLog.Warn("TryBuildBeatrixVisual exception: " + ex.Message);
                 if (pivot != null) Object.Destroy(pivot);
                 return false;
+            }
+        }
+
+        private static void DisableComponentIfPossible(Component c)
+        {
+            if (c == null) return;
+            Behaviour b = c as Behaviour;
+            if (b != null)
+            {
+                b.enabled = false;
+                return;
+            }
+            Renderer r = c as Renderer;
+            if (r != null)
+            {
+                r.enabled = false;
+                return;
+            }
+            PropertyInfo pEnabled = c.GetType().GetProperty("enabled");
+            if (pEnabled != null && pEnabled.CanWrite && pEnabled.PropertyType == typeof(bool))
+            {
+                pEnabled.SetValue(c, false, null);
             }
         }
 
@@ -521,9 +721,10 @@ namespace SlimeCoop.World
             go.transform.localPosition = localPos;
             go.transform.localScale = localScale;
             Renderer r = go.GetComponent<Renderer>();
-            if (r != null && _standardShader != null)
+            Shader shader = ResolveSafeShader();
+            if (r != null && shader != null)
             {
-                Material mat = new Material(_standardShader);
+                Material mat = new Material(shader);
                 mat.color = color;
                 r.sharedMaterial = mat;
             }

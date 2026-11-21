@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Reflection;
 using HarmonyLib;
 using MonomiPark.SlimeRancher.DataModel;
@@ -496,6 +497,86 @@ namespace SlimeCoop.Patches
                 SyncWriter.WriteInt(__result.currency);
                 SyncWriter.WriteString(CoopSession.LocalNick);
                 CoopSession.BroadcastReliable(PacketType.MarketDepositNotice, SyncWriter);
+            }
+        }
+
+        // --- Prevent client knockout/sleep from hanging forever in FastForwardTo ---
+        // Host owns worldTime and constantly syncs it to clients; if client calls FastForwardTo,
+        // host's worldTime keeps resetting it before unlockWorldTime is reached (infinite clock ticking).
+        internal static class ClientLockOnDeathState
+        {
+            public static bool Active;
+            public static float UnlockRealtime;
+            public static readonly AccessTools.FieldRef<LockOnDeath, double> UnlockWorldTimeRef =
+                AccessTools.FieldRefAccess<LockOnDeath, double>("unlockWorldTime");
+
+            public static IEnumerator EmptyCoroutine()
+            {
+                yield break;
+            }
+        }
+
+        [HarmonyPatch(typeof(LockOnDeath), nameof(LockOnDeath.LockUntil))]
+        internal static class ClientLockUntilPatch
+        {
+            private static void Prefix(ref double unlockWorldTime, float delayTime)
+            {
+                if (!CoopSession.IsClient) return;
+
+                ClientLockOnDeathState.Active = true;
+                // Wait out knockout UI fade (~5s) or brief sleep fade (0.5s), then wake without warping host time
+                ClientLockOnDeathState.UnlockRealtime = Time.unscaledTime + (delayTime > 0.1f ? delayTime + 0.3f : 0.5f);
+                unlockWorldTime = double.MaxValue;
+                CoopLog.Info("Client LockOnDeath.LockUntil intercepted (delay=" + delayTime.ToString("F1") + "s)");
+            }
+        }
+
+        [HarmonyPatch(typeof(LockOnDeath), "DelayedFastForward")]
+        internal static class ClientLockDelayedFastForwardPatch
+        {
+            private static bool Prefix(ref IEnumerator __result)
+            {
+                if (!CoopSession.IsClient) return true;
+                __result = ClientLockOnDeathState.EmptyCoroutine();
+                return false;
+            }
+        }
+
+        [HarmonyPatch(typeof(LockOnDeath), nameof(LockOnDeath.Update))]
+        internal static class ClientLockUpdatePatch
+        {
+            private static void Prefix(LockOnDeath __instance)
+            {
+                if (__instance == null || !__instance.Locked())
+                {
+                    ClientLockOnDeathState.Active = false;
+                    return;
+                }
+
+                if (!CoopSession.IsClient)
+                {
+                    if (ClientLockOnDeathState.Active)
+                    {
+                        ClientLockOnDeathState.Active = false;
+                        SceneContext ctx = SRSingleton<SceneContext>.Instance;
+                        if (ctx != null && ctx.TimeDirector != null)
+                        {
+                            ClientLockOnDeathState.UnlockWorldTimeRef(__instance) = ctx.TimeDirector.WorldTime() - 1.0;
+                        }
+                    }
+                    return;
+                }
+
+                if (ClientLockOnDeathState.Active && Time.unscaledTime >= ClientLockOnDeathState.UnlockRealtime)
+                {
+                    ClientLockOnDeathState.Active = false;
+                    SceneContext ctx = SRSingleton<SceneContext>.Instance;
+                    if (ctx != null && ctx.TimeDirector != null)
+                    {
+                        ClientLockOnDeathState.UnlockWorldTimeRef(__instance) = ctx.TimeDirector.WorldTime() - 1.0;
+                    }
+                    CoopLog.Info("Client LockOnDeath unlocked cleanly");
+                }
             }
         }
     }

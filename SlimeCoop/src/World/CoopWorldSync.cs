@@ -337,7 +337,8 @@ namespace SlimeCoop.World
             WorldModel wm = TimeWorldModelRef(ctx.TimeDirector);
             if (wm != null)
             {
-                if (Math.Abs(wm.worldTime - worldTime) > 1.5)
+                bool isLocked = SRSingleton<LockOnDeath>.Instance != null && SRSingleton<LockOnDeath>.Instance.Locked();
+                if (!ctx.TimeDirector.IsFastForwarding() && !isLocked && Math.Abs(wm.worldTime - worldTime) > 1.5)
                 {
                     wm.worldTime = worldTime;
                 }
