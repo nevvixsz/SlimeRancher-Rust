@@ -196,10 +196,13 @@ namespace SlimeCoop.Net
                     if (props == null) continue;
 
                     string nameLower = (nic.Name + " " + nic.Description).ToLowerInvariant();
+                    bool hasGateway = props.GatewayAddresses != null && props.GatewayAddresses.Count > 0;
                     bool isHypervisor = nameLower.Contains("vethernet") || nameLower.Contains("hyper-v") ||
                                         nameLower.Contains("wsl") || nameLower.Contains("docker") ||
                                         nameLower.Contains("vmware") || nameLower.Contains("virtualbox") ||
-                                        nameLower.Contains("vbox");
+                                        nameLower.Contains("vbox") || nameLower.Contains("loopback") ||
+                                        nameLower.Contains("bluetooth") || nameLower.Contains("npcap") ||
+                                        nameLower.Contains("km-test");
 
                     bool isVpn = !isHypervisor && (
                                  nameLower.Contains("radmin") || nameLower.Contains("hamachi") ||
@@ -212,13 +215,13 @@ namespace SlimeCoop.Net
                     foreach (UnicastIPAddressInformation uni in props.UnicastAddresses)
                     {
                         if (uni.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                        byte[] bytes = uni.Address.GetAddressBytes();
                         string s = uni.Address.ToString();
                         if (s.StartsWith("169.254.") || !seenIps.Add(s)) continue;
 
-                        if (!isHypervisor && (s.StartsWith("26.") || s.StartsWith("25.") || s.StartsWith("100.")))
-                        {
-                            isVpn = true;
-                        }
+                        bool isPrivate172 = bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31;
+                        bool entryHypervisor = isHypervisor || (isPrivate172 && !hasGateway && !isVpn);
+                        bool entryVpn = !entryHypervisor && (isVpn || bytes[0] == 26 || bytes[0] == 25 || bytes[0] == 10 || (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127));
 
                         NetworkEndpointEntry entry = new NetworkEndpointEntry
                         {
@@ -226,12 +229,13 @@ namespace SlimeCoop.Net
                             Ip = s,
                             Port = port,
                             RoomCode = Encode(s, port),
-                            IsVpn = isVpn,
-                            IsVirtualHypervisor = isHypervisor
+                            IsVpn = entryVpn,
+                            IsVirtualHypervisor = entryHypervisor
                         };
 
-                        if (isHypervisor) virtualList.Add(entry);
-                        else if (isVpn) vpnList.Add(entry);
+                        if (entryHypervisor) virtualList.Add(entry);
+                        else if (entryVpn) vpnList.Add(entry);
+                        else if (hasGateway) lanList.Insert(0, entry);
                         else lanList.Add(entry);
                     }
                 }

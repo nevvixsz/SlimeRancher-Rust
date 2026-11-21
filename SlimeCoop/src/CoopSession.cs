@@ -78,6 +78,9 @@ namespace SlimeCoop
         private static float _nextKeepAliveTime;
         private static float _nextProfileAutoSaveTime;
         private static bool _clientProfileLoaded;
+        private static bool _clientHandshakeDone;
+        private static float _connectStartTime;
+        private static float _nextHelloRetryTime;
         private static PlayerZoneTracker _cachedZoneTracker;
 
         private static ZoneDirector.Zone GetLocalZone(SceneContext ctx)
@@ -188,6 +191,9 @@ namespace SlimeCoop
             _serverEp = ep;
             _pendingJoinPass = password ?? string.Empty;
             _clientProfileLoaded = false;
+            _clientHandshakeDone = false;
+            _connectStartTime = Time.unscaledTime;
+            _nextHelloRetryTime = _connectStartTime + 1.5f;
             StatusMessage = "Подключение к " + ep + "...";
 
             SharedWriter.Reset();
@@ -220,6 +226,7 @@ namespace SlimeCoop
             Role = CoopRole.None;
             WaitingWorldLoad = false;
             _clientProfileLoaded = false;
+            _clientHandshakeDone = false;
             _serverEp = null;
             ConnectedPeers.Clear();
             PeersByEp.Clear();
@@ -452,7 +459,28 @@ namespace SlimeCoop
             }
             else if (IsClient)
             {
-                if (now >= _nextKeepAliveTime && _serverEp != null)
+                if (!_clientHandshakeDone && _serverEp != null)
+                {
+                    int elapsed = Mathf.Max(0, (int)(now - _connectStartTime));
+                    if (elapsed >= 6)
+                    {
+                        StatusMessage = "Нет ответа от " + _serverEp + " — проверьте VPN IP/код и брандмауэр хоста (UDP)!";
+                    }
+                    else
+                    {
+                        StatusMessage = "Подключение к " + _serverEp + "... (" + elapsed + "с)";
+                    }
+
+                    if (now >= _nextHelloRetryTime)
+                    {
+                        _nextHelloRetryTime = now + 2.0f;
+                        SharedWriter.Reset();
+                        SharedWriter.WriteInt(1);
+                        Transport.SendReliable(_serverEp, PacketType.Hello, SharedWriter);
+                    }
+                }
+
+                if (_clientHandshakeDone && now >= _nextKeepAliveTime && _serverEp != null)
                 {
                     _nextKeepAliveTime = now + 2.5f;
                     SharedWriter.Reset();
@@ -897,6 +925,7 @@ namespace SlimeCoop
                     break;
 
                 case PacketType.JoinAccept:
+                    _clientHandshakeDone = true;
                     LocalPlayerId = r.ReadInt();
                     HostServerId = r.ReadString();
                     ShareMarketIncome = r.ReadBool();

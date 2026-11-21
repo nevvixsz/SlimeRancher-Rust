@@ -362,7 +362,10 @@ namespace SlimeCoop.UI
                 GUILayout.Space(6f);
                 GUILayout.BeginVertical(_boxStyle);
                 string primaryCode = CoopSession.GetPrimaryRoomCode();
-                GUILayout.Label("Главный Код комнаты:  " + primaryCode, _titleStyle);
+                string primaryIp = CoopSession.HostEndpoints.Count > 0
+                    ? (CoopSession.HostEndpoints[0].Ip + ":" + CoopSession.HostEndpoints[0].Port)
+                    : string.Empty;
+                GUILayout.Label("Главный Код комнаты:  " + primaryCode + (string.IsNullOrEmpty(primaryIp) ? "" : ("  (" + primaryIp + ")")), _titleStyle);
                 if (GUILayout.Button("Скопировать Главный Код", _btnActiveStyle, GUILayout.Height(26f)))
                 {
                     GUIUtility.systemCopyBuffer = primaryCode;
