@@ -59,9 +59,13 @@ namespace SlimeCoop.Net
         private readonly Dictionary<IPEndPoint, PeerReliability> _peers = new Dictionary<IPEndPoint, PeerReliability>();
         private readonly ConcurrentQueue<IncomingPacket> _inbox = new ConcurrentQueue<IncomingPacket>();
         private readonly byte[] _recvScratch = new byte[65536];
+        private long _packetsSent;
+        private long _packetsRecv;
 
         public int LocalPort { get; private set; }
         public bool IsActive => _running && _socket != null;
+        public long PacketsSent => Interlocked.Read(ref _packetsSent);
+        public long PacketsReceived => Interlocked.Read(ref _packetsRecv);
 
         public bool Start(int port)
         {
@@ -110,6 +114,8 @@ namespace SlimeCoop.Net
         public void Stop()
         {
             _running = false;
+            Interlocked.Exchange(ref _packetsSent, 0);
+            Interlocked.Exchange(ref _packetsRecv, 0);
             try
             {
                 _socket?.Close();
@@ -321,6 +327,7 @@ namespace SlimeCoop.Net
             try
             {
                 s.SendTo(data, len, SocketFlags.None, target);
+                Interlocked.Increment(ref _packetsSent);
             }
             catch (SocketException sex)
             {
