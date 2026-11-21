@@ -52,6 +52,8 @@ namespace SlimeCoop
         public static bool ShareMarketIncome = true;
 
         public static string HostServerId = string.Empty;
+        public static bool IsClientProfileLoaded => _clientProfileLoaded;
+        public static bool BlockLocalSaveUntilMenu;
         public static int LocalPlayerId = 1;
         public static string StatusMessage = "Не подключено";
         public static int ClientPingMs;
@@ -157,7 +159,9 @@ namespace SlimeCoop
                               SRSingleton<GameContext>.Instance.AutoSaveDirector.SavedGame != null
                 ? SRSingleton<GameContext>.Instance.AutoSaveDirector.SavedGame.GetName()
                 : null;
-            HostServerId = !string.IsNullOrEmpty(saveName) ? ("host_" + saveName) : ("host_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            HostServerId = !string.IsNullOrEmpty(saveName)
+                ? ClientProfileStore.GetOrCreateHostServerId(saveName)
+                : ("srv_" + Guid.NewGuid().ToString("N").Substring(0, 12));
 
             HostRoomCodes.Clear();
             HostEndpoints.Clear();
@@ -215,6 +219,7 @@ namespace SlimeCoop
             }
 
             Role = CoopRole.Client;
+            HostServerId = string.Empty;
             _serverEp = ep;
             _pendingJoinPass = password ?? string.Empty;
             _clientProfileLoaded = false;
@@ -258,6 +263,7 @@ namespace SlimeCoop
             }
 
             Role = CoopRole.None;
+            HostServerId = string.Empty;
             WaitingWorldLoad = false;
             _clientProfileLoaded = false;
             _clientHandshakeDone = false;
@@ -311,7 +317,7 @@ namespace SlimeCoop
                     : null;
                 if (!string.IsNullOrEmpty(saveName))
                 {
-                    HostServerId = "host_" + saveName;
+                    HostServerId = ClientProfileStore.GetOrCreateHostServerId(saveName);
                 }
             }
             else if (IsClient && WaitingWorldLoad)
@@ -325,6 +331,7 @@ namespace SlimeCoop
         {
             if (!_clientProfileLoaded && !string.IsNullOrEmpty(HostServerId))
             {
+                BlockLocalSaveUntilMenu = true;
                 NetSyncGuard.SuppressPersonalProgressDepth++;
                 try
                 {
@@ -445,6 +452,11 @@ namespace SlimeCoop
 
         public static void TickPerFrame()
         {
+            if (BlockLocalSaveUntilMenu && !IsActive && !IsInGameSession())
+            {
+                BlockLocalSaveUntilMenu = false;
+            }
+
             if (WaitingWorldLoad &&
                 SRSingleton<SceneContext>.Instance != null &&
                 SRSingleton<GameContext>.Instance != null &&

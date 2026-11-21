@@ -62,12 +62,37 @@ namespace SlimeCoop.Patches
         {
             private static bool Prefix()
             {
-                if (CoopSession.IsClient && !string.IsNullOrEmpty(CoopSession.HostServerId))
+                if (CoopSession.IsClient)
                 {
-                    ClientProfileStore.SaveCurrentClientProfile(CoopSession.HostServerId);
+                    if (CoopSession.IsClientProfileLoaded && !string.IsNullOrEmpty(CoopSession.HostServerId))
+                    {
+                        ClientProfileStore.SaveCurrentClientProfile(CoopSession.HostServerId);
+                    }
+                    return false;
+                }
+                if (CoopSession.BlockLocalSaveUntilMenu)
+                {
                     return false;
                 }
                 return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(AutoSaveDirector), nameof(AutoSaveDirector.BeginLoad))]
+        internal static class ResetBlockOnBeginLoadPatch
+        {
+            private static void Prefix()
+            {
+                CoopSession.BlockLocalSaveUntilMenu = false;
+            }
+        }
+
+        [HarmonyPatch(typeof(AutoSaveDirector), nameof(AutoSaveDirector.LoadNewGame))]
+        internal static class ResetBlockOnLoadNewGamePatch
+        {
+            private static void Prefix()
+            {
+                CoopSession.BlockLocalSaveUntilMenu = false;
             }
         }
 
