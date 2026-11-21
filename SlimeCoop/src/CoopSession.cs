@@ -61,6 +61,7 @@ namespace SlimeCoop
         public static readonly List<LanServerEntry> DiscoveredServers = new List<LanServerEntry>();
         public static readonly List<CoopChatEntry> ChatLog = new List<CoopChatEntry>();
         public static readonly List<string> HostRoomCodes = new List<string>();
+        public static readonly List<NetworkEndpointEntry> HostEndpoints = new List<NetworkEndpointEntry>();
 
         private static readonly NetTransport Transport = new NetTransport();
         private static readonly PacketWriter SharedWriter = new PacketWriter(1400);
@@ -136,11 +137,12 @@ namespace SlimeCoop
             HostServerId = !string.IsNullOrEmpty(saveName) ? ("host_" + saveName) : ("host_" + Guid.NewGuid().ToString("N").Substring(0, 8));
 
             HostRoomCodes.Clear();
-            List<string> ips = RoomCode.GetLocalAndVpnAddresses();
-            for (int i = 0; i < ips.Count; i++)
+            HostEndpoints.Clear();
+            List<NetworkEndpointEntry> eps = RoomCode.GetNetworkEndpoints(HostPort);
+            for (int i = 0; i < eps.Count; i++)
             {
-                string code = RoomCode.Encode(ips[i], HostPort);
-                if (!string.IsNullOrEmpty(code)) HostRoomCodes.Add(code);
+                HostEndpoints.Add(eps[i]);
+                if (!string.IsNullOrEmpty(eps[i].RoomCode)) HostRoomCodes.Add(eps[i].RoomCode);
             }
 
             if (UseUpnp)
@@ -223,6 +225,7 @@ namespace SlimeCoop
             PeersByEp.Clear();
             PendingChallenges.Clear();
             HostRoomCodes.Clear();
+            HostEndpoints.Clear();
             RemotePlayerManager.ClearAll();
             CoopWorldSync.ClearCaches();
             Transport.Stop();

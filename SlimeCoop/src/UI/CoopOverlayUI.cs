@@ -17,6 +17,7 @@ namespace SlimeCoop.UI
         private static string _chatInput = string.Empty;
         private static Vector2 _chatScroll;
         private static Vector2 _lanScroll;
+        private static Vector2 _hostEpsScroll;
 
         private static bool _wasCursorForced;
         private static bool _capturedCursorState;
@@ -155,8 +156,8 @@ namespace SlimeCoop.UI
                 SyncCursorLock(true);
             }
 
-            float w = Mathf.Min(640f, Screen.width - 40f);
-            float h = Mathf.Min(540f, Screen.height - 60f);
+            float w = Mathf.Min(680f, Screen.width - 40f);
+            float h = Mathf.Min(610f, Screen.height - 40f);
             Rect rect = new Rect((Screen.width - w) * 0.5f, (Screen.height - h) * 0.5f, w, h);
 
             GUILayout.BeginArea(rect, _winStyle);
@@ -271,7 +272,8 @@ namespace SlimeCoop.UI
             _lanScroll = GUILayout.BeginScrollView(_lanScroll, GUILayout.Height(140f));
             if (CoopSession.DiscoveredServers.Count == 0)
             {
-                GUILayout.Label("Серверы не найдены. Нажми 'Обновить' или введи код комнаты / IP выше.", _mutedStyle);
+                GUILayout.Label("Серверы через автопоиск не найдены.", _mutedStyle);
+                GUILayout.Label("Важно: свой VPN (WireGuard / OpenVPN / Amnezia и др.) часто блокирует широковещательный поиск — в таком случае просто вставь Код комнаты (SLIME-...) или прямой IP:порт друга в поле сверху!", _mutedStyle);
             }
             else
             {
@@ -361,18 +363,35 @@ namespace SlimeCoop.UI
                 GUILayout.BeginVertical(_boxStyle);
                 string primaryCode = CoopSession.GetPrimaryRoomCode();
                 GUILayout.Label("Главный Код комнаты:  " + primaryCode, _titleStyle);
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Скопировать Код комнаты", _btnActiveStyle, GUILayout.Height(28f)))
+                if (GUILayout.Button("Скопировать Главный Код", _btnActiveStyle, GUILayout.Height(26f)))
                 {
                     GUIUtility.systemCopyBuffer = primaryCode;
                     CoopSession.AddChat("Система", "Код комнаты скопирован в буфер: " + primaryCode, true);
                 }
-                GUILayout.EndHorizontal();
 
-                if (CoopSession.HostRoomCodes.Count > 1)
+                GUILayout.Space(4f);
+                GUILayout.Label("Адреса и коды по сетевым адаптерам (выбери свой VPN и отправь другу):", _mutedStyle);
+                _hostEpsScroll = GUILayout.BeginScrollView(_hostEpsScroll, GUILayout.Height(105f));
+                for (int i = 0; i < CoopSession.HostEndpoints.Count; i++)
                 {
-                    GUILayout.Label("Локальные/VPN коды: " + string.Join("  |  ", CoopSession.HostRoomCodes.ToArray()), _mutedStyle);
+                    NetworkEndpointEntry ep = CoopSession.HostEndpoints[i];
+                    string tag = ep.IsVirtualHypervisor ? "[Вирт]" : (ep.IsVpn ? "[VPN]" : "[LAN]");
+                    string ipPort = ep.Ip + ":" + ep.Port;
+
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label(string.Format("{0} {1} — {2} ({3})", tag, ep.InterfaceName, ipPort, ep.RoomCode), _mutedStyle);
+                    if (GUILayout.Button("Код", _btnStyle, GUILayout.Width(54f)))
+                    {
+                        GUIUtility.systemCopyBuffer = ep.RoomCode;
+                    }
+                    if (GUILayout.Button("IP", _btnStyle, GUILayout.Width(42f)))
+                    {
+                        GUIUtility.systemCopyBuffer = ipPort;
+                    }
+                    GUILayout.EndHorizontal();
                 }
+                GUILayout.EndScrollView();
+
                 GUILayout.Label("UPnP статус: " + UpnpMapper.StatusText, _mutedStyle);
                 GUILayout.EndVertical();
             }
