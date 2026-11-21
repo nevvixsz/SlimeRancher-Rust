@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using HarmonyLib;
 using MonomiPark.SlimeRancher.Regions;
 using SRML.Console;
 using UnityEngine;
@@ -9,19 +10,69 @@ namespace SlimeDevConsole.Commands
 {
     internal static class CommandHelpers
     {
+        private static readonly AccessTools.FieldRef<IdDirector, Dictionary<IdHandler, string>> PersistenceDictRef =
+            AccessTools.FieldRefAccess<IdDirector, Dictionary<IdHandler, string>>("persistenceDict");
+
+        public static void AssignUniquePersistenceId(GameObject go, string uniqueId)
+        {
+            if (go == null || string.IsNullOrEmpty(uniqueId))
+            {
+                return;
+            }
+
+            IdHandler ih = go.GetComponent<IdHandler>();
+            if (ih == null)
+            {
+                return;
+            }
+
+            IdDirector dir = go.GetComponentInParent<IdDirector>();
+            if (dir == null)
+            {
+                dir = go.AddComponent<IdDirector>();
+            }
+
+            Dictionary<IdHandler, string> dict = PersistenceDictRef(dir);
+            if (dict != null)
+            {
+                dict[ih] = uniqueId;
+            }
+        }
+
         public static void Log(string msg)
         {
-            SRML.Console.Console.Log("[SlimeDev] " + msg);
+            if (ModMain.LogConsole != null)
+            {
+                ModMain.LogConsole.Log(msg);
+            }
+            else
+            {
+                Debug.Log("[SlimeDevConsole] " + msg);
+            }
         }
 
         public static void LogError(string msg)
         {
-            SRML.Console.Console.LogError("[SlimeDev] " + msg);
+            if (ModMain.LogConsole != null)
+            {
+                ModMain.LogConsole.LogError(msg);
+            }
+            else
+            {
+                Debug.LogError("[SlimeDevConsole] " + msg);
+            }
         }
 
         public static void LogSuccess(string msg)
         {
-            SRML.Console.Console.LogSuccess("[SlimeDev] " + msg);
+            if (ModMain.LogConsole != null)
+            {
+                ModMain.LogConsole.LogSuccess(msg);
+            }
+            else
+            {
+                Debug.Log("[SlimeDevConsole] " + msg);
+            }
         }
 
         public static bool EnsureInGame(out SceneContext ctx, out GameContext gctx)

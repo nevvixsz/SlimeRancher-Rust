@@ -10,15 +10,18 @@ namespace SlimeDevConsole
     public class ModMain : ModEntryPoint
     {
         private static GameObject _driverObject;
+        internal static SRML.Console.Console.ConsoleInstance LogConsole { get; private set; }
 
         public override void PreLoad()
         {
+            LogConsole = ConsoleInstance;
             HarmonyInstance.PatchAll(typeof(ModMain).Assembly);
             DevPatches.Install(HarmonyInstance);
         }
 
         public override void Load()
         {
+            LogConsole = ConsoleInstance;
             RegisterCommands();
             RegisterButtons();
         }
@@ -33,9 +36,10 @@ namespace SlimeDevConsole
 
         public override void PostLoad()
         {
+            LogConsole = ConsoleInstance;
             RussianCatalog.EnsureInitialized();
             EnsureDriverObject();
-            SRML.Console.Console.Log("[SlimeDevConsole] v1.0.0 загружен! Напишите 'помощь' или 'devhelp' в консоли.");
+            CommandHelpers.Log("v1.0.0 загружен! Напишите 'помощь' или 'devhelp' в консоли.");
         }
 
         private static void RegisterCommands()
