@@ -28,8 +28,8 @@ namespace SlimeCoop.World
         private static readonly AccessTools.FieldRef<GordoEat, GordoModel> GordoModelRef =
             AccessTools.FieldRefAccess<GordoEat, GordoModel>("gordoModel");
 
-        private static readonly AccessTools.FieldRef<GordoEat, GordoRewards> GordoRewardsRef =
-            AccessTools.FieldRefAccess<GordoEat, GordoRewards>("rewards");
+        private static readonly AccessTools.FieldRef<GordoEat, GordoRewardsBase> GordoRewardsRef =
+            AccessTools.FieldRefAccess<GordoEat, GordoRewardsBase>("rewards");
 
         private static readonly AccessTools.FieldRef<TimeDirector, WorldModel> TimeWorldModelRef =
             AccessTools.FieldRefAccess<TimeDirector, WorldModel>("worldModel");
@@ -434,7 +434,7 @@ namespace SlimeCoop.World
 
                     if (eatenCount == -1)
                     {
-                        GordoRewards rew = GordoRewardsRef(gordo);
+                        GordoRewardsBase rew = GordoRewardsRef(gordo);
                         if (rew != null) rew.SetupActiveRewards();
                         gordo.gameObject.SetActive(false);
                     }
