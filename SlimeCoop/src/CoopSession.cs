@@ -87,6 +87,10 @@ namespace SlimeCoop
         private static float _nextHelloRetryTime;
         private static float _lastDiscoveryTime;
         private static PlayerZoneTracker _cachedZoneTracker;
+        private static GameObject _cachedPlayerObj;
+        private static vp_FPController _cachedFpCtrl;
+        private static WeaponVacuum _cachedWeaponVac;
+        private static Camera _cachedMainCam;
 
         public static bool IsInGameSession()
         {
@@ -290,6 +294,10 @@ namespace SlimeCoop
         public static void OnGameSceneLoaded()
         {
             _cachedZoneTracker = null;
+            _cachedPlayerObj = null;
+            _cachedFpCtrl = null;
+            _cachedWeaponVac = null;
+            _cachedMainCam = null;
             if (!IsActive) return;
 
             CoopLog.Info("OnGameSceneLoaded: role=" + Role + ", waitingWorldLoad=" + WaitingWorldLoad);
@@ -451,7 +459,7 @@ namespace SlimeCoop
             {
                 Transport.PumpReliableRetries();
                 int processed = 0;
-                while (processed < 128 && Transport.TryDequeue(out IncomingPacket pkt))
+                while (processed < 48 && Transport.TryDequeue(out IncomingPacket pkt))
                 {
                     HandleIncomingPacket(ref pkt);
                     processed++;
@@ -573,22 +581,32 @@ namespace SlimeCoop
         private static void SendLocalTransform(SceneContext ctx)
         {
             if (IsClient && (!_clientHandshakeDone || WaitingWorldLoad)) return;
-            Transform pt = ctx.Player.transform;
-            Camera cam = Camera.main;
+            GameObject playerGo = ctx.Player;
+            Transform pt = playerGo.transform;
+            if (_cachedPlayerObj != playerGo)
+            {
+                _cachedPlayerObj = playerGo;
+                _cachedFpCtrl = playerGo.GetComponentInChildren<vp_FPController>();
+                _cachedWeaponVac = playerGo.GetComponentInChildren<WeaponVacuum>();
+                _cachedMainCam = Camera.main;
+            }
+            if (_cachedMainCam == null || !_cachedMainCam.isActiveAndEnabled)
+            {
+                _cachedMainCam = Camera.main;
+            }
+
             float yaw = pt.eulerAngles.y;
-            float pitch = cam != null ? cam.transform.localEulerAngles.x : 0f;
+            float pitch = _cachedMainCam != null ? _cachedMainCam.transform.localEulerAngles.x : 0f;
             if (pitch > 180f) pitch -= 360f;
 
-            vp_FPController ctrl = ctx.Player.GetComponentInChildren<vp_FPController>();
-            bool jet = ctrl != null && ctrl.MotorFreeFly;
+            bool jet = _cachedFpCtrl != null && _cachedFpCtrl.MotorFreeFly;
             if (!jet && ctx.PlayerState != null)
             {
                 // Detect airborne + holding jump/jetpack roughly via vertical velocity
-                jet = ctrl != null && !ctrl.Grounded && ctrl.Velocity.y > 1.5f;
+                jet = _cachedFpCtrl != null && !_cachedFpCtrl.Grounded && _cachedFpCtrl.Velocity.y > 1.5f;
             }
 
-            WeaponVacuum vac = ctx.Player.GetComponentInChildren<WeaponVacuum>();
-            bool vacActive = vac != null && vac.InVacMode();
+            bool vacActive = _cachedWeaponVac != null && _cachedWeaponVac.InVacMode();
 
             ZoneDirector.Zone zone = GetLocalZone(ctx);
 
@@ -972,7 +990,14 @@ namespace SlimeCoop
             try { prefab = gctx.LookupDirector.GetPrefab(id); } catch { }
             if (prefab == null) return;
 
+            if (setId == RegionRegistry.RegionSetId.UNSET)
+            {
+                RegionMember pm = ctx.Player != null ? ctx.Player.GetComponent<RegionMember>() : null;
+                setId = pm != null && pm.setId != RegionRegistry.RegionSetId.UNSET ? pm.setId : RegionRegistry.RegionSetId.HOME;
+            }
+
             NetSyncGuard.SuppressPersonalProgressDepth++;
+            CoopWorldSync.PendingActorSpawnVelocity = vel;
             try
             {
                 GameObject go = SRBehaviour.InstantiateActor(prefab, setId, pos, Quaternion.identity, false);
@@ -984,6 +1009,7 @@ namespace SlimeCoop
             }
             finally
             {
+                CoopWorldSync.PendingActorSpawnVelocity = null;
                 NetSyncGuard.SuppressPersonalProgressDepth--;
             }
         }

@@ -311,17 +311,15 @@ namespace SlimeCoop.Patches
                     "InstantiateActor",
                     new[]
                     {
-                        typeof(long), typeof(GameObject), typeof(RegionRegistry.RegionSetId),
-                        typeof(Vector3), typeof(Quaternion), typeof(bool), typeof(bool)
+                        typeof(GameObject), typeof(RegionRegistry.RegionSetId),
+                        typeof(Vector3), typeof(Quaternion), typeof(bool)
                     });
             }
 
             private static void Postfix(
-                long actorId,
                 RegionRegistry.RegionSetId regionSetId,
                 Vector3 pos,
                 Quaternion rot,
-                bool skipNotify,
                 GameObject __result)
             {
                 if (__result == null) return;
@@ -334,21 +332,30 @@ namespace SlimeCoop.Patches
 
                 if (!CoopSession.IsHost || NetSyncGuard.IsApplyingRemote) return;
 
-                CoopWorldSync.RegisterActor(actorId, __result);
-                if (skipNotify) return;
+                if (!CoopWorldSync.TryGetActorId(__result, out long actorId) || actorId <= 0) return;
 
                 Identifiable ident = __result.GetComponent<Identifiable>();
                 if (ident == null || ident.id == Identifiable.Id.NONE || ident.id == Identifiable.Id.PLAYER) return;
 
                 if (CoopSession.ConnectedPeers.Count == 0) return;
 
+                Vector3 vel;
+                if (CoopWorldSync.PendingActorSpawnVelocity.HasValue)
+                {
+                    vel = CoopWorldSync.PendingActorSpawnVelocity.Value;
+                }
+                else
+                {
+                    Rigidbody rb = __result.GetComponent<Rigidbody>();
+                    vel = rb != null ? rb.velocity : Vector3.zero;
+                }
+
                 SyncWriter.Reset();
                 SyncWriter.WriteLong(actorId);
                 SyncWriter.WriteInt((int)ident.id);
                 SyncWriter.WriteVector3(pos);
                 SyncWriter.WriteQuaternion(rot);
-                Rigidbody rb = __result.GetComponent<Rigidbody>();
-                SyncWriter.WriteVector3(rb != null ? rb.velocity : Vector3.zero);
+                SyncWriter.WriteVector3(vel);
                 SyncWriter.WriteByte((byte)regionSetId);
                 CoopSession.BroadcastReliable(PacketType.ActorSpawn, SyncWriter);
             }
@@ -359,10 +366,14 @@ namespace SlimeCoop.Patches
         {
             private static void Prefix(GameObject gameObj)
             {
-                if (!CoopSession.IsHost || NetSyncGuard.IsApplyingRemote || gameObj == null) return;
-                long actorId = Identifiable.GetActorId(gameObj);
+                if (gameObj == null) return;
+                long actorId = 0;
+                if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote && CoopSession.ConnectedPeers.Count > 0)
+                {
+                    CoopWorldSync.TryGetActorId(gameObj, out actorId);
+                }
                 CoopWorldSync.UnregisterActor(gameObj);
-                if (actorId <= 0 || CoopSession.ConnectedPeers.Count == 0) return;
+                if (actorId <= 0) return;
 
                 SyncWriter.Reset();
                 SyncWriter.WriteLong(actorId);
@@ -383,13 +394,20 @@ namespace SlimeCoop.Patches
                 }
             }
 
-            private static void Postfix(bool __result, long __state)
+            private static void Postfix(Vacuumable __instance, bool __result, long __state)
             {
-                if (__result && __state > 0 && CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                if (__result && CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
                 {
-                    SyncWriter.Reset();
-                    SyncWriter.WriteLong(__state);
-                    CoopSession.SendToHostReliable(PacketType.ClientVacCapture, SyncWriter);
+                    if (__instance != null)
+                    {
+                        CoopWorldSync.UnregisterActor(__instance.gameObject);
+                    }
+                    if (__state > 0)
+                    {
+                        SyncWriter.Reset();
+                        SyncWriter.WriteLong(__state);
+                        CoopSession.SendToHostReliable(PacketType.ClientVacCapture, SyncWriter);
+                    }
                 }
             }
         }
@@ -406,40 +424,61 @@ namespace SlimeCoop.Patches
                 }
             }
 
-            private static void Postfix()
+            private static void Postfix(WeaponVacuum __instance, GameObject toExpel)
             {
                 if (!_clientExpelling) return;
                 _clientExpelling = false;
 
                 GameObject tempObj = _lastExpelledObj;
                 _lastExpelledObj = null;
-                if (tempObj == null) return;
 
-                Identifiable ident = tempObj.GetComponent<Identifiable>();
-                if (ident != null)
+                Identifiable.Id identId = Identifiable.Id.NONE;
+                Vector3 pos = Vector3.zero;
+                Vector3 vel = Vector3.zero;
+                RegionRegistry.RegionSetId setId = RegionRegistry.RegionSetId.HOME;
+
+                if (tempObj != null)
                 {
-                    Vector3 pos = tempObj.transform.position;
+                    Identifiable ident = tempObj.GetComponent<Identifiable>();
+                    if (ident != null) identId = ident.id;
+                    pos = tempObj.transform.position;
                     Rigidbody rb = tempObj.GetComponent<Rigidbody>();
-                    Vector3 vel = rb != null ? rb.velocity : Vector3.zero;
+                    vel = rb != null ? rb.velocity : Vector3.zero;
                     RegionMember rm = tempObj.GetComponent<RegionMember>();
-                    RegionRegistry.RegionSetId setId = rm != null ? rm.setId : RegionRegistry.RegionSetId.HOME;
+                    if (rm != null && rm.setId != RegionRegistry.RegionSetId.UNSET) setId = rm.setId;
+                }
+                else if (toExpel != null && __instance != null && __instance.vacOrigin != null)
+                {
+                    Identifiable ident = toExpel.GetComponent<Identifiable>();
+                    if (ident != null) identId = ident.id;
+                    Transform orig = __instance.vacOrigin.transform;
+                    pos = orig.position + orig.up * 0.8f;
+                    vel = orig.up * __instance.ejectSpeed;
+                    RegionMember rm = __instance.GetComponentInParent<RegionMember>();
+                    if (rm != null && rm.setId != RegionRegistry.RegionSetId.UNSET) setId = rm.setId;
+                }
 
+                if (identId != Identifiable.Id.NONE && identId != Identifiable.Id.PLAYER)
+                {
                     SyncWriter.Reset();
-                    SyncWriter.WriteInt((int)ident.id);
+                    SyncWriter.WriteInt((int)identId);
                     SyncWriter.WriteVector3(pos);
                     SyncWriter.WriteVector3(vel);
                     SyncWriter.WriteByte((byte)setId);
                     CoopSession.SendToHostReliable(PacketType.ClientExpelRequest, SyncWriter);
                 }
 
-                NetSyncGuard.ApplyingRemoteDepth++;
-                try
+                if (tempObj != null)
                 {
-                    Destroyer.DestroyActor(tempObj, "SlimeCoop.ClientExpelProxy", true);
-                }
-                finally
-                {
-                    NetSyncGuard.ApplyingRemoteDepth--;
+                    NetSyncGuard.ApplyingRemoteDepth++;
+                    try
+                    {
+                        Destroyer.DestroyActor(tempObj, "SlimeCoop.ClientExpelProxy", true);
+                    }
+                    finally
+                    {
+                        NetSyncGuard.ApplyingRemoteDepth--;
+                    }
                 }
             }
         }

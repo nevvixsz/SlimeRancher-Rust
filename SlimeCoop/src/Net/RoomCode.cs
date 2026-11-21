@@ -127,6 +127,10 @@ namespace SlimeCoop.Net
             }
 
             string trimmed = input.Trim();
+            if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) trimmed = trimmed.Substring(7);
+            else if (trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) trimmed = trimmed.Substring(8);
+            trimmed = trimmed.TrimEnd('/');
+
             if (trimmed.StartsWith("SLIME-", StringComparison.OrdinalIgnoreCase))
             {
                 return TryDecode(trimmed, out endPoint);
