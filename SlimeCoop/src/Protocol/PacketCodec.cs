@@ -53,6 +53,11 @@ namespace SlimeCoop.Protocol
         PlotPlant = 42,
         SiloSlotSync = 43,
         PlotCollectorActivate = 44,
+        ExchangeStateSync = 45,
+        ExchangeAction = 46,
+        ExchangeOpenChat = 47,
+        ExchangeCrateBreak = 48,
+        ExchangeDirectCoin = 49,
 
         // World Interactables
         DoorState = 50,

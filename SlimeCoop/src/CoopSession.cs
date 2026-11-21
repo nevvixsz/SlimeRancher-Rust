@@ -931,6 +931,104 @@ namespace SlimeCoop
                     CoopWorldSync.ApplyPlotCollectorActivate(pcPlotId);
                     break;
 
+                case PacketType.ExchangeAction:
+                    if (peer == null) return;
+                    byte exAction = r.ReadByte();
+                    SceneContext exCtx = SRSingleton<SceneContext>.Instance;
+                    if (exCtx == null || exCtx.ExchangeDirector == null) return;
+
+                    if (exAction == 0) // SelectDailyOffer(rancherId, isFirstOffer)
+                    {
+                        string rancherId = r.ReadString();
+                        bool isFirst = r.ReadBool();
+                        bool accepted = exCtx.ExchangeDirector.SelectDailyOffer(rancherId, isFirst);
+                        if (!accepted)
+                        {
+                            SharedWriter.Reset();
+                            if (CoopWorldSync.WriteExchangeState(SharedWriter))
+                            {
+                                Transport.SendReliable(sender, PacketType.ExchangeStateSync, SharedWriter);
+                            }
+                        }
+                        if (exCtx.ExchangeDirector.GetOfferId(ExchangeDirector.OfferType.GENERAL) != null)
+                        {
+                            SharedWriter.Reset();
+                            SharedWriter.WriteByte((byte)ExchangeDirector.OfferType.GENERAL);
+                            SharedWriter.WriteBool(false);
+                            Transport.SendReliable(sender, PacketType.ExchangeOpenChat, SharedWriter);
+                        }
+                    }
+                    else if (exAction == 1) // MaybeStartNext(offerType)
+                    {
+                        ExchangeDirector.OfferType oType = (ExchangeDirector.OfferType)r.ReadByte();
+                        bool started = false;
+                        CoopWorldSync.SuppressLocalRancherChatUI = true;
+                        try
+                        {
+                            started = exCtx.ExchangeDirector.MaybeStartNext(oType);
+                        }
+                        finally
+                        {
+                            CoopWorldSync.SuppressLocalRancherChatUI = false;
+                        }
+
+                        if (started && exCtx.ProgressDirector != null)
+                        {
+                            if (oType == ExchangeDirector.OfferType.OGDEN)
+                                exCtx.ProgressDirector.SetUniqueProgress(ProgressDirector.ProgressType.UNLOCK_WILDS);
+                            else if (oType == ExchangeDirector.OfferType.MOCHI)
+                                exCtx.ProgressDirector.SetUniqueProgress(ProgressDirector.ProgressType.UNLOCK_VALLEY);
+                            else if (oType == ExchangeDirector.OfferType.VIKTOR)
+                                exCtx.ProgressDirector.SetUniqueProgress(ProgressDirector.ProgressType.UNLOCK_SLIMULATIONS);
+                        }
+
+                        if (!started)
+                        {
+                            SharedWriter.Reset();
+                            if (CoopWorldSync.WriteExchangeState(SharedWriter))
+                            {
+                                Transport.SendReliable(sender, PacketType.ExchangeStateSync, SharedWriter);
+                            }
+                        }
+
+                        if (started || exCtx.ExchangeDirector.GetOfferId(oType) != null)
+                        {
+                            SharedWriter.Reset();
+                            SharedWriter.WriteByte((byte)oType);
+                            SharedWriter.WriteBool(started);
+                            Transport.SendReliable(sender, PacketType.ExchangeOpenChat, SharedWriter);
+                        }
+                    }
+                    else if (exAction == 2) // TryAccept(offerType, itemId, actorId)
+                    {
+                        ExchangeDirector.OfferType oType = (ExchangeDirector.OfferType)r.ReadByte();
+                        Identifiable.Id itemId = (Identifiable.Id)r.ReadInt();
+                        long actorId = r.ReadLong();
+
+                        if (actorId > 0 && CoopWorldSync.TryGetActorObject(actorId, out GameObject actorGo) && actorGo != null)
+                        {
+                            Destroyer.DestroyActor(actorGo, "SlimeCoop.ExchangeAccept", false);
+                        }
+
+                        List<ExchangeDirector.Awarder> awarderList = new List<ExchangeDirector.Awarder>();
+                        ExchangeEjector[] exEj = UnityEngine.Object.FindObjectsOfType<ExchangeEjector>();
+                        if (exEj != null) awarderList.AddRange(exEj);
+                        DirectRewardEjector[] dirEj = UnityEngine.Object.FindObjectsOfType<DirectRewardEjector>();
+                        if (dirEj != null) awarderList.AddRange(dirEj);
+                        RancherProgressAwarder[] progAw = UnityEngine.Object.FindObjectsOfType<RancherProgressAwarder>();
+                        if (progAw != null) awarderList.AddRange(progAw);
+
+                        if (!exCtx.ExchangeDirector.TryAccept(oType, itemId, awarderList.ToArray()))
+                        {
+                            SharedWriter.Reset();
+                            if (CoopWorldSync.WriteExchangeState(SharedWriter))
+                            {
+                                Transport.SendReliable(sender, PacketType.ExchangeStateSync, SharedWriter);
+                            }
+                        }
+                    }
+                    break;
+
                 case PacketType.DoorState:
                     if (peer == null) return;
                     string dId = r.ReadString();
@@ -1215,6 +1313,29 @@ namespace SlimeCoop
 
                 case PacketType.SiloSlotSync:
                     CoopWorldSync.ApplySiloSlot(r.ReadString(), (SiloStorage.StorageType)r.ReadByte(), r.ReadByte(), (Identifiable.Id)r.ReadInt(), r.ReadInt());
+                    break;
+
+                case PacketType.ExchangeStateSync:
+                    CoopWorldSync.ApplyExchangeState(ref r);
+                    break;
+
+                case PacketType.ExchangeOpenChat:
+                    CoopWorldSync.ApplyExchangeOpenChat((ExchangeDirector.OfferType)r.ReadByte(), r.ReadBool());
+                    break;
+
+                case PacketType.ExchangeCrateBreak:
+                    long crateActorId = r.ReadLong();
+                    byte specCount = r.ReadByte();
+                    ExchangeDirector.NonIdentReward[] specs = new ExchangeDirector.NonIdentReward[specCount];
+                    for (int i = 0; i < specCount; i++)
+                    {
+                        specs[i] = (ExchangeDirector.NonIdentReward)r.ReadInt();
+                    }
+                    CoopWorldSync.ApplyExchangeCrateBreak(crateActorId, specs);
+                    break;
+
+                case PacketType.ExchangeDirectCoin:
+                    CoopWorldSync.ApplyExchangeDirectCoin((ExchangeDirector.OfferType)r.ReadByte());
                     break;
 
                 case PacketType.DoorState:
