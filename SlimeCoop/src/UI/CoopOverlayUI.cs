@@ -29,7 +29,6 @@ namespace SlimeCoop.UI
         private static GUIStyle _btnStyle;
         private static GUIStyle _btnActiveStyle;
         private static GUIStyle _boxStyle;
-        private static GUIStyle _miniBadgeStyle;
         private static Texture2D _darkBgTex;
         private static Texture2D _panelTex;
         private static Texture2D _accentTex;
@@ -55,6 +54,10 @@ namespace SlimeCoop.UI
             if (open && !CoopSession.IsActive)
             {
                 CoopSession.RefreshLanDiscovery();
+            }
+            if (!open)
+            {
+                ClientProfileStore.SaveLocalPrefs();
             }
 
             SyncCursorLock(open);
@@ -130,13 +133,6 @@ namespace SlimeCoop.UI
             _btnActiveStyle = new GUIStyle(_btnStyle);
             _btnActiveStyle.normal.background = _accentTex;
             _btnActiveStyle.hover.background = _accentTex;
-
-            _miniBadgeStyle = new GUIStyle(GUI.skin.box);
-            _miniBadgeStyle.normal.background = _darkBgTex;
-            _miniBadgeStyle.normal.textColor = new Color(0.72f, 0.95f, 0.82f);
-            _miniBadgeStyle.fontSize = 12;
-            _miniBadgeStyle.fontStyle = FontStyle.Bold;
-            _miniBadgeStyle.alignment = TextAnchor.MiddleCenter;
         }
 
         private static Texture2D MakeTex(Color c)
@@ -149,30 +145,9 @@ namespace SlimeCoop.UI
 
         public static void Draw()
         {
-            EnsureStyles();
-
-            // Always show compact non-intrusive badge at top-left
-            string badgeText;
-            if (CoopSession.IsHost)
-            {
-                badgeText = string.Format("[F9] Кооп Хост ({0}/{1}) | {2}",
-                    1 + CoopSession.ConnectedPeers.Count, CoopSession.MaxPlayers, CoopSession.GetPrimaryRoomCode());
-            }
-            else if (CoopSession.IsClient)
-            {
-                badgeText = string.Format("[F9] Кооп Клиент ({0} ms)", CoopSession.ClientPingMs);
-            }
-            else
-            {
-                badgeText = "[F9] Мультиплеер (P2P)";
-            }
-
-            if (GUI.Button(new Rect(14f, 14f, 340f, 26f), badgeText, _miniBadgeStyle))
-            {
-                Toggle();
-            }
-
             if (!_isOpen) return;
+
+            EnsureStyles();
 
             // Keep cursor unlocked while open
             if (SRSingleton<SceneContext>.Instance != null && Cursor.lockState != CursorLockMode.None)
@@ -226,6 +201,7 @@ namespace SlimeCoop.UI
             if (GUILayout.Button(ColorNames[Mathf.Abs(CoopSession.LocalColorIndex) % ColorNames.Length], _btnStyle, GUILayout.Width(110f)))
             {
                 CoopSession.LocalColorIndex = (CoopSession.LocalColorIndex + 1) % ColorNames.Length;
+                ClientProfileStore.SaveLocalPrefs();
             }
             GUILayout.EndHorizontal();
             GUILayout.Label("Общее ранчо, загоны, двери, Гордо. Апгрейды, Слаймопедия и достижения — личные у каждого.", _mutedStyle);

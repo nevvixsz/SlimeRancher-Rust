@@ -109,6 +109,7 @@ namespace SlimeCoop
 
         public static bool StartHost(int port, string password, string roomName, int maxPlayers, bool useUpnp)
         {
+            ClientProfileStore.SaveLocalPrefs();
             Disconnect();
 
             HostPort = Mathf.Clamp(port, 1024, 65535);
@@ -165,6 +166,7 @@ namespace SlimeCoop
 
         public static bool ConnectTo(string endpointOrCode, string password)
         {
+            ClientProfileStore.SaveLocalPrefs();
             Disconnect();
 
             IPEndPoint ep;

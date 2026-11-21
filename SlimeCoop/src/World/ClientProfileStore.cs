@@ -17,6 +17,58 @@ namespace SlimeCoop.World
         private static readonly AccessTools.FieldRef<PediaDirector, PediaModel> PediaModelRef =
             AccessTools.FieldRefAccess<PediaDirector, PediaModel>("pediaModel");
 
+        private static string GetSettingsPath()
+        {
+            string dir = Path.Combine(
+                Application.persistentDataPath,
+                "SRML", "Config", "slimecoop");
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "settings.cfg");
+        }
+
+        public static void LoadLocalPrefs()
+        {
+            try
+            {
+                string path = GetSettingsPath();
+                if (!File.Exists(path)) return;
+                string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    int eq = lines[i].IndexOf('=');
+                    if (eq <= 0) continue;
+                    string key = lines[i].Substring(0, eq).Trim();
+                    string val = lines[i].Substring(eq + 1).Trim();
+                    if (key == "nick" && !string.IsNullOrEmpty(val))
+                    {
+                        CoopSession.LocalNick = val.Length > 20 ? val.Substring(0, 20) : val;
+                    }
+                    else if (key == "color" && int.TryParse(val, out int col))
+                    {
+                        CoopSession.LocalColorIndex = Math.Abs(col) % 8;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        public static void SaveLocalPrefs()
+        {
+            try
+            {
+                string path = GetSettingsPath();
+                StringBuilder sb = new StringBuilder(128);
+                sb.Append("nick=").AppendLine((CoopSession.LocalNick ?? "SlimePlayer").Replace("\r", "").Replace("\n", ""));
+                sb.Append("color=").AppendLine(CoopSession.LocalColorIndex.ToString(CultureInfo.InvariantCulture));
+                File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+            }
+            catch
+            {
+            }
+        }
+
         private static string GetProfilePath(string hostServerId)
         {
             string safe = SanitizeId(hostServerId);
