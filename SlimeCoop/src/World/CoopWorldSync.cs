@@ -22,6 +22,9 @@ namespace SlimeCoop.World
         private static readonly AccessTools.FieldRef<LandPlotModel, GameObject> PlotModelGoRef =
             AccessTools.FieldRefAccess<LandPlotModel, GameObject>("gameObj");
 
+        private static readonly AccessTools.FieldRef<ActorModel, Transform> ActorTransformRef =
+            AccessTools.FieldRefAccess<ActorModel, Transform>("transform");
+
         private static readonly AccessTools.FieldRef<GordoEat, GordoModel> GordoModelRef =
             AccessTools.FieldRefAccess<GordoEat, GordoModel>("gordoModel");
 
@@ -125,11 +128,15 @@ namespace SlimeCoop.World
                 return true;
             }
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
-            if (ctx != null && ctx.GameModel != null && ctx.GameModel.AllActors().TryGetValue(actorId, out ActorModel am) && am != null && am.transform != null)
+            if (ctx != null && ctx.GameModel != null && ctx.GameModel.AllActors().TryGetValue(actorId, out ActorModel am) && am != null)
             {
-                go = am.transform.gameObject;
-                RegisterActor(actorId, go);
-                return true;
+                Transform tr = ActorTransformRef(am);
+                if (tr != null)
+                {
+                    go = tr.gameObject;
+                    RegisterActor(actorId, go);
+                    return true;
+                }
             }
             go = null;
             return false;
@@ -203,9 +210,11 @@ namespace SlimeCoop.World
             {
                 foreach (KeyValuePair<long, ActorModel> kv in ctx.GameModel.AllActors())
                 {
-                    if (kv.Value != null && kv.Value.transform != null)
+                    if (kv.Value == null) continue;
+                    Transform tr = ActorTransformRef(kv.Value);
+                    if (tr != null)
                     {
-                        RegisterActor(kv.Key, kv.Value.transform.gameObject);
+                        RegisterActor(kv.Key, tr.gameObject);
                     }
                 }
             }
@@ -590,7 +599,7 @@ namespace SlimeCoop.World
             NetSyncGuard.SuppressPersonalProgressDepth++;
             try
             {
-                GameObject go = ctx.GameModel.InstantiateActorWithoutNotify(actorId, prefab, setId, pos, rot, false);
+                GameObject go = ctx.GameModel.InstantiateActorWithoutNotify(actorId, prefab, setId, pos, rot);
                 if (go != null)
                 {
                     RegisterActor(actorId, go);
@@ -801,16 +810,18 @@ namespace SlimeCoop.World
             foreach (KeyValuePair<long, ActorModel> kv in ctx.GameModel.AllActors())
             {
                 ActorModel am = kv.Value;
-                if (am == null || am.transform == null || am.ident == Identifiable.Id.NONE || am.ident == Identifiable.Id.PLAYER) continue;
-                if ((am.transform.position - hostPos).sqrMagnitude > 140f * 140f) continue;
+                if (am == null || am.ident == Identifiable.Id.NONE || am.ident == Identifiable.Id.PLAYER) continue;
+                Transform tr = ActorTransformRef(am);
+                if (tr == null) continue;
+                if ((tr.position - hostPos).sqrMagnitude > 140f * 140f) continue;
 
                 w.Reset();
                 w.WriteByte(8); // ActorSpawn
                 w.WriteLong(kv.Key);
                 w.WriteInt((int)am.ident);
-                w.WriteVector3(am.transform.position);
-                w.WriteQuaternion(am.transform.rotation);
-                Rigidbody rb = am.transform.GetComponent<Rigidbody>();
+                w.WriteVector3(tr.position);
+                w.WriteQuaternion(tr.rotation);
+                Rigidbody rb = tr.GetComponent<Rigidbody>();
                 w.WriteVector3(rb != null ? rb.velocity : Vector3.zero);
                 w.WriteByte((byte)am.currRegionSetId);
                 sendReliable(w);

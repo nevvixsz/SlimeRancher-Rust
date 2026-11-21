@@ -130,7 +130,8 @@ namespace SlimeCoop.World
                 pModel.SetCurrency(250);
                 pModel.SetKeys(0);
                 pModel.SetUpgrades(new List<PlayerState.Upgrade>());
-                pModel.InitZoneMaps();
+                pModel.unlockedZoneMaps.Clear();
+                pModel.unlockedZoneMaps.Add(ZoneDirector.Zone.RANCH);
                 if (ctx.PlayerState.Ammo != null)
                 {
                     ctx.PlayerState.Ammo.Clear();
