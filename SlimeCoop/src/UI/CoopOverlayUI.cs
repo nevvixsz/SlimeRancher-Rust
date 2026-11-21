@@ -402,6 +402,7 @@ namespace SlimeCoop.UI
                 GUILayout.EndScrollView();
 
                 GUILayout.Label("UPnP статус: " + UpnpMapper.StatusText, _mutedStyle);
+                GUILayout.Label(string.Format("UDP пакеты: отправлено {0} | получено {1}", CoopSession.PacketsSent, CoopSession.PacketsReceived), _mutedStyle);
                 GUILayout.EndVertical();
             }
         }

@@ -44,7 +44,7 @@ namespace SlimeCoop
         {
             bool hasCtx = SRSingleton<SceneContext>.Instance != null;
             CoopLog.Info("SceneLoaded: '" + scene.name + "', hasSceneContext=" + hasCtx + ", role=" + CoopSession.Role);
-            if (hasCtx)
+            if (hasCtx && !string.Equals(scene.name, "MainMenu", System.StringComparison.OrdinalIgnoreCase))
             {
                 CoopSession.OnGameSceneLoaded();
             }

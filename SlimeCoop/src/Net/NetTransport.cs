@@ -347,6 +347,7 @@ namespace SlimeCoop.Net
                     int received = _socket.ReceiveFrom(_recvScratch, 0, _recvScratch.Length, SocketFlags.None, ref remoteEp);
                     if (received < HeaderSize) continue;
                     if (_recvScratch[0] != Magic0 || _recvScratch[1] != Magic1) continue;
+                    Interlocked.Increment(ref _packetsRecv);
 
                     IPEndPoint sender = (IPEndPoint)remoteEp;
                     PacketType type = (PacketType)_recvScratch[2];
