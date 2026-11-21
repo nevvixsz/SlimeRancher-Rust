@@ -236,7 +236,15 @@ namespace SlimeCoop.UI
             {
                 if (GUILayout.Button("Подключиться", _btnActiveStyle, GUILayout.Height(30f)))
                 {
-                    CoopSession.ConnectTo(_joinInput, _joinPassword);
+                    try
+                    {
+                        CoopSession.ConnectTo(_joinInput, _joinPassword);
+                    }
+                    catch (Exception ex)
+                    {
+                        CoopSession.StatusMessage = "Ошибка: " + ex.Message;
+                        ModMain.LogConsole?.LogError("SlimeCoop ConnectTo error: " + ex);
+                    }
                 }
             }
             else
@@ -319,11 +327,22 @@ namespace SlimeCoop.UI
             {
                 if (GUILayout.Button("Запустить сервер", _btnActiveStyle, GUILayout.Height(32f)))
                 {
-                    int port = 7777;
-                    int.TryParse(_hostPortStr, out port);
-                    if (CoopSession.StartHost(port, CoopSession.HostPassword, CoopSession.RoomName, CoopSession.MaxPlayers, CoopSession.UseUpnp))
+                    try
                     {
-                        _tab = 1;
+                        int port = 7777;
+                        if (!int.TryParse(_hostPortStr, out port) || port < 1024 || port > 65535)
+                        {
+                            port = 7777;
+                        }
+                        if (CoopSession.StartHost(port, CoopSession.HostPassword, CoopSession.RoomName, CoopSession.MaxPlayers, CoopSession.UseUpnp))
+                        {
+                            _tab = 1;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        CoopSession.StatusMessage = "Ошибка: " + ex.Message;
+                        ModMain.LogConsole?.LogError("SlimeCoop StartHost error: " + ex);
                     }
                 }
             }
