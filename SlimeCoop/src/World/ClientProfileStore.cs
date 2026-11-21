@@ -26,6 +26,62 @@ namespace SlimeCoop.World
             return Path.Combine(dir, "settings.cfg");
         }
 
+        private static string GetHostServersPath()
+        {
+            string dir = Path.Combine(
+                Application.persistentDataPath,
+                "SRML", "Config", "slimecoop");
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "host_servers.cfg");
+        }
+
+        public static string GetOrCreateHostServerId(string worldKey)
+        {
+            string key = string.IsNullOrEmpty(worldKey) ? "default" : worldKey.Trim();
+            try
+            {
+                string path = GetHostServersPath();
+                Dictionary<string, string> map = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (File.Exists(path))
+                {
+                    string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        int eq = lines[i].IndexOf('=');
+                        if (eq <= 0) continue;
+                        string k = lines[i].Substring(0, eq).Trim();
+                        string v = lines[i].Substring(eq + 1).Trim();
+                        if (!string.IsNullOrEmpty(k) && !string.IsNullOrEmpty(v))
+                        {
+                            map[k] = v;
+                        }
+                    }
+                }
+
+                if (map.TryGetValue(key, out string existing) && !string.IsNullOrEmpty(existing))
+                {
+                    return existing;
+                }
+
+                string created = "srv_" + Guid.NewGuid().ToString("N").Substring(0, 12);
+                map[key] = created;
+
+                StringBuilder sb = new StringBuilder(map.Count * 48);
+                foreach (KeyValuePair<string, string> kv in map)
+                {
+                    sb.Append(kv.Key.Replace("=", "_").Replace("\r", "").Replace("\n", ""))
+                      .Append('=')
+                      .AppendLine(kv.Value);
+                }
+                File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+                return created;
+            }
+            catch
+            {
+                return "srv_" + SanitizeId(key);
+            }
+        }
+
         public static void LoadLocalPrefs()
         {
             try
@@ -74,7 +130,7 @@ namespace SlimeCoop.World
             string safe = SanitizeId(hostServerId);
             string dir = Path.Combine(
                 Application.persistentDataPath,
-                "SRML", "Config", "slimecoop", "profiles");
+                "SRML", "Config", "slimecoop", "profiles_v2");
             Directory.CreateDirectory(dir);
             return Path.Combine(dir, safe + ".profile");
         }
@@ -102,11 +158,12 @@ namespace SlimeCoop.World
         {
             if (string.IsNullOrEmpty(hostServerId)) return;
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
-            if (ctx == null || ctx.PlayerState == null || ctx.PediaDirector == null) return;
+            if (ctx == null || ctx.PlayerState == null) return;
 
             PlayerModel pModel = PlayerModelRef(ctx.PlayerState);
-            PediaModel pedModel = PediaModelRef(ctx.PediaDirector);
-            if (pModel == null || pedModel == null) return;
+            if (pModel == null) return;
+
+            PediaModel pedModel = ctx.PediaDirector != null ? PediaModelRef(ctx.PediaDirector) : null;
 
             StringBuilder sb = new StringBuilder(1024);
             sb.Append("currency=").Append(pModel.currency).Append('\n');
@@ -148,12 +205,15 @@ namespace SlimeCoop.World
 
             // Personal Slimepedia
             sb.Append("pedia=");
-            bool firstPed = true;
-            foreach (PediaDirector.Id pid in pedModel.unlocked)
+            if (pedModel != null)
             {
-                if (!firstPed) sb.Append(',');
-                firstPed = false;
-                sb.Append((int)pid);
+                bool firstPed = true;
+                foreach (PediaDirector.Id pid in pedModel.unlocked)
+                {
+                    if (!firstPed) sb.Append(',');
+                    firstPed = false;
+                    sb.Append((int)pid);
+                }
             }
             sb.Append('\n');
 
@@ -161,34 +221,56 @@ namespace SlimeCoop.World
             {
                 File.WriteAllText(GetProfilePath(hostServerId), sb.ToString(), Encoding.UTF8);
             }
-            catch
+            catch (Exception ex)
             {
+                CoopLog.Warn("SaveCurrentClientProfile failed: " + ex.Message);
             }
         }
 
         public static void LoadOrInitClientProfile(string hostServerId)
         {
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
-            if (ctx == null || ctx.PlayerState == null || ctx.PediaDirector == null) return;
+            if (ctx == null || ctx.PlayerState == null)
+            {
+                CoopLog.Warn("LoadOrInitClientProfile: SceneContext/PlayerState is null");
+                return;
+            }
 
             PlayerModel pModel = PlayerModelRef(ctx.PlayerState);
-            PediaModel pedModel = PediaModelRef(ctx.PediaDirector);
-            if (pModel == null || pedModel == null) return;
+            if (pModel == null)
+            {
+                CoopLog.Warn("LoadOrInitClientProfile: PlayerModel is null");
+                return;
+            }
+
+            PediaModel pedModel = ctx.PediaDirector != null ? PediaModelRef(ctx.PediaDirector) : null;
 
             string path = GetProfilePath(hostServerId);
             if (!File.Exists(path))
             {
-                // Fresh personal character on this server (upgrades/pedia/inventory belong only to this player)
+                // Fresh personal character on this server: start cleanly with 250 newbucks, zero upgrades, empty vac
                 pModel.SetCurrency(250);
+                pModel.SetCurrencyEverCollected(250);
+                pModel.currencyDisplayOverride = null;
+                pModel.currencyDisplayDelta = 0;
                 pModel.SetKeys(0);
                 pModel.SetUpgrades(new List<PlayerState.Upgrade>());
                 pModel.unlockedZoneMaps.Clear();
                 pModel.unlockedZoneMaps.Add(ZoneDirector.Zone.RANCH);
+                ctx.PlayerState.SetHealth(ctx.PlayerState.GetMaxHealth());
+                ctx.PlayerState.SetEnergy(ctx.PlayerState.GetMaxEnergy());
+                ctx.PlayerState.SetRad(0);
                 if (ctx.PlayerState.Ammo != null)
                 {
                     ctx.PlayerState.Ammo.Clear();
                 }
-                pedModel.ResetUnlocked(ctx.PediaDirector.initUnlocked ?? new PediaDirector.Id[0]);
+                if (pedModel != null && ctx.PediaDirector != null)
+                {
+                    pedModel.ResetUnlocked(ctx.PediaDirector.initUnlocked ?? new PediaDirector.Id[0]);
+                }
+
+                SaveCurrentClientProfile(hostServerId);
+                CoopLog.Info("Initialized new client profile for serverId='" + hostServerId + "' with 250 currency");
                 return;
             }
 
@@ -205,14 +287,22 @@ namespace SlimeCoop.World
                     }
                 }
 
+                int loadedCur = 250;
                 if (kv.TryGetValue("currency", out string curStr) && int.TryParse(curStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int cur))
                 {
-                    pModel.SetCurrency(cur);
+                    loadedCur = Math.Max(0, cur);
                 }
+                pModel.SetCurrency(loadedCur);
+                pModel.SetCurrencyEverCollected(Math.Max(loadedCur, 250));
+                pModel.currencyDisplayOverride = null;
+                pModel.currencyDisplayDelta = 0;
+
+                int loadedKeys = 0;
                 if (kv.TryGetValue("keys", out string keyStr) && int.TryParse(keyStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int keys))
                 {
-                    pModel.SetKeys(keys);
+                    loadedKeys = Math.Max(0, keys);
                 }
+                pModel.SetKeys(loadedKeys);
 
                 List<PlayerState.Upgrade> upgrades = new List<PlayerState.Upgrade>();
                 if (kv.TryGetValue("upgrades", out string upgStr) && !string.IsNullOrEmpty(upgStr))
@@ -263,26 +353,36 @@ namespace SlimeCoop.World
                     }
                 }
 
-                pedModel.ResetUnlocked(ctx.PediaDirector.initUnlocked ?? new PediaDirector.Id[0]);
-                if (kv.TryGetValue("pedia", out string pedStr) && !string.IsNullOrEmpty(pedStr))
+                if (pedModel != null && ctx.PediaDirector != null)
                 {
-                    string[] parts = pedStr.Split(',');
-                    List<PediaDirector.Id> ids = new List<PediaDirector.Id>(parts.Length);
-                    for (int i = 0; i < parts.Length; i++)
+                    pedModel.ResetUnlocked(ctx.PediaDirector.initUnlocked ?? new PediaDirector.Id[0]);
+                    if (kv.TryGetValue("pedia", out string pedStr) && !string.IsNullOrEmpty(pedStr))
                     {
-                        if (int.TryParse(parts[i], out int val))
+                        string[] parts = pedStr.Split(',');
+                        List<PediaDirector.Id> ids = new List<PediaDirector.Id>(parts.Length);
+                        for (int i = 0; i < parts.Length; i++)
                         {
-                            ids.Add((PediaDirector.Id)val);
+                            if (int.TryParse(parts[i], out int val))
+                            {
+                                ids.Add((PediaDirector.Id)val);
+                            }
+                        }
+                        if (ids.Count > 0)
+                        {
+                            pedModel.Unlock(ids.ToArray());
                         }
                     }
-                    if (ids.Count > 0)
-                    {
-                        pedModel.Unlock(ids.ToArray());
-                    }
                 }
+
+                CoopLog.Info("Loaded existing client profile for serverId='" + hostServerId + "' currency=" + loadedCur);
             }
-            catch
+            catch (Exception ex)
             {
+                CoopLog.Warn("LoadOrInitClientProfile parse failed, resetting to 250: " + ex.Message);
+                pModel.SetCurrency(250);
+                pModel.SetCurrencyEverCollected(250);
+                pModel.currencyDisplayOverride = null;
+                pModel.currencyDisplayDelta = 0;
             }
         }
     }
