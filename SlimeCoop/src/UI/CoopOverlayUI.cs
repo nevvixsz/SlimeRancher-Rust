@@ -49,6 +49,10 @@ namespace SlimeCoop.UI
 
         public static void SetOpen(bool open)
         {
+            if (open && !CoopSession.IsInGameSession())
+            {
+                return;
+            }
             if (_isOpen == open) return;
             _isOpen = open;
 
@@ -146,7 +150,7 @@ namespace SlimeCoop.UI
 
         public static void Draw()
         {
-            if (!_isOpen) return;
+            if (!_isOpen || !CoopSession.IsInGameSession()) return;
 
             EnsureStyles();
 
@@ -267,7 +271,7 @@ namespace SlimeCoop.UI
             GUILayout.Space(6f);
             GUILayout.BeginVertical(_boxStyle);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Серверы в локальной сети / Radmin VPN:", _labelStyle);
+            GUILayout.Label("Серверы в локальной / VPN-сети:", _labelStyle);
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("Обновить", _btnStyle, GUILayout.Width(95f)))
             {

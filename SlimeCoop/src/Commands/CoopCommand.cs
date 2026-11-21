@@ -20,6 +20,11 @@ namespace SlimeCoop.Commands
         {
             if (args == null || args.Length == 0)
             {
+                if (!CoopSession.IsInGameSession())
+                {
+                    ModMain.LogConsole?.LogWarning("Меню SlimeCoop (F9) открывается только внутри игровой сессии!");
+                    return true;
+                }
                 CoopOverlayUI.Toggle();
                 return true;
             }
@@ -27,6 +32,11 @@ namespace SlimeCoop.Commands
             string sub = args[0].Trim().ToLowerInvariant();
             if (sub == "ui" || sub == "окно" || sub == "menu")
             {
+                if (!CoopSession.IsInGameSession())
+                {
+                    ModMain.LogConsole?.LogWarning("Меню SlimeCoop (F9) открывается только внутри игровой сессии!");
+                    return true;
+                }
                 CoopOverlayUI.Toggle();
                 return true;
             }
