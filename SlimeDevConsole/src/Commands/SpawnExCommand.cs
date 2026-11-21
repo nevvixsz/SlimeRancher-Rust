@@ -203,8 +203,7 @@ namespace SlimeDevConsole.Commands
                         if (g != null && ctx.GameModel != null)
                         {
                             string gid = "devgadget_" + Guid.NewGuid().ToString("N").Substring(0, 10);
-                            IdHandler ih = go.GetComponent<IdHandler>();
-                            if (ih != null) ih.id = gid;
+                            CommandHelpers.AssignUniquePersistenceId(go, gid);
                         }
                         ok++;
                     }
@@ -306,11 +305,7 @@ namespace SlimeDevConsole.Commands
                 }
 
                 string uniqueId = "devgordo_" + Guid.NewGuid().ToString("N").Substring(0, 12);
-                IdHandler idHandler = gordoObj.GetComponent<IdHandler>();
-                if (idHandler != null)
-                {
-                    idHandler.id = uniqueId;
-                }
+                CommandHelpers.AssignUniquePersistenceId(gordoObj, uniqueId);
 
                 if (ctx.GameModel != null)
                 {
