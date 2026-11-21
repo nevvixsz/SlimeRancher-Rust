@@ -432,7 +432,7 @@ namespace SlimeCoop.World
             }
         }
 
-        public static void ApplySiloSlot(string plotId, int slotIdx, Identifiable.Id itemId, int count)
+        public static void ApplySiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int count)
         {
             LandPlotLocation loc = FindPlot(plotId);
             if (loc == null) return;
@@ -440,12 +440,23 @@ namespace SlimeCoop.World
             SiloStorage[] silos = loc.GetComponentsInChildren<SiloStorage>(true);
             if (silos == null || silos.Length == 0) return;
 
+            SiloStorage target = null;
+            for (int i = 0; i < silos.Length; i++)
+            {
+                if (silos[i] != null && silos[i].type == storageType)
+                {
+                    target = silos[i];
+                    break;
+                }
+            }
+            if (target == null) return;
+
             NetSyncGuard.ApplyingRemoteDepth++;
             NetSyncGuard.SuppressPersonalProgressDepth++;
             try
             {
-                Ammo ammo = silos[0].GetRelevantAmmo();
-                if (ammo == null) return;
+                Ammo ammo = target.GetRelevantAmmo();
+                if (ammo == null || slotIdx < 0 || slotIdx >= ammo.GetUsableSlotCount()) return;
 
                 ammo.Clear(slotIdx);
                 if (itemId != Identifiable.Id.NONE && count > 0)
@@ -457,6 +468,18 @@ namespace SlimeCoop.World
             {
                 NetSyncGuard.SuppressPersonalProgressDepth--;
                 NetSyncGuard.ApplyingRemoteDepth--;
+            }
+        }
+
+        public static void ApplyPlotCollectorActivate(string plotId)
+        {
+            LandPlotLocation loc = FindPlot(plotId);
+            if (loc == null) return;
+
+            PlortCollector collector = loc.GetComponentInChildren<PlortCollector>(false);
+            if (collector != null && collector.isActiveAndEnabled)
+            {
+                collector.StartCollection();
             }
         }
 
@@ -798,25 +821,37 @@ namespace SlimeCoop.World
                     w.WriteInt((int)upg);
                 }
 
-                // Silo slots if present
+                // Silo storages if present (e.g. Corral has FOOD feeder + PLORT collector)
                 LandPlotLocation loc = FindPlot(kv.Key);
                 if (loc != null)
                 {
                     SiloStorage[] silos = loc.GetComponentsInChildren<SiloStorage>(true);
-                    if (silos != null && silos.Length > 0 && silos[0].GetRelevantAmmo() != null)
+                    List<SiloStorage> validSilos = new List<SiloStorage>();
+                    if (silos != null)
                     {
-                        Ammo a = silos[0].GetRelevantAmmo();
+                        for (int si = 0; si < silos.Length; si++)
+                        {
+                            if (silos[si] != null && silos[si].GetRelevantAmmo() != null)
+                            {
+                                validSilos.Add(silos[si]);
+                            }
+                        }
+                    }
+
+                    int siloCount = Math.Min(16, validSilos.Count);
+                    w.WriteByte((byte)siloCount);
+                    for (int si = 0; si < siloCount; si++)
+                    {
+                        SiloStorage ss = validSilos[si];
+                        Ammo a = ss.GetRelevantAmmo();
                         int sc = Math.Min(12, a.GetUsableSlotCount());
+                        w.WriteByte((byte)ss.type);
                         w.WriteByte((byte)sc);
                         for (int s = 0; s < sc; s++)
                         {
                             w.WriteInt((int)a.GetSlotName(s));
                             w.WriteInt(a.GetSlotCount(s));
                         }
-                    }
-                    else
-                    {
-                        w.WriteByte(0);
                     }
                 }
                 else
@@ -951,12 +986,17 @@ namespace SlimeCoop.World
                     {
                         ApplyPlotPlant(plotId, cropId);
                     }
-                    byte slotCount = r.ReadByte();
-                    for (int s = 0; s < slotCount; s++)
+                    byte siloCount = r.ReadByte();
+                    for (int si = 0; si < siloCount; si++)
                     {
-                        Identifiable.Id itemId = (Identifiable.Id)r.ReadInt();
-                        int cnt = r.ReadInt();
-                        ApplySiloSlot(plotId, s, itemId, cnt);
+                        SiloStorage.StorageType storageType = (SiloStorage.StorageType)r.ReadByte();
+                        byte slotCount = r.ReadByte();
+                        for (int s = 0; s < slotCount; s++)
+                        {
+                            Identifiable.Id itemId = (Identifiable.Id)r.ReadInt();
+                            int cnt = r.ReadInt();
+                            ApplySiloSlot(plotId, storageType, s, itemId, cnt);
+                        }
                     }
                     break;
                 case 3: // Door

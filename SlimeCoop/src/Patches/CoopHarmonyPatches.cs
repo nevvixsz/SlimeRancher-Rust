@@ -191,6 +191,7 @@ namespace SlimeCoop.Patches
 
             SyncWriter.Reset();
             SyncWriter.WriteString(loc.id);
+            SyncWriter.WriteByte((byte)silo.type);
             SyncWriter.WriteByte((byte)slotIdx);
             SyncWriter.WriteInt((int)ammo.GetSlotName(slotIdx));
             SyncWriter.WriteInt(ammo.GetSlotCount(slotIdx));
@@ -220,6 +221,74 @@ namespace SlimeCoop.Patches
                 for (int i = 0; i < count; i++)
                 {
                     SyncSiloSlot(__instance, i);
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(SiloCatcher), "Remove")]
+        internal static class SiloRemoveSyncPatch
+        {
+            private static void Postfix(SiloCatcher __instance, SiloStorage ___storageSilo, bool __result)
+            {
+                if (!__result || !CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || __instance == null || ___storageSilo == null) return;
+                if (__instance.type == SiloCatcher.Type.SILO_DEFAULT || __instance.type == SiloCatcher.Type.SILO_OUTPUT_ONLY)
+                {
+                    SyncSiloSlot(___storageSilo, __instance.slotIdx);
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(PlortCollector), "DoCollection")]
+        internal static class PlortCollectorDoCollectionPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(PlortCollector), nameof(PlortCollector.FastForward))]
+        internal static class PlortCollectorFastForwardPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(PlortCollectorActivator), nameof(PlortCollectorActivator.Activate))]
+        internal static class PlortCollectorActivatePatch
+        {
+            private static void Prefix(PlortCollectorActivator __instance, float ___nextAllowedActivationTime)
+            {
+                if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || __instance == null) return;
+                if (___nextAllowedActivationTime > Time.time) return;
+
+                LandPlotLocation loc = __instance.GetComponentInParent<LandPlotLocation>();
+                if (loc == null || string.IsNullOrEmpty(loc.id)) return;
+
+                SyncWriter.Reset();
+                SyncWriter.WriteString(loc.id);
+                CoopSession.SendToHostReliable(PacketType.PlotCollectorActivate, SyncWriter);
+            }
+        }
+
+        [HarmonyPatch(typeof(SlimeFeeder), "ProcessFeedOperation")]
+        internal static class SlimeFeederSyncPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+
+            private static void Postfix(SiloStorage ___storage)
+            {
+                if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote && ___storage != null)
+                {
+                    SyncSiloSlot(___storage, 0);
                 }
             }
         }

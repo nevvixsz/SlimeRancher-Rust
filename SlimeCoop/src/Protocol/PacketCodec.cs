@@ -52,6 +52,7 @@ namespace SlimeCoop.Protocol
         PlotUpgrade = 41,
         PlotPlant = 42,
         SiloSlotSync = 43,
+        PlotCollectorActivate = 44,
 
         // World Interactables
         DoorState = 50,

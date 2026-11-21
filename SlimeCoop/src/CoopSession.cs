@@ -908,6 +908,29 @@ namespace SlimeCoop
                     BroadcastReliable(PacketType.PlotPlant, SharedWriter, sender);
                     break;
 
+                case PacketType.SiloSlotSync:
+                    if (peer == null) return;
+                    string sPlotId = r.ReadString();
+                    SiloStorage.StorageType sType = (SiloStorage.StorageType)r.ReadByte();
+                    byte sSlot = r.ReadByte();
+                    Identifiable.Id sItem = (Identifiable.Id)r.ReadInt();
+                    int sCount = r.ReadInt();
+                    CoopWorldSync.ApplySiloSlot(sPlotId, sType, sSlot, sItem, sCount);
+                    SharedWriter.Reset();
+                    SharedWriter.WriteString(sPlotId);
+                    SharedWriter.WriteByte((byte)sType);
+                    SharedWriter.WriteByte(sSlot);
+                    SharedWriter.WriteInt((int)sItem);
+                    SharedWriter.WriteInt(sCount);
+                    BroadcastReliable(PacketType.SiloSlotSync, SharedWriter, sender);
+                    break;
+
+                case PacketType.PlotCollectorActivate:
+                    if (peer == null) return;
+                    string pcPlotId = r.ReadString();
+                    CoopWorldSync.ApplyPlotCollectorActivate(pcPlotId);
+                    break;
+
                 case PacketType.DoorState:
                     if (peer == null) return;
                     string dId = r.ReadString();
@@ -1191,7 +1214,7 @@ namespace SlimeCoop
                     break;
 
                 case PacketType.SiloSlotSync:
-                    CoopWorldSync.ApplySiloSlot(r.ReadString(), r.ReadByte(), (Identifiable.Id)r.ReadInt(), r.ReadInt());
+                    CoopWorldSync.ApplySiloSlot(r.ReadString(), (SiloStorage.StorageType)r.ReadByte(), r.ReadByte(), (Identifiable.Id)r.ReadInt(), r.ReadInt());
                     break;
 
                 case PacketType.DoorState:
