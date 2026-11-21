@@ -17,8 +17,10 @@ namespace SlimeCoop
         public override void PreLoad()
         {
             LogConsole = ConsoleInstance;
+            CoopLog.Initialize(Application.persistentDataPath);
             HarmonyInstance.PatchAll(typeof(ModMain).Assembly);
             CoopHarmonyPatches.Install(HarmonyInstance);
+            CoopLog.Info("Harmony patches installed.");
         }
 
         public override void Load()
@@ -40,7 +42,9 @@ namespace SlimeCoop
 
         private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            if (SRSingleton<SceneContext>.Instance != null)
+            bool hasCtx = SRSingleton<SceneContext>.Instance != null;
+            CoopLog.Info("SceneLoaded: '" + scene.name + "', hasSceneContext=" + hasCtx + ", role=" + CoopSession.Role);
+            if (hasCtx)
             {
                 CoopSession.OnGameSceneLoaded();
             }
