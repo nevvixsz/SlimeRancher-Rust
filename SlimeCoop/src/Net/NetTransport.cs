@@ -96,10 +96,12 @@ namespace SlimeCoop.Net
                     Name = "SlimeCoop_UdpRecv"
                 };
                 _recvThread.Start();
+                CoopLog.Info("NetTransport.Start OK: bound 0.0.0.0:" + LocalPort + " (requested " + port + ")");
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                CoopLog.Error("NetTransport.Start(" + port + ") FAILED: " + ex.GetType().Name + ": " + ex.Message);
                 Stop();
                 return false;
             }
@@ -207,9 +209,11 @@ namespace SlimeCoop.Net
             try
             {
                 _socket.SendTo(frame, frame.Length, SocketFlags.None, new IPEndPoint(IPAddress.Broadcast, targetPort));
+                CoopLog.Info("BroadcastDiscovery -> 255.255.255.255:" + targetPort);
             }
-            catch
+            catch (Exception ex)
             {
+                CoopLog.Warn("BroadcastDiscovery 255.255.255.255:" + targetPort + " error: " + ex.Message);
             }
 
             List<IPAddress> subnetBroadcasts = RoomCode.GetSubnetBroadcastAddresses();
@@ -218,9 +222,11 @@ namespace SlimeCoop.Net
                 try
                 {
                     _socket.SendTo(frame, frame.Length, SocketFlags.None, new IPEndPoint(subnetBroadcasts[i], targetPort));
+                    CoopLog.Info("BroadcastDiscovery -> " + subnetBroadcasts[i] + ":" + targetPort);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    CoopLog.Warn("BroadcastDiscovery " + subnetBroadcasts[i] + ":" + targetPort + " error: " + ex.Message);
                 }
             }
         }
@@ -261,7 +267,12 @@ namespace SlimeCoop.Net
                     {
                         for (int i = 0; i < expired.Count; i++)
                         {
-                            peer.Outgoing.Remove(expired[i]);
+                            ushort expSeq = expired[i];
+                            if (peer.Outgoing.TryGetValue(expSeq, out PendingReliable prExp) && prExp.Length > 2)
+                            {
+                                CoopLog.Warn("Reliable packet timeout (no ACK after 45 retries): to=" + kv.Key + ", type=" + (PacketType)prExp.Frame[2] + ", seq=" + expSeq);
+                            }
+                            peer.Outgoing.Remove(expSeq);
                         }
                     }
                 }
@@ -311,8 +322,13 @@ namespace SlimeCoop.Net
             {
                 s.SendTo(data, len, SocketFlags.None, target);
             }
-            catch
+            catch (SocketException sex)
             {
+                CoopLog.Warn("SendRaw SocketException to " + target + ": code=" + sex.SocketErrorCode + " (" + sex.Message + ")");
+            }
+            catch (Exception ex)
+            {
+                CoopLog.Warn("SendRaw error to " + target + ": " + ex.Message);
             }
         }
 
@@ -413,9 +429,15 @@ namespace SlimeCoop.Net
                         Length = payloadLen
                     });
                 }
-                catch
+                catch (SocketException sex)
                 {
                     if (!_running) break;
+                    CoopLog.Warn("RecvLoop SocketException: code=" + sex.SocketErrorCode + " (" + sex.Message + ")");
+                }
+                catch (Exception ex)
+                {
+                    if (!_running) break;
+                    CoopLog.Warn("RecvLoop error: " + ex.Message);
                 }
             }
         }

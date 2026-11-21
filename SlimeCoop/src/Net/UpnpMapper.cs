@@ -28,16 +28,19 @@ namespace SlimeCoop.Net
                     if (!DiscoverGateway(out string ctrlUrl, out string srvType))
                     {
                         StatusText = "UPnP роутер не найден (используй Radmin VPN / LAN / прямой IP)";
+                        CoopLog.Warn("UPnP: gateway not found");
                         return;
                     }
 
                     _controlUrl = ctrlUrl;
                     _serviceType = srvType;
+                    CoopLog.Info("UPnP: gateway found ctrlUrl=" + ctrlUrl + ", service=" + srvType);
 
                     string localIp = GetLocalIpv4ToGateway();
                     if (string.IsNullOrEmpty(localIp))
                     {
                         StatusText = "Не определён локальный IPv4";
+                        CoopLog.Warn("UPnP: local IPv4 not resolved");
                         return;
                     }
 
@@ -49,15 +52,18 @@ namespace SlimeCoop.Net
                         StatusText = string.IsNullOrEmpty(ExternalIp)
                             ? ("UPnP порт " + port + " открыт")
                             : ("UPnP OK -> " + ExternalIp + ":" + port);
+                        CoopLog.Info("UPnP OK: local=" + localIp + ":" + port + ", ext=" + ExternalIp);
                     }
                     else
                     {
                         StatusText = "Роутер отклонил UPnP (используй Radmin VPN или пробрось UDP " + port + ")";
+                        CoopLog.Warn("UPnP AddPortMapping failed for " + localIp + ":" + port);
                     }
                 }
                 catch (Exception ex)
                 {
                     StatusText = "UPnP ошибка: " + ex.Message;
+                    CoopLog.Error("UPnP exception: " + ex);
                 }
             });
         }

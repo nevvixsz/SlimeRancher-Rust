@@ -78,6 +78,9 @@ namespace SlimeCoop
         private static float _nextKeepAliveTime;
         private static float _nextProfileAutoSaveTime;
         private static bool _clientProfileLoaded;
+        private static bool _clientHandshakeDone;
+        private static float _connectStartTime;
+        private static float _nextHelloRetryTime;
         private static PlayerZoneTracker _cachedZoneTracker;
 
         private static ZoneDirector.Zone GetLocalZone(SceneContext ctx)
@@ -143,6 +146,9 @@ namespace SlimeCoop
             {
                 HostEndpoints.Add(eps[i]);
                 if (!string.IsNullOrEmpty(eps[i].RoomCode)) HostRoomCodes.Add(eps[i].RoomCode);
+                string tag = eps[i].IsVirtualHypervisor ? "VIRT" : (eps[i].IsVpn ? "VPN" : "LAN");
+                CoopLog.Info(string.Format("Host adapter [{0}] '{1}' -> {2}:{3} (code={4})",
+                    tag, eps[i].InterfaceName, eps[i].Ip, eps[i].Port, eps[i].RoomCode));
             }
 
             if (UseUpnp)
@@ -151,6 +157,7 @@ namespace SlimeCoop
             }
 
             StatusMessage = "Сервер запущен на UDP :" + HostPort;
+            CoopLog.Info("StartHost OK: room='" + RoomName + "', port=" + HostPort + ", hasPass=" + (!string.IsNullOrEmpty(HostPassword)) + ", serverId=" + HostServerId);
             AddChat("Система", "Сервер создан! Код комнаты: " + GetPrimaryRoomCode(), true);
 
             // If currently in main menu, auto-start/continue game on host
@@ -171,16 +178,19 @@ namespace SlimeCoop
             ClientProfileStore.SaveLocalPrefs();
             Disconnect();
 
+            CoopLog.Info("ConnectTo requested: input='" + endpointOrCode + "', nick='" + LocalNick + "', hasPass=" + (!string.IsNullOrEmpty(password)));
             IPEndPoint ep;
             if (!RoomCode.TryParseEndpoint(endpointOrCode, 7777, out ep))
             {
                 StatusMessage = "Неверный код комнаты или IP:порт";
+                CoopLog.Warn("ConnectTo failed: TryParseEndpoint returned false for '" + endpointOrCode + "'");
                 return false;
             }
 
             if (!Transport.Start(0))
             {
                 StatusMessage = "Ошибка создания UDP сокета";
+                CoopLog.Error("ConnectTo failed: Transport.Start(0) returned false");
                 return false;
             }
 
@@ -188,8 +198,12 @@ namespace SlimeCoop
             _serverEp = ep;
             _pendingJoinPass = password ?? string.Empty;
             _clientProfileLoaded = false;
+            _clientHandshakeDone = false;
+            _connectStartTime = Time.unscaledTime;
+            _nextHelloRetryTime = _connectStartTime + 1.5f;
             StatusMessage = "Подключение к " + ep + "...";
 
+            CoopLog.Info("Sending Hello to " + _serverEp + " from local UDP :" + Transport.LocalPort);
             SharedWriter.Reset();
             SharedWriter.WriteInt(1); // Protocol version
             Transport.SendReliable(_serverEp, PacketType.Hello, SharedWriter);
@@ -198,6 +212,10 @@ namespace SlimeCoop
 
         public static void Disconnect()
         {
+            if (Role != CoopRole.None)
+            {
+                CoopLog.Info("Disconnect called (previous role=" + Role + ")");
+            }
             if (Role == CoopRole.Client && _clientProfileLoaded && !string.IsNullOrEmpty(HostServerId))
             {
                 ClientProfileStore.SaveCurrentClientProfile(HostServerId);
@@ -220,6 +238,7 @@ namespace SlimeCoop
             Role = CoopRole.None;
             WaitingWorldLoad = false;
             _clientProfileLoaded = false;
+            _clientHandshakeDone = false;
             _serverEp = null;
             ConnectedPeers.Clear();
             PeersByEp.Clear();
@@ -234,6 +253,7 @@ namespace SlimeCoop
 
         public static void RefreshLanDiscovery()
         {
+            CoopLog.Info("RefreshLanDiscovery called (isActive=" + IsActive + ", localPort=" + Transport.LocalPort + ")");
             if (!Transport.IsActive)
             {
                 Transport.Start(0);
@@ -248,6 +268,7 @@ namespace SlimeCoop
             _cachedZoneTracker = null;
             if (!IsActive) return;
 
+            CoopLog.Info("OnGameSceneLoaded: role=" + Role + ", waitingWorldLoad=" + WaitingWorldLoad);
             CoopWorldSync.RebuildSceneObjectCaches();
             if (IsHost)
             {
@@ -286,6 +307,7 @@ namespace SlimeCoop
 
             if (_serverEp != null)
             {
+                CoopLog.Info("Client sending RequestSnapshot to " + _serverEp);
                 SharedWriter.Reset();
                 Transport.SendReliable(_serverEp, PacketType.RequestSnapshot, SharedWriter);
             }
@@ -294,8 +316,13 @@ namespace SlimeCoop
         private static void EnsureWorldLoadedForCoop(bool isClientSandbox)
         {
             GameContext gctx = SRSingleton<GameContext>.Instance;
-            if (gctx == null || gctx.AutoSaveDirector == null) return;
+            if (gctx == null || gctx.AutoSaveDirector == null)
+            {
+                CoopLog.Error("EnsureWorldLoadedForCoop: GameContext/AutoSaveDirector is null!");
+                return;
+            }
 
+            CoopLog.Info("EnsureWorldLoadedForCoop: isClientSandbox=" + isClientSandbox);
             WaitingWorldLoad = true;
             AutoSaveDirector asd = gctx.AutoSaveDirector;
 
@@ -304,15 +331,22 @@ namespace SlimeCoop
                 GameData.Summary summary = asd.GetSaveToContinue();
                 if (summary != null)
                 {
-                    asd.BeginLoad(summary.name, summary.saveName, () => { StatusMessage = "Ошибка загрузки мира"; });
+                    CoopLog.Info("Loading host continue save: " + summary.name + " / " + summary.saveName);
+                    asd.BeginLoad(summary.name, summary.saveName, () =>
+                    {
+                        StatusMessage = "Ошибка загрузки мира";
+                        CoopLog.Error("BeginLoad failed for " + summary.saveName);
+                    });
                     return;
                 }
             }
 
             string name = isClientSandbox ? "SlimeCoop_ClientSandbox" : "SlimeCoop_HostWorld";
+            CoopLog.Info("Calling LoadNewGame: " + name);
             asd.LoadNewGame(name, Identifiable.Id.PINK_SLIME, PlayerState.GameMode.CLASSIC, () =>
             {
                 StatusMessage = "Ошибка создания мира";
+                CoopLog.Error("LoadNewGame failed for " + name);
             });
         }
 
@@ -452,7 +486,28 @@ namespace SlimeCoop
             }
             else if (IsClient)
             {
-                if (now >= _nextKeepAliveTime && _serverEp != null)
+                if (!_clientHandshakeDone && _serverEp != null)
+                {
+                    int elapsed = Mathf.Max(0, (int)(now - _connectStartTime));
+                    if (elapsed >= 6)
+                    {
+                        StatusMessage = "Нет ответа от " + _serverEp + " — проверьте VPN IP/код и брандмауэр хоста (UDP)!";
+                    }
+                    else
+                    {
+                        StatusMessage = "Подключение к " + _serverEp + "... (" + elapsed + "с)";
+                    }
+
+                    if (now >= _nextHelloRetryTime)
+                    {
+                        _nextHelloRetryTime = now + 2.0f;
+                        SharedWriter.Reset();
+                        SharedWriter.WriteInt(1);
+                        Transport.SendReliable(_serverEp, PacketType.Hello, SharedWriter);
+                    }
+                }
+
+                if (_clientHandshakeDone && now >= _nextKeepAliveTime && _serverEp != null)
                 {
                     _nextKeepAliveTime = now + 2.5f;
                     SharedWriter.Reset();
@@ -521,6 +576,7 @@ namespace SlimeCoop
             {
                 if (IsHost)
                 {
+                    CoopLog.Info("Host received LanDiscoveryReq from " + pkt.Sender);
                     SharedWriter.Reset();
                     SharedWriter.WriteString(RoomName);
                     SharedWriter.WriteByte((byte)(ConnectedPeers.Count + 1));
@@ -540,6 +596,7 @@ namespace SlimeCoop
                 bool hasPass = r.ReadBool();
                 int hostPort = r.ReadInt();
                 IPEndPoint srvEp = new IPEndPoint(pkt.Sender.Address, hostPort > 0 ? hostPort : pkt.Sender.Port);
+                CoopLog.Info("Client received LanDiscoveryResp from " + pkt.Sender + " -> srvEp=" + srvEp + ", room='" + rName + "'");
 
                 LanServerEntry existing = null;
                 for (int i = 0; i < DiscoveredServers.Count; i++)
@@ -585,6 +642,7 @@ namespace SlimeCoop
             {
                 case PacketType.Hello:
                     int protoVer = r.ReadInt();
+                    CoopLog.Info("Host received Hello from " + sender + " (proto=" + protoVer + ")");
                     if (protoVer != 1)
                     {
                         SharedWriter.Reset();
@@ -604,6 +662,7 @@ namespace SlimeCoop
                     string nick = r.ReadString();
                     int colorIdx = r.ReadInt();
                     string passHash = r.ReadString();
+                    CoopLog.Info("Host received JoinRequest from " + sender + " nick='" + nick + "'");
 
                     if (ConnectedPeers.Count + 1 >= MaxPlayers)
                     {
@@ -661,12 +720,16 @@ namespace SlimeCoop
 
                 case PacketType.RequestSnapshot:
                     if (peer == null) return;
+                    CoopLog.Info("Host sending WorldSnapshot to " + peer.Name + " (" + sender + ")");
+                    int chunkCount = 0;
                     CoopWorldSync.SendFullSnapshotToClient(chunk =>
                     {
+                        chunkCount++;
                         Transport.SendReliable(sender, PacketType.WorldSnapshotChunk, chunk);
                     });
                     SharedWriter.Reset();
                     Transport.SendReliable(sender, PacketType.WorldSnapshotEnd, SharedWriter);
+                    CoopLog.Info("Host sent WorldSnapshot (" + chunkCount + " chunks) to " + peer.Name);
                     break;
 
                 case PacketType.Ping:
@@ -874,6 +937,7 @@ namespace SlimeCoop
                 case PacketType.AuthChallenge:
                     bool requiresPass = r.ReadBool();
                     string challenge = r.ReadString();
+                    CoopLog.Info("Client received AuthChallenge from " + sender + " (requiresPass=" + requiresPass + ")");
                     if (requiresPass && string.IsNullOrEmpty(_pendingJoinPass))
                     {
                         StatusMessage = "Сервер требует пароль! Введите пароль и подключитесь снова.";
@@ -890,6 +954,7 @@ namespace SlimeCoop
 
                 case PacketType.JoinReject:
                     string reason = r.ReadString();
+                    CoopLog.Warn("Client received JoinReject: " + reason);
                     StatusMessage = "Отказ: " + reason;
                     AddChat("Система", StatusMessage, true);
                     Disconnect();
@@ -897,10 +962,12 @@ namespace SlimeCoop
                     break;
 
                 case PacketType.JoinAccept:
+                    _clientHandshakeDone = true;
                     LocalPlayerId = r.ReadInt();
                     HostServerId = r.ReadString();
                     ShareMarketIncome = r.ReadBool();
                     RoomName = r.ReadString();
+                    CoopLog.Info("Client received JoinAccept! playerId=" + LocalPlayerId + ", serverId=" + HostServerId + ", room='" + RoomName + "'");
                     StatusMessage = "Подключено к '" + RoomName + "'";
                     AddChat("Система", "Вы подключились к '" + RoomName + "'! Ваш прогресс апгрейдов, Слаймопедии и достижений личный.", true);
 
@@ -980,6 +1047,7 @@ namespace SlimeCoop
                     break;
 
                 case PacketType.WorldSnapshotEnd:
+                    CoopLog.Info("Client received WorldSnapshotEnd (ranch synced).");
                     AddChat("Система", "Общее ранчо синхронизировано!", true);
                     break;
 
