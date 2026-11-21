@@ -7,24 +7,35 @@ using System.Text;
 
 namespace SlimeCoop.Net
 {
+    internal struct NetworkEndpointEntry
+    {
+        public string InterfaceName;
+        public string Ip;
+        public int Port;
+        public string RoomCode;
+        public bool IsVpn;
+        public bool IsVirtualHypervisor;
+    }
+
     internal static class RoomCode
     {
-        // Crockford-like readable 32-char alphabet (no 0/O, 1/I/L)
-        private const string Alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789C";
+        // Standard Crockford Base32 (32 strictly unique chars: 0-9 + 22 letters, no I/L/O/U)
+        private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
         private static readonly int[] ReverseLookup = BuildReverse();
 
         private static int[] BuildReverse()
         {
             int[] map = new int[128];
             for (int i = 0; i < map.Length; i++) map[i] = -1;
-            for (int i = 0; i < 32; i++)
+            for (int i = 0; i < Alphabet.Length; i++)
             {
                 char c = Alphabet[i];
                 if (c < 128) map[c] = i;
             }
-            // Friendly aliases
-            map['0'] = map['O'] >= 0 ? map['O'] : 0;
-            map['1'] = map['I'] >= 0 ? map['I'] : 0;
+            // Friendly human-typing aliases
+            map['O'] = map['0'];
+            map['I'] = map['1'];
+            map['L'] = map['1'];
             return map;
         }
 
@@ -165,10 +176,12 @@ namespace SlimeCoop.Net
             return false;
         }
 
-        public static List<string> GetLocalAndVpnAddresses()
+        public static List<NetworkEndpointEntry> GetNetworkEndpoints(int port)
         {
-            List<string> preferredVpn = new List<string>();
-            List<string> lan = new List<string>();
+            List<NetworkEndpointEntry> vpnList = new List<NetworkEndpointEntry>();
+            List<NetworkEndpointEntry> lanList = new List<NetworkEndpointEntry>();
+            List<NetworkEndpointEntry> virtualList = new List<NetworkEndpointEntry>();
+            HashSet<string> seenIps = new HashSet<string>();
 
             try
             {
@@ -183,24 +196,113 @@ namespace SlimeCoop.Net
                     if (props == null) continue;
 
                     string nameLower = (nic.Name + " " + nic.Description).ToLowerInvariant();
-                    bool isVpn = nameLower.Contains("radmin") || nameLower.Contains("hamachi") ||
+                    bool isHypervisor = nameLower.Contains("vethernet") || nameLower.Contains("hyper-v") ||
+                                        nameLower.Contains("wsl") || nameLower.Contains("docker") ||
+                                        nameLower.Contains("vmware") || nameLower.Contains("virtualbox") ||
+                                        nameLower.Contains("vbox");
+
+                    bool isVpn = !isHypervisor && (
+                                 nameLower.Contains("radmin") || nameLower.Contains("hamachi") ||
                                  nameLower.Contains("zerotier") || nameLower.Contains("tailscale") ||
-                                 nameLower.Contains("wireguard") || nameLower.Contains("tap") ||
-                                 nameLower.Contains("tun");
+                                 nameLower.Contains("wireguard") || nameLower.Contains("amnezia") ||
+                                 nameLower.Contains("openvpn") || nameLower.Contains("vpn") ||
+                                 nameLower.Contains("wintun") || nameLower.Contains("tap") ||
+                                 nameLower.Contains("tun"));
 
                     foreach (UnicastIPAddressInformation uni in props.UnicastAddresses)
                     {
                         if (uni.Address.AddressFamily != AddressFamily.InterNetwork) continue;
                         string s = uni.Address.ToString();
-                        if (s.StartsWith("169.254.")) continue;
+                        if (s.StartsWith("169.254.") || !seenIps.Add(s)) continue;
 
-                        if (isVpn || s.StartsWith("26.") || s.StartsWith("25."))
+                        if (!isHypervisor && (s.StartsWith("26.") || s.StartsWith("25.") || s.StartsWith("100.")))
                         {
-                            if (!preferredVpn.Contains(s)) preferredVpn.Add(s);
+                            isVpn = true;
                         }
-                        else
+
+                        NetworkEndpointEntry entry = new NetworkEndpointEntry
                         {
-                            if (!lan.Contains(s)) lan.Add(s);
+                            InterfaceName = string.IsNullOrEmpty(nic.Name) ? nic.Description : nic.Name,
+                            Ip = s,
+                            Port = port,
+                            RoomCode = Encode(s, port),
+                            IsVpn = isVpn,
+                            IsVirtualHypervisor = isHypervisor
+                        };
+
+                        if (isHypervisor) virtualList.Add(entry);
+                        else if (isVpn) vpnList.Add(entry);
+                        else lanList.Add(entry);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            List<NetworkEndpointEntry> combined = new List<NetworkEndpointEntry>(vpnList.Count + lanList.Count + virtualList.Count);
+            combined.AddRange(vpnList);
+            combined.AddRange(lanList);
+            combined.AddRange(virtualList);
+            if (combined.Count == 0)
+            {
+                combined.Add(new NetworkEndpointEntry
+                {
+                    InterfaceName = "Localhost",
+                    Ip = "127.0.0.1",
+                    Port = port,
+                    RoomCode = Encode("127.0.0.1", port)
+                });
+            }
+            return combined;
+        }
+
+        public static List<IPAddress> GetSubnetBroadcastAddresses()
+        {
+            List<IPAddress> list = new List<IPAddress>();
+            HashSet<string> seen = new HashSet<string>();
+
+            try
+            {
+                NetworkInterface[] nics = NetworkInterface.GetAllNetworkInterfaces();
+                for (int i = 0; i < nics.Length; i++)
+                {
+                    NetworkInterface nic = nics[i];
+                    if (nic.OperationalStatus != OperationalStatus.Up) continue;
+                    if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+
+                    IPInterfaceProperties props = nic.GetIPProperties();
+                    if (props == null) continue;
+
+                    foreach (UnicastIPAddressInformation uni in props.UnicastAddresses)
+                    {
+                        if (uni.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                        byte[] ipBytes = uni.Address.GetAddressBytes();
+                        if (ipBytes[0] == 169 && ipBytes[1] == 254) continue;
+
+                        byte[] maskBytes = uni.IPv4Mask != null ? uni.IPv4Mask.GetAddressBytes() : null;
+                        if (maskBytes == null || maskBytes.Length != 4)
+                        {
+                            maskBytes = new byte[] { 255, 255, 255, 0 };
+                        }
+
+                        // Skip /32 point-to-point masks (nothing to broadcast to via mask)
+                        if (maskBytes[0] == 255 && maskBytes[1] == 255 && maskBytes[2] == 255 && maskBytes[3] == 255)
+                        {
+                            continue;
+                        }
+
+                        byte[] bcast = new byte[4];
+                        for (int b = 0; b < 4; b++)
+                        {
+                            bcast[b] = (byte)(ipBytes[b] | (~maskBytes[b]));
+                        }
+
+                        IPAddress bcastIp = new IPAddress(bcast);
+                        string s = bcastIp.ToString();
+                        if (seen.Add(s))
+                        {
+                            list.Add(bcastIp);
                         }
                     }
                 }
@@ -209,14 +311,7 @@ namespace SlimeCoop.Net
             {
             }
 
-            List<string> combined = new List<string>(preferredVpn.Count + lan.Count);
-            combined.AddRange(preferredVpn);
-            combined.AddRange(lan);
-            if (combined.Count == 0)
-            {
-                combined.Add("127.0.0.1");
-            }
-            return combined;
+            return list;
         }
     }
 }

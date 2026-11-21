@@ -211,6 +211,18 @@ namespace SlimeCoop.Net
             catch
             {
             }
+
+            List<IPAddress> subnetBroadcasts = RoomCode.GetSubnetBroadcastAddresses();
+            for (int i = 0; i < subnetBroadcasts.Count; i++)
+            {
+                try
+                {
+                    _socket.SendTo(frame, frame.Length, SocketFlags.None, new IPEndPoint(subnetBroadcasts[i], targetPort));
+                }
+                catch
+                {
+                }
+            }
         }
 
         public void PumpReliableRetries()
