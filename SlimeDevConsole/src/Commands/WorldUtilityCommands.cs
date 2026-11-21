@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using MonomiPark.SlimeRancher.DataModel;
+using MonomiPark.SlimeRancher.Regions;
 using UnityEngine;
 
 namespace SlimeDevConsole.Commands
