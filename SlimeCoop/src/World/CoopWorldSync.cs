@@ -37,6 +37,45 @@ namespace SlimeCoop.World
         private static readonly System.Reflection.MethodInfo GordoReachedTargetMethod =
             AccessTools.Method(typeof(GordoEat), "ReachedTarget");
 
+        private static readonly System.Reflection.MethodInfo ExchangeOfferDidChangeMethod =
+            AccessTools.Method(typeof(ExchangeDirector), "OfferDidChange");
+
+        private static readonly AccessTools.FieldRef<ExchangeBreakOnImpact, bool> ExchangeBreakBreakingRef =
+            AccessTools.FieldRefAccess<ExchangeBreakOnImpact, bool>("breaking");
+
+        private static readonly System.Reflection.MethodInfo ExchangeBreakSpawnSpecMethod =
+            AccessTools.Method(typeof(ExchangeBreakOnImpact), "SpawnSpecReward");
+
+        private static readonly AccessTools.FieldRef<DirectRewardEjector, bool> DirectEjectorRewardIsActorRef =
+            AccessTools.FieldRefAccess<DirectRewardEjector, bool>("rewardIsActor");
+
+        public static bool SuppressLocalRancherChatUI;
+
+        private static readonly ProgressDirector.ProgressType[] SyncedExchangeProgressTypes = new[]
+        {
+            ProgressDirector.ProgressType.UNLOCK_QUARRY,
+            ProgressDirector.ProgressType.UNLOCK_MOSS,
+            ProgressDirector.ProgressType.UNLOCK_DESERT,
+            ProgressDirector.ProgressType.UNLOCK_RUINS,
+            ProgressDirector.ProgressType.UNLOCK_WILDS,
+            ProgressDirector.ProgressType.UNLOCK_VALLEY,
+            ProgressDirector.ProgressType.UNLOCK_SLIMULATIONS,
+            ProgressDirector.ProgressType.UNLOCK_OGDEN_MISSIONS,
+            ProgressDirector.ProgressType.UNLOCK_MOCHI_MISSIONS,
+            ProgressDirector.ProgressType.UNLOCK_VIKTOR_MISSIONS,
+            ProgressDirector.ProgressType.EXCHANGE_THORA,
+            ProgressDirector.ProgressType.EXCHANGE_VIKTOR,
+            ProgressDirector.ProgressType.EXCHANGE_OGDEN,
+            ProgressDirector.ProgressType.EXCHANGE_MOCHI,
+            ProgressDirector.ProgressType.EXCHANGE_BOB,
+            ProgressDirector.ProgressType.OGDEN_REWARDS,
+            ProgressDirector.ProgressType.OGDEN_SEEN_FINAL_CHAT,
+            ProgressDirector.ProgressType.MOCHI_REWARDS,
+            ProgressDirector.ProgressType.MOCHI_SEEN_FINAL_CHAT,
+            ProgressDirector.ProgressType.VIKTOR_REWARDS,
+            ProgressDirector.ProgressType.VIKTOR_SEEN_FINAL_CHAT
+        };
+
         private struct CachedNetActor
         {
             public GameObject Go;
@@ -432,7 +471,7 @@ namespace SlimeCoop.World
             }
         }
 
-        public static void ApplySiloSlot(string plotId, int slotIdx, Identifiable.Id itemId, int count)
+        public static void ApplySiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int count)
         {
             LandPlotLocation loc = FindPlot(plotId);
             if (loc == null) return;
@@ -440,12 +479,23 @@ namespace SlimeCoop.World
             SiloStorage[] silos = loc.GetComponentsInChildren<SiloStorage>(true);
             if (silos == null || silos.Length == 0) return;
 
+            SiloStorage target = null;
+            for (int i = 0; i < silos.Length; i++)
+            {
+                if (silos[i] != null && silos[i].type == storageType)
+                {
+                    target = silos[i];
+                    break;
+                }
+            }
+            if (target == null) return;
+
             NetSyncGuard.ApplyingRemoteDepth++;
             NetSyncGuard.SuppressPersonalProgressDepth++;
             try
             {
-                Ammo ammo = silos[0].GetRelevantAmmo();
-                if (ammo == null) return;
+                Ammo ammo = target.GetRelevantAmmo();
+                if (ammo == null || slotIdx < 0 || slotIdx >= ammo.GetUsableSlotCount()) return;
 
                 ammo.Clear(slotIdx);
                 if (itemId != Identifiable.Id.NONE && count > 0)
@@ -456,6 +506,255 @@ namespace SlimeCoop.World
             finally
             {
                 NetSyncGuard.SuppressPersonalProgressDepth--;
+                NetSyncGuard.ApplyingRemoteDepth--;
+            }
+        }
+
+        public static void ApplyPlotCollectorActivate(string plotId)
+        {
+            LandPlotLocation loc = FindPlot(plotId);
+            if (loc == null) return;
+
+            PlortCollector collector = loc.GetComponentInChildren<PlortCollector>(false);
+            if (collector != null && collector.isActiveAndEnabled)
+            {
+                collector.StartCollection();
+            }
+        }
+
+        public static bool WriteExchangeState(PacketWriter w)
+        {
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.TimeDirector == null || ctx.ExchangeDirector == null) return false;
+
+            WorldModel wm = TimeWorldModelRef(ctx.TimeDirector);
+            if (wm == null) return false;
+
+            w.WriteDouble(wm.nextDailyOfferCreateTime);
+
+            int pendingCount = Math.Min(32, wm.pendingOfferRancherIds.Count);
+            w.WriteByte((byte)pendingCount);
+            for (int i = 0; i < pendingCount; i++)
+            {
+                w.WriteString(wm.pendingOfferRancherIds[i] ?? string.Empty);
+            }
+
+            int lastCount = Math.Min(32, wm.lastOfferRancherIds.Count);
+            w.WriteByte((byte)lastCount);
+            for (int i = 0; i < lastCount; i++)
+            {
+                w.WriteString(wm.lastOfferRancherIds[i] ?? string.Empty);
+            }
+
+            int offerCount = Math.Min(32, wm.currOffers.Count);
+            w.WriteByte((byte)offerCount);
+            int writtenOffers = 0;
+            foreach (KeyValuePair<ExchangeDirector.OfferType, ExchangeDirector.Offer> kv in wm.currOffers)
+            {
+                if (writtenOffers >= offerCount) break;
+                writtenOffers++;
+                ExchangeDirector.Offer o = kv.Value;
+                w.WriteByte((byte)kv.Key);
+                w.WriteString(o != null && o.offerId != null ? o.offerId : string.Empty);
+                w.WriteString(o != null && o.rancherId != null ? o.rancherId : string.Empty);
+                w.WriteDouble(o != null ? o.expireTime : double.PositiveInfinity);
+                w.WriteDouble(o != null ? o.earlyExchangeTime : double.NegativeInfinity);
+
+                int reqCount = o != null && o.requests != null ? Math.Min(32, o.requests.Count) : 0;
+                w.WriteByte((byte)reqCount);
+                for (int r = 0; r < reqCount; r++)
+                {
+                    ExchangeDirector.RequestedItemEntry req = o.requests[r];
+                    w.WriteInt((int)req.id);
+                    w.WriteInt(req.count);
+                    w.WriteInt(req.progress);
+                    w.WriteInt((int)req.specReward);
+                }
+
+                int rewCount = o != null && o.rewards != null ? Math.Min(32, o.rewards.Count) : 0;
+                w.WriteByte((byte)rewCount);
+                for (int rw = 0; rw < rewCount; rw++)
+                {
+                    ExchangeDirector.ItemEntry rew = o.rewards[rw];
+                    w.WriteInt((int)rew.id);
+                    w.WriteInt(rew.count);
+                    w.WriteInt((int)rew.specReward);
+                }
+            }
+
+            w.WriteByte((byte)SyncedExchangeProgressTypes.Length);
+            for (int i = 0; i < SyncedExchangeProgressTypes.Length; i++)
+            {
+                int val = ctx.ProgressDirector != null ? ctx.ProgressDirector.GetProgress(SyncedExchangeProgressTypes[i]) : 0;
+                w.WriteInt(val);
+            }
+            return true;
+        }
+
+        public static void ApplyExchangeState(ref PacketReader r)
+        {
+            double nextDailyTime = r.ReadDouble();
+
+            byte pendingCount = r.ReadByte();
+            List<string> pending = new List<string>(pendingCount);
+            for (int i = 0; i < pendingCount; i++)
+            {
+                pending.Add(r.ReadString());
+            }
+
+            byte lastCount = r.ReadByte();
+            List<string> last = new List<string>(lastCount);
+            for (int i = 0; i < lastCount; i++)
+            {
+                last.Add(r.ReadString());
+            }
+
+            byte offerCount = r.ReadByte();
+            Dictionary<ExchangeDirector.OfferType, ExchangeDirector.Offer> offers =
+                new Dictionary<ExchangeDirector.OfferType, ExchangeDirector.Offer>(offerCount);
+            for (int i = 0; i < offerCount; i++)
+            {
+                ExchangeDirector.OfferType oType = (ExchangeDirector.OfferType)r.ReadByte();
+                string offerId = r.ReadString();
+                string rancherId = r.ReadString();
+                double expireTime = r.ReadDouble();
+                double earlyTime = r.ReadDouble();
+
+                byte reqCount = r.ReadByte();
+                List<ExchangeDirector.RequestedItemEntry> reqs = new List<ExchangeDirector.RequestedItemEntry>(reqCount);
+                for (int j = 0; j < reqCount; j++)
+                {
+                    Identifiable.Id id = (Identifiable.Id)r.ReadInt();
+                    int cnt = r.ReadInt();
+                    int prog = r.ReadInt();
+                    ExchangeDirector.NonIdentReward spec = (ExchangeDirector.NonIdentReward)r.ReadInt();
+                    reqs.Add(new ExchangeDirector.RequestedItemEntry(id, cnt, prog, spec));
+                }
+
+                byte rewCount = r.ReadByte();
+                List<ExchangeDirector.ItemEntry> rews = new List<ExchangeDirector.ItemEntry>(rewCount);
+                for (int j = 0; j < rewCount; j++)
+                {
+                    Identifiable.Id id = (Identifiable.Id)r.ReadInt();
+                    int cnt = r.ReadInt();
+                    ExchangeDirector.NonIdentReward spec = (ExchangeDirector.NonIdentReward)r.ReadInt();
+                    rews.Add(new ExchangeDirector.ItemEntry(id, cnt, spec));
+                }
+
+                offers[oType] = new ExchangeDirector.Offer(offerId, rancherId, expireTime, earlyTime, reqs, rews);
+            }
+
+            byte progCount = r.ReadByte();
+            int[] progVals = new int[progCount];
+            for (int i = 0; i < progCount; i++)
+            {
+                progVals[i] = r.ReadInt();
+            }
+
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.TimeDirector == null || ctx.ExchangeDirector == null) return;
+
+            WorldModel wm = TimeWorldModelRef(ctx.TimeDirector);
+            if (wm == null) return;
+
+            NetSyncGuard.ApplyingRemoteDepth++;
+            NetSyncGuard.SuppressPersonalProgressDepth++;
+            try
+            {
+                wm.nextDailyOfferCreateTime = nextDailyTime;
+                wm.pendingOfferRancherIds.Clear();
+                wm.pendingOfferRancherIds.AddRange(pending);
+                wm.lastOfferRancherIds.Clear();
+                wm.lastOfferRancherIds.AddRange(last);
+
+                wm.currOffers.Clear();
+                foreach (KeyValuePair<ExchangeDirector.OfferType, ExchangeDirector.Offer> kv in offers)
+                {
+                    wm.currOffers[kv.Key] = kv.Value;
+                }
+
+                if (ctx.ProgressDirector != null)
+                {
+                    int n = Math.Min(progCount, SyncedExchangeProgressTypes.Length);
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (progVals[i] > 0)
+                        {
+                            ctx.ProgressDirector.SetProgress(SyncedExchangeProgressTypes[i], progVals[i]);
+                        }
+                    }
+                }
+
+                ExchangeOfferDidChangeMethod?.Invoke(ctx.ExchangeDirector, null);
+            }
+            finally
+            {
+                NetSyncGuard.SuppressPersonalProgressDepth--;
+                NetSyncGuard.ApplyingRemoteDepth--;
+            }
+        }
+
+        public static void ApplyExchangeOpenChat(ExchangeDirector.OfferType offerType, bool intro)
+        {
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.ExchangeDirector == null) return;
+
+            NetSyncGuard.ApplyingRemoteDepth++;
+            try
+            {
+                ctx.ExchangeDirector.CreateRancherChatUI(offerType, intro);
+            }
+            finally
+            {
+                NetSyncGuard.ApplyingRemoteDepth--;
+            }
+        }
+
+        public static void ApplyExchangeCrateBreak(long crateActorId, ExchangeDirector.NonIdentReward[] specs)
+        {
+            if (crateActorId <= 0 || !TryGetActorObject(crateActorId, out GameObject go) || go == null) return;
+
+            ExchangeBreakOnImpact ebi = go.GetComponent<ExchangeBreakOnImpact>();
+            if (ebi == null) return;
+            if (ExchangeBreakBreakingRef(ebi)) return;
+
+            ExchangeBreakBreakingRef(ebi) = true;
+            if (ebi.breakFX != null)
+            {
+                SRBehaviour.SpawnAndPlayFX(ebi.breakFX, go.transform.position, go.transform.rotation);
+            }
+
+            if (specs != null && ExchangeBreakSpawnSpecMethod != null)
+            {
+                for (int i = 0; i < specs.Length; i++)
+                {
+                    if (specs[i] != ExchangeDirector.NonIdentReward.NONE)
+                    {
+                        ExchangeBreakSpawnSpecMethod.Invoke(ebi, new object[] { specs[i] });
+                    }
+                }
+            }
+        }
+
+        public static void ApplyExchangeDirectCoin(ExchangeDirector.OfferType offerType)
+        {
+            DirectRewardEjector[] ejectors = UnityEngine.Object.FindObjectsOfType<DirectRewardEjector>();
+            if (ejectors == null) return;
+
+            NetSyncGuard.ApplyingRemoteDepth++;
+            try
+            {
+                for (int i = 0; i < ejectors.Length; i++)
+                {
+                    DirectRewardEjector ej = ejectors[i];
+                    if (ej != null && ej.offerType == offerType && !DirectEjectorRewardIsActorRef(ej))
+                    {
+                        ej.Eject();
+                    }
+                }
+            }
+            finally
+            {
                 NetSyncGuard.ApplyingRemoteDepth--;
             }
         }
@@ -781,6 +1080,14 @@ namespace SlimeCoop.World
                 sendReliable(w);
             }
 
+            // 1b. Range Exchange offers & quest progress
+            w.Reset();
+            w.WriteByte(9); // chunk kind: ExchangeState
+            if (WriteExchangeState(w))
+            {
+                sendReliable(w);
+            }
+
             // 2. LandPlots (build + upgrades + crop + silo slots)
             foreach (KeyValuePair<string, LandPlotModel> kv in ctx.GameModel.AllLandPlots())
             {
@@ -798,25 +1105,37 @@ namespace SlimeCoop.World
                     w.WriteInt((int)upg);
                 }
 
-                // Silo slots if present
+                // Silo storages if present (e.g. Corral has FOOD feeder + PLORT collector)
                 LandPlotLocation loc = FindPlot(kv.Key);
                 if (loc != null)
                 {
                     SiloStorage[] silos = loc.GetComponentsInChildren<SiloStorage>(true);
-                    if (silos != null && silos.Length > 0 && silos[0].GetRelevantAmmo() != null)
+                    List<SiloStorage> validSilos = new List<SiloStorage>();
+                    if (silos != null)
                     {
-                        Ammo a = silos[0].GetRelevantAmmo();
+                        for (int si = 0; si < silos.Length; si++)
+                        {
+                            if (silos[si] != null && silos[si].GetRelevantAmmo() != null)
+                            {
+                                validSilos.Add(silos[si]);
+                            }
+                        }
+                    }
+
+                    int siloCount = Math.Min(16, validSilos.Count);
+                    w.WriteByte((byte)siloCount);
+                    for (int si = 0; si < siloCount; si++)
+                    {
+                        SiloStorage ss = validSilos[si];
+                        Ammo a = ss.GetRelevantAmmo();
                         int sc = Math.Min(12, a.GetUsableSlotCount());
+                        w.WriteByte((byte)ss.type);
                         w.WriteByte((byte)sc);
                         for (int s = 0; s < sc; s++)
                         {
                             w.WriteInt((int)a.GetSlotName(s));
                             w.WriteInt(a.GetSlotCount(s));
                         }
-                    }
-                    else
-                    {
-                        w.WriteByte(0);
                     }
                 }
                 else
@@ -951,12 +1270,17 @@ namespace SlimeCoop.World
                     {
                         ApplyPlotPlant(plotId, cropId);
                     }
-                    byte slotCount = r.ReadByte();
-                    for (int s = 0; s < slotCount; s++)
+                    byte siloCount = r.ReadByte();
+                    for (int si = 0; si < siloCount; si++)
                     {
-                        Identifiable.Id itemId = (Identifiable.Id)r.ReadInt();
-                        int cnt = r.ReadInt();
-                        ApplySiloSlot(plotId, s, itemId, cnt);
+                        SiloStorage.StorageType storageType = (SiloStorage.StorageType)r.ReadByte();
+                        byte slotCount = r.ReadByte();
+                        for (int s = 0; s < slotCount; s++)
+                        {
+                            Identifiable.Id itemId = (Identifiable.Id)r.ReadInt();
+                            int cnt = r.ReadInt();
+                            ApplySiloSlot(plotId, storageType, s, itemId, cnt);
+                        }
                     }
                     break;
                 case 3: // Door
@@ -982,6 +1306,9 @@ namespace SlimeCoop.World
                     Vector3 vel = r.ReadVector3();
                     RegionRegistry.RegionSetId setId = (RegionRegistry.RegionSetId)r.ReadByte();
                     ApplyActorSpawn(aid, id, pos, rot, vel, setId);
+                    break;
+                case 9: // ExchangeState
+                    ApplyExchangeState(ref r);
                     break;
             }
         }

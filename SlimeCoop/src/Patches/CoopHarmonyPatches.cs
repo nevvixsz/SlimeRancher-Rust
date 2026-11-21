@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using MonomiPark.SlimeRancher.DataModel;
@@ -15,6 +16,8 @@ namespace SlimeCoop.Patches
         private static readonly PacketWriter SyncWriter = new PacketWriter(512);
         private static bool _clientExpelling;
         private static GameObject _lastExpelledObj;
+        private static float _nextExchangeActionTime;
+        private static long _pendingExchangeActorId;
 
         public static void Install(Harmony harmony)
         {
@@ -191,6 +194,7 @@ namespace SlimeCoop.Patches
 
             SyncWriter.Reset();
             SyncWriter.WriteString(loc.id);
+            SyncWriter.WriteByte((byte)silo.type);
             SyncWriter.WriteByte((byte)slotIdx);
             SyncWriter.WriteInt((int)ammo.GetSlotName(slotIdx));
             SyncWriter.WriteInt(ammo.GetSlotCount(slotIdx));
@@ -220,6 +224,318 @@ namespace SlimeCoop.Patches
                 for (int i = 0; i < count; i++)
                 {
                     SyncSiloSlot(__instance, i);
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(SiloCatcher), "Remove")]
+        internal static class SiloRemoveSyncPatch
+        {
+            private static void Postfix(SiloCatcher __instance, SiloStorage ___storageSilo, bool __result)
+            {
+                if (!__result || !CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || __instance == null || ___storageSilo == null) return;
+                if (__instance.type == SiloCatcher.Type.SILO_DEFAULT || __instance.type == SiloCatcher.Type.SILO_OUTPUT_ONLY)
+                {
+                    SyncSiloSlot(___storageSilo, __instance.slotIdx);
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(PlortCollector), "DoCollection")]
+        internal static class PlortCollectorDoCollectionPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(PlortCollector), nameof(PlortCollector.FastForward))]
+        internal static class PlortCollectorFastForwardPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(PlortCollectorActivator), nameof(PlortCollectorActivator.Activate))]
+        internal static class PlortCollectorActivatePatch
+        {
+            private static void Prefix(PlortCollectorActivator __instance, float ___nextAllowedActivationTime)
+            {
+                if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || __instance == null) return;
+                if (___nextAllowedActivationTime > Time.time) return;
+
+                LandPlotLocation loc = __instance.GetComponentInParent<LandPlotLocation>();
+                if (loc == null || string.IsNullOrEmpty(loc.id)) return;
+
+                SyncWriter.Reset();
+                SyncWriter.WriteString(loc.id);
+                CoopSession.SendToHostReliable(PacketType.PlotCollectorActivate, SyncWriter);
+            }
+        }
+
+        [HarmonyPatch(typeof(SlimeFeeder), "ProcessFeedOperation")]
+        internal static class SlimeFeederSyncPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+
+            private static void Postfix(SiloStorage ___storage)
+            {
+                if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote && ___storage != null)
+                {
+                    SyncSiloSlot(___storage, 0);
+                }
+            }
+        }
+
+        // --- Shared World: Range Exchange Quests ---
+        private static void BroadcastHostExchangeState()
+        {
+            if (!CoopSession.IsHost || NetSyncGuard.IsApplyingRemote || CoopSession.ConnectedPeers.Count == 0) return;
+            SyncWriter.Reset();
+            if (CoopWorldSync.WriteExchangeState(SyncWriter))
+            {
+                CoopSession.BroadcastReliable(PacketType.ExchangeStateSync, SyncWriter);
+            }
+        }
+
+        [HarmonyPatch(typeof(ExchangeDirector), nameof(ExchangeDirector.Update))]
+        internal static class ExchangeDirectorUpdatePatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(ExchangeDirector), "OfferDidChange")]
+        internal static class ExchangeOfferDidChangePatch
+        {
+            private static void Postfix()
+            {
+                BroadcastHostExchangeState();
+            }
+        }
+
+        [HarmonyPatch(typeof(ExchangeDirector), nameof(ExchangeDirector.SelectDailyOffer))]
+        internal static class ExchangeSelectDailyOfferPatch
+        {
+            private static bool Prefix(string rancherId, bool isFirstOffer, ref bool __result)
+            {
+                if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote) return true;
+                if (Time.unscaledTime >= _nextExchangeActionTime)
+                {
+                    _nextExchangeActionTime = Time.unscaledTime + 0.4f;
+                    SyncWriter.Reset();
+                    SyncWriter.WriteByte(0); // SelectDailyOffer
+                    SyncWriter.WriteString(rancherId ?? string.Empty);
+                    SyncWriter.WriteBool(isFirstOffer);
+                    CoopSession.SendToHostReliable(PacketType.ExchangeAction, SyncWriter);
+                }
+                __result = false;
+                return false;
+            }
+        }
+
+        [HarmonyPatch(typeof(ExchangeDirector), nameof(ExchangeDirector.MaybeStartNext))]
+        internal static class ExchangeMaybeStartNextPatch
+        {
+            private static bool Prefix(ExchangeDirector __instance, ExchangeDirector.OfferType offerType, ref bool __result)
+            {
+                if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote) return true;
+                if (__instance != null && __instance.GetOfferId(offerType) != null)
+                {
+                    __result = false;
+                    return false;
+                }
+                if (Time.unscaledTime >= _nextExchangeActionTime)
+                {
+                    _nextExchangeActionTime = Time.unscaledTime + 0.4f;
+                    SyncWriter.Reset();
+                    SyncWriter.WriteByte(1); // MaybeStartNext
+                    SyncWriter.WriteByte((byte)offerType);
+                    CoopSession.SendToHostReliable(PacketType.ExchangeAction, SyncWriter);
+                }
+                __result = true; // wait for host ExchangeStateSync + ExchangeOpenChat instead of falling through to stale chat
+                return false;
+            }
+        }
+
+        [HarmonyPatch(typeof(ExchangeDirector), nameof(ExchangeDirector.CreateRancherChatUI))]
+        internal static class ExchangeSuppressHostChatPatch
+        {
+            private static bool Prefix(ref bool __result)
+            {
+                if (CoopWorldSync.SuppressLocalRancherChatUI)
+                {
+                    __result = true;
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(ExchangeAcceptor), nameof(ExchangeAcceptor.OnTriggerEnter))]
+        internal static class ExchangeAcceptorEnterPatch
+        {
+            private static void Prefix(Collider col)
+            {
+                _pendingExchangeActorId = 0;
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote && col != null && !col.isTrigger)
+                {
+                    CoopWorldSync.TryGetActorId(col.gameObject, out _pendingExchangeActorId);
+                }
+            }
+
+            private static void Postfix()
+            {
+                _pendingExchangeActorId = 0;
+            }
+        }
+
+        [HarmonyPatch(typeof(ExchangeDirector), nameof(ExchangeDirector.TryAccept))]
+        internal static class ExchangeTryAcceptPatch
+        {
+            private static void Postfix(ExchangeDirector.OfferType type, Identifiable.Id id, bool __result)
+            {
+                if (!__result || !CoopSession.IsClient || NetSyncGuard.IsApplyingRemote) return;
+                SyncWriter.Reset();
+                SyncWriter.WriteByte(2); // TryAccept
+                SyncWriter.WriteByte((byte)type);
+                SyncWriter.WriteInt((int)id);
+                SyncWriter.WriteLong(_pendingExchangeActorId);
+                CoopSession.SendToHostReliable(PacketType.ExchangeAction, SyncWriter);
+                _pendingExchangeActorId = 0;
+            }
+        }
+
+        [HarmonyPatch(typeof(ExchangeEjector), nameof(ExchangeEjector.AwardIfType))]
+        internal static class ExchangeEjectorClientBlockPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(DirectRewardEjector), nameof(DirectRewardEjector.AwardIfType))]
+        internal static class DirectRewardEjectorClientBlockPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(RancherProgressAwarder), nameof(RancherProgressAwarder.AwardIfType))]
+        internal static class RancherProgressAwarderClientBlockPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(ExchangeBreakOnImpact), "BreakOpen")]
+        internal static class ExchangeCrateBreakPatch
+        {
+            private static bool Prefix(ExchangeBreakOnImpact __instance, bool ___breaking)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote) return false;
+
+                if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote && !___breaking && __instance != null && CoopSession.ConnectedPeers.Count > 0)
+                {
+                    if (CoopWorldSync.TryGetActorId(__instance.gameObject, out long crateId) && crateId > 0)
+                    {
+                        SceneContext ctx = SRSingleton<SceneContext>.Instance;
+                        List<ExchangeDirector.ItemEntry> rewards = ctx != null && ctx.ExchangeDirector != null
+                            ? ctx.ExchangeDirector.GetOfferRewards(ExchangeDirector.OfferType.GENERAL)
+                            : null;
+                        List<ExchangeDirector.NonIdentReward> specs = new List<ExchangeDirector.NonIdentReward>();
+                        if (rewards != null)
+                        {
+                            for (int i = 0; i < rewards.Count; i++)
+                            {
+                                if (rewards[i] != null && rewards[i].specReward != ExchangeDirector.NonIdentReward.NONE)
+                                {
+                                    specs.Add(rewards[i].specReward);
+                                }
+                            }
+                        }
+
+                        SyncWriter.Reset();
+                        SyncWriter.WriteLong(crateId);
+                        int count = Math.Min(16, specs.Count);
+                        SyncWriter.WriteByte((byte)count);
+                        for (int i = 0; i < count; i++)
+                        {
+                            SyncWriter.WriteInt((int)specs[i]);
+                        }
+                        CoopSession.BroadcastReliable(PacketType.ExchangeCrateBreak, SyncWriter);
+                    }
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(DirectRewardEjector), nameof(DirectRewardEjector.Eject))]
+        internal static class DirectRewardEjectorSyncPatch
+        {
+            private static void Postfix(DirectRewardEjector __instance, bool ___rewardIsActor)
+            {
+                if (!CoopSession.IsHost || NetSyncGuard.IsApplyingRemote || __instance == null || ___rewardIsActor) return;
+                if (CoopSession.ConnectedPeers.Count == 0) return;
+
+                SyncWriter.Reset();
+                SyncWriter.WriteByte((byte)__instance.offerType);
+                CoopSession.BroadcastReliable(PacketType.ExchangeDirectCoin, SyncWriter);
+            }
+        }
+
+        [HarmonyPatch(typeof(ProgressDirector), nameof(ProgressDirector.SetUniqueProgress))]
+        internal static class HostUniqueProgressExchangeSyncPatch
+        {
+            private static void Postfix(bool __result, ProgressDirector.ProgressType type)
+            {
+                if (!__result || !CoopSession.IsHost || NetSyncGuard.IsApplyingRemote) return;
+                if (type == ProgressDirector.ProgressType.UNLOCK_WILDS ||
+                    type == ProgressDirector.ProgressType.UNLOCK_VALLEY ||
+                    type == ProgressDirector.ProgressType.UNLOCK_SLIMULATIONS ||
+                    type == ProgressDirector.ProgressType.OGDEN_SEEN_FINAL_CHAT ||
+                    type == ProgressDirector.ProgressType.MOCHI_SEEN_FINAL_CHAT ||
+                    type == ProgressDirector.ProgressType.VIKTOR_SEEN_FINAL_CHAT)
+                {
+                    BroadcastHostExchangeState();
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(ProgressDirector), nameof(ProgressDirector.AddProgress))]
+        internal static class HostAddProgressExchangeSyncPatch
+        {
+            private static void Postfix(ProgressDirector.ProgressType type)
+            {
+                if (!CoopSession.IsHost || NetSyncGuard.IsApplyingRemote) return;
+                if (type == ProgressDirector.ProgressType.UNLOCK_OGDEN_MISSIONS ||
+                    type == ProgressDirector.ProgressType.UNLOCK_MOCHI_MISSIONS ||
+                    type == ProgressDirector.ProgressType.UNLOCK_VIKTOR_MISSIONS ||
+                    type == ProgressDirector.ProgressType.OGDEN_REWARDS ||
+                    type == ProgressDirector.ProgressType.MOCHI_REWARDS ||
+                    type == ProgressDirector.ProgressType.VIKTOR_REWARDS)
+                {
+                    BroadcastHostExchangeState();
                 }
             }
         }
