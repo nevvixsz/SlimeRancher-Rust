@@ -27,6 +27,8 @@ namespace SlimeOptimizer.Patches
         private static readonly List<ParticleSystem> TempSystems = new List<ParticleSystem>(8);
         private static readonly PsSlot[] EmptySlots = new PsSlot[0];
         private static bool _anyEverCapped;
+        private static GameObject _lastFxGo;
+        private static FxCacheEntry _lastFxEntry;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void Prefix(GameObject fxObject)
@@ -48,7 +50,12 @@ namespace SlimeOptimizer.Patches
                 cap = 8;
             }
 
-            if (!Cache.TryGetValue(fxObject, out FxCacheEntry entry))
+            FxCacheEntry entry;
+            if (ReferenceEquals(fxObject, _lastFxGo))
+            {
+                entry = _lastFxEntry;
+            }
+            else if (!Cache.TryGetValue(fxObject, out entry))
             {
                 if (!capEnabled)
                 {
@@ -85,6 +92,13 @@ namespace SlimeOptimizer.Patches
                     AppliedEnabled = false
                 };
                 Cache.Set(fxObject, entry);
+                _lastFxGo = fxObject;
+                _lastFxEntry = entry;
+            }
+            else
+            {
+                _lastFxGo = fxObject;
+                _lastFxEntry = entry;
             }
 
             if (entry.Slots.Length == 0)

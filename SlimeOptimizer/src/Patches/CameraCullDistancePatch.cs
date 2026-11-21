@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace SlimeOptimizer.Patches
@@ -13,8 +12,10 @@ namespace SlimeOptimizer.Patches
             public bool Applied;
         }
 
-        private static readonly ConditionalWeakTable<Camera, OriginalCameraSettings> Originals =
-            new ConditionalWeakTable<Camera, OriginalCameraSettings>();
+        private static readonly FastObjCache<Camera, OriginalCameraSettings> Originals =
+            new FastObjCache<Camera, OriginalCameraSettings>(8);
+
+        private static readonly float[] WorkDistances = new float[32];
 
         private static Camera _lastCamera;
         private static bool _dirty = true;
@@ -33,12 +34,12 @@ namespace SlimeOptimizer.Patches
         public static void UpdateActiveCamera()
         {
             Camera cam = CameraCache.MainCamera;
-            if (cam == null)
+            if (ReferenceEquals(cam, null))
             {
                 return;
             }
 
-            if (cam == _lastCamera && !_dirty)
+            if (ReferenceEquals(cam, _lastCamera) && !_dirty)
             {
                 return;
             }
@@ -77,7 +78,7 @@ namespace SlimeOptimizer.Patches
                     LayerCullSpherical = cam.layerCullSpherical,
                     Applied = false
                 };
-                Originals.Add(cam, orig);
+                Originals.Set(cam, orig);
             }
 
             if (!OptimizerConfig.EnableCameraLayerCull)
@@ -94,19 +95,18 @@ namespace SlimeOptimizer.Patches
 
             EnsureLayerIndices();
 
-            float[] distances = new float[32];
-            System.Array.Copy(orig.LayerCullDistances, distances, 32);
+            System.Array.Copy(orig.LayerCullDistances, WorkDistances, 32);
 
             float actorDist = OptimizerConfig.LayerActorCullDistance;
             if (actorDist > 0f)
             {
-                SetLayerDistanceIfCloser(distances, _actorLayer, actorDist);
-                SetLayerDistanceIfCloser(distances, _actorEchoesLayer, actorDist);
-                SetLayerDistanceIfCloser(distances, _actorIgnorePlayerLayer, actorDist);
-                SetLayerDistanceIfCloser(distances, _launchedLayer, actorDist);
+                SetLayerDistanceIfCloser(WorkDistances, _actorLayer, actorDist);
+                SetLayerDistanceIfCloser(WorkDistances, _actorEchoesLayer, actorDist);
+                SetLayerDistanceIfCloser(WorkDistances, _actorIgnorePlayerLayer, actorDist);
+                SetLayerDistanceIfCloser(WorkDistances, _launchedLayer, actorDist);
             }
 
-            cam.layerCullDistances = distances;
+            cam.layerCullDistances = WorkDistances;
             cam.layerCullSpherical = true;
 
             float maxFar = OptimizerConfig.MaxFarClipPlane;

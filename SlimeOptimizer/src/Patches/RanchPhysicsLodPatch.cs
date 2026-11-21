@@ -42,7 +42,7 @@ namespace SlimeOptimizer.Patches
                     entry = new UprightEntry
                     {
                         Transform = __instance.transform,
-                        Hash = RuntimeHelpers.GetHashCode(__instance) & 0x7FFFFFFF,
+                        Hash = FastObjCache<KeepUpright, UprightEntry>.MixHash(__instance),
                         NextCheckFrame = -1
                     };
                     Cache.Set(__instance, entry);
@@ -95,7 +95,7 @@ namespace SlimeOptimizer.Patches
                 entry = new ChickenEntry
                 {
                     Transform = __instance.transform,
-                    Hash = RuntimeHelpers.GetHashCode(__instance) & 0x7FFFFFFF,
+                    Hash = FastObjCache<ChickenRandomMove, ChickenEntry>.MixHash(__instance),
                     NextCheckFrame = -1
                 };
                 Cache.Set(__instance, entry);

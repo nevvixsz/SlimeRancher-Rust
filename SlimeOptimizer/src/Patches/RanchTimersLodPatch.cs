@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -24,7 +23,7 @@ namespace SlimeOptimizer.Patches
 
             int interval = OptimizerConfig.RanchTimersLodInterval;
             int mask = interval >= 16 ? 15 : (interval >= 8 ? 7 : (interval >= 4 ? 3 : 1));
-            int hash = RuntimeHelpers.GetHashCode(__instance);
+            int hash = FastObjCache<ResourceCycle, object>.MixHash(__instance);
 
             if (((CameraCache.FrameCount + hash) & mask) == 0)
             {

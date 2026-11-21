@@ -6,6 +6,9 @@ namespace SlimeOptimizer.Patches
     [HarmonyPatch(typeof(CameraFacingBillboard), "FaceCamera")]
     internal static class BillboardCachePatch
     {
+        private static readonly FastObjCache<CameraFacingBillboard, Transform> SelfTransformCache =
+            new FastObjCache<CameraFacingBillboard, Transform>(128);
+
         [HarmonyPrefix]
         private static bool Prefix(CameraFacingBillboard __instance, ref Camera ___mainCamera)
         {
@@ -18,7 +21,7 @@ namespace SlimeOptimizer.Patches
             if (cam == null)
             {
                 cam = CameraCache.MainCamera;
-                if (cam == null)
+                if (ReferenceEquals(cam, null))
                 {
                     return false;
                 }
@@ -30,7 +33,17 @@ namespace SlimeOptimizer.Patches
                 }
             }
 
-            __instance.transform.LookAt(cam.transform);
+            if (!SelfTransformCache.TryGetValue(__instance, out Transform selfTr))
+            {
+                selfTr = __instance.transform;
+                SelfTransformCache.Set(__instance, selfTr);
+            }
+
+            Transform camTr = ReferenceEquals(cam, CameraCache.MainCam) && !ReferenceEquals(CameraCache.MainCamTransform, null)
+                ? CameraCache.MainCamTransform
+                : cam.transform;
+
+            selfTr.LookAt(camTr);
             return false;
         }
     }
