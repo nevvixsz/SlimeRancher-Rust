@@ -27,7 +27,7 @@ namespace SlimeCoop.Net
                 {
                     if (!DiscoverGateway(out string ctrlUrl, out string srvType))
                     {
-                        StatusText = "UPnP роутер не найден (используй Radmin VPN / LAN / прямой IP)";
+                        StatusText = "UPnP роутер не найден (используй Tailscale/ZeroTier/VPN или проброс UDP " + port + ")";
                         CoopLog.Warn("UPnP: gateway not found");
                         return;
                     }
@@ -56,7 +56,7 @@ namespace SlimeCoop.Net
                     }
                     else
                     {
-                        StatusText = "Роутер отклонил UPnP (используй Radmin VPN или пробрось UDP " + port + ")";
+                        StatusText = "Роутер отклонил UPnP (используй Tailscale/ZeroTier/VPN или пробрось UDP " + port + ")";
                         CoopLog.Warn("UPnP AddPortMapping failed for " + localIp + ":" + port);
                     }
                 }

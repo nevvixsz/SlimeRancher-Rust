@@ -271,7 +271,7 @@ namespace SlimeCoop.UI
             GUILayout.Space(6f);
             GUILayout.BeginVertical(_boxStyle);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Серверы в локальной сети / Radmin VPN:", _labelStyle);
+            GUILayout.Label("Серверы в локальной / VPN-сети:", _labelStyle);
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("Обновить", _btnStyle, GUILayout.Width(95f)))
             {
