@@ -82,6 +82,7 @@ namespace SlimeCoop
         private static bool _clientProfileLoaded;
         private static bool _clientHandshakeDone;
         private static bool _clientSnapshotDone;
+        private static bool _tcpFallbackStarted;
         private static float _connectStartTime;
         private static float _nextHelloRetryTime;
         private static float _lastDiscoveryTime;
@@ -171,7 +172,7 @@ namespace SlimeCoop
                 UpnpMapper.OpenPortAsync(HostPort);
             }
 
-            StatusMessage = "Сервер запущен на UDP :" + HostPort;
+            StatusMessage = "Сервер запущен (UDP+TCP :" + HostPort + ")";
             CoopLog.Info("StartHost OK: room='" + RoomName + "', port=" + HostPort + ", hasPass=" + (!string.IsNullOrEmpty(HostPassword)) + ", serverId=" + HostServerId);
             AddChat("Система", "Сервер создан! Код комнаты: " + GetPrimaryRoomCode(), true);
 
@@ -215,6 +216,7 @@ namespace SlimeCoop
             _clientProfileLoaded = false;
             _clientHandshakeDone = false;
             _clientSnapshotDone = false;
+            _tcpFallbackStarted = false;
             _connectStartTime = Time.unscaledTime;
             _nextHelloRetryTime = _connectStartTime + 1.5f;
             StatusMessage = "Подключение к " + ep + "...";
@@ -256,6 +258,7 @@ namespace SlimeCoop
             _clientProfileLoaded = false;
             _clientHandshakeDone = false;
             _clientSnapshotDone = false;
+            _tcpFallbackStarted = false;
             _serverEp = null;
             ConnectedPeers.Clear();
             PeersByEp.Clear();
@@ -513,14 +516,33 @@ namespace SlimeCoop
             {
                 if (!_clientHandshakeDone && _serverEp != null)
                 {
+                    if (!_tcpFallbackStarted && now - _connectStartTime >= 0.8f)
+                    {
+                        _tcpFallbackStarted = true;
+                        Transport.BeginTcpFallback(_serverEp);
+                    }
+
+                    if (Transport.ConsumeTcpJustConnected(_serverEp))
+                    {
+                        CoopLog.Info("Client sending Hello over TCP to " + _serverEp);
+                        SharedWriter.Reset();
+                        SharedWriter.WriteInt(1);
+                        Transport.SendReliable(_serverEp, PacketType.Hello, SharedWriter);
+                        _nextHelloRetryTime = now + 2.0f;
+                    }
+
                     int elapsed = Mathf.Max(0, (int)(now - _connectStartTime));
                     if (elapsed >= 6)
                     {
-                        StatusMessage = "Нет ответа от " + _serverEp + " — проверьте VPN IP/код и брандмауэр хоста (UDP)!";
+                        string tcpErr = Transport.LastTcpError;
+                        StatusMessage = string.IsNullOrEmpty(tcpErr)
+                            ? ("Нет ответа от " + _serverEp + " — проверьте IP/VPN и брандмауэр хоста!")
+                            : ("Нет ответа от " + _serverEp + " (TCP: " + tcpErr + ")");
                     }
                     else
                     {
-                        StatusMessage = "Подключение к " + _serverEp + "... (" + elapsed + "с)";
+                        string via = Transport.IsTcpPeer(_serverEp) ? " [TCP]" : "";
+                        StatusMessage = "Подключение к " + _serverEp + via + "... (" + elapsed + "с)";
                     }
 
                     if (now >= _nextHelloRetryTime)
@@ -1003,8 +1025,14 @@ namespace SlimeCoop
                     HostServerId = r.ReadString();
                     ShareMarketIncome = r.ReadBool();
                     RoomName = r.ReadString();
-                    CoopLog.Info("Client received JoinAccept! playerId=" + LocalPlayerId + ", serverId=" + HostServerId + ", room='" + RoomName + "'");
-                    StatusMessage = "Подключено к '" + RoomName + "'";
+                    bool viaTcp = Transport.IsTcpPeer(sender);
+                    if (!viaTcp)
+                    {
+                        Transport.CancelTcpFallback(_serverEp);
+                    }
+                    string protoUsed = viaTcp ? "TCP" : "UDP";
+                    CoopLog.Info("Client received JoinAccept (" + protoUsed + ")! playerId=" + LocalPlayerId + ", serverId=" + HostServerId + ", room='" + RoomName + "'");
+                    StatusMessage = "Подключено к '" + RoomName + "' (" + protoUsed + ")";
                     AddChat("Система", "Вы подключились к '" + RoomName + "'! Ваш прогресс апгрейдов, Слаймопедии и достижений личный.", true);
 
                     if (SRSingleton<SceneContext>.Instance == null)

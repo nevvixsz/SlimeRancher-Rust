@@ -45,18 +45,20 @@ namespace SlimeCoop.Net
                     }
 
                     string extIp = QueryExternalIp(ctrlUrl, srvType);
-                    bool mapped = AddPortMapping(ctrlUrl, srvType, localIp, port, "UDP", "SlimeCoop P2P");
-                    if (mapped)
+                    bool mappedUdp = AddPortMapping(ctrlUrl, srvType, localIp, port, "UDP", "SlimeCoop P2P UDP");
+                    bool mappedTcp = AddPortMapping(ctrlUrl, srvType, localIp, port, "TCP", "SlimeCoop P2P TCP");
+                    if (mappedUdp || mappedTcp)
                     {
                         ExternalIp = extIp ?? string.Empty;
+                        string proto = (mappedUdp && mappedTcp) ? "UDP+TCP" : (mappedUdp ? "UDP" : "TCP");
                         StatusText = string.IsNullOrEmpty(ExternalIp)
-                            ? ("UPnP порт " + port + " открыт")
-                            : ("UPnP OK -> " + ExternalIp + ":" + port);
-                        CoopLog.Info("UPnP OK: local=" + localIp + ":" + port + ", ext=" + ExternalIp);
+                            ? ("UPnP " + proto + " :" + port + " открыт")
+                            : ("UPnP OK (" + proto + ") -> " + ExternalIp + ":" + port);
+                        CoopLog.Info("UPnP OK (" + proto + "): local=" + localIp + ":" + port + ", ext=" + ExternalIp);
                     }
                     else
                     {
-                        StatusText = "Роутер отклонил UPnP (используй Tailscale/ZeroTier/VPN или пробрось UDP " + port + ")";
+                        StatusText = "Роутер отклонил UPnP (используй Tailscale/ZeroTier/VPN или пробрось UDP+TCP " + port + ")";
                         CoopLog.Warn("UPnP AddPortMapping failed for " + localIp + ":" + port);
                     }
                 }
@@ -83,13 +85,21 @@ namespace SlimeCoop.Net
             {
                 try
                 {
-                    string body =
+                    string bodyUdp =
                         "<u:DeletePortMapping xmlns:u=\"" + srv + "\">" +
                         "<NewRemoteHost></NewRemoteHost>" +
                         "<NewExternalPort>" + port + "</NewExternalPort>" +
                         "<NewProtocol>UDP</NewProtocol>" +
                         "</u:DeletePortMapping>";
-                    SendSoap(ctrl, srv, "DeletePortMapping", body);
+                    SendSoap(ctrl, srv, "DeletePortMapping", bodyUdp);
+
+                    string bodyTcp =
+                        "<u:DeletePortMapping xmlns:u=\"" + srv + "\">" +
+                        "<NewRemoteHost></NewRemoteHost>" +
+                        "<NewExternalPort>" + port + "</NewExternalPort>" +
+                        "<NewProtocol>TCP</NewProtocol>" +
+                        "</u:DeletePortMapping>";
+                    SendSoap(ctrl, srv, "DeletePortMapping", bodyTcp);
                 }
                 catch
                 {
