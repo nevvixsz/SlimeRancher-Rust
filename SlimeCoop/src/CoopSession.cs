@@ -81,9 +81,14 @@ namespace SlimeCoop
         private static float _nextProfileAutoSaveTime;
         private static bool _clientProfileLoaded;
         private static bool _clientHandshakeDone;
+        private static bool _clientSnapshotDone;
         private static float _connectStartTime;
         private static float _nextHelloRetryTime;
+        private static float _lastDiscoveryTime;
         private static PlayerZoneTracker _cachedZoneTracker;
+
+        public static bool CanClientSendGameplaySync =>
+            IsClient && _clientHandshakeDone && !WaitingWorldLoad && _clientSnapshotDone;
 
         private static ZoneDirector.Zone GetLocalZone(SceneContext ctx)
         {
@@ -201,6 +206,7 @@ namespace SlimeCoop
             _pendingJoinPass = password ?? string.Empty;
             _clientProfileLoaded = false;
             _clientHandshakeDone = false;
+            _clientSnapshotDone = false;
             _connectStartTime = Time.unscaledTime;
             _nextHelloRetryTime = _connectStartTime + 1.5f;
             StatusMessage = "Подключение к " + ep + "...";
@@ -241,6 +247,7 @@ namespace SlimeCoop
             WaitingWorldLoad = false;
             _clientProfileLoaded = false;
             _clientHandshakeDone = false;
+            _clientSnapshotDone = false;
             _serverEp = null;
             ConnectedPeers.Clear();
             PeersByEp.Clear();
@@ -255,6 +262,10 @@ namespace SlimeCoop
 
         public static void RefreshLanDiscovery()
         {
+            float now = Time.unscaledTime;
+            if (now - _lastDiscoveryTime < 0.8f && Transport.IsActive) return;
+            _lastDiscoveryTime = now;
+
             CoopLog.Info("RefreshLanDiscovery called (isActive=" + IsActive + ", localPort=" + Transport.LocalPort + ")");
             if (!Transport.IsActive)
             {
@@ -403,9 +414,12 @@ namespace SlimeCoop
 
         public static void SendToHostReliable(PacketType type, PacketWriter payload)
         {
-            if (IsClient && _serverEp != null)
+            if (IsClient && _serverEp != null && _clientHandshakeDone && !WaitingWorldLoad)
             {
-                Transport.SendReliable(_serverEp, type, payload);
+                if (type == PacketType.RequestSnapshot || type == PacketType.ChatMessage || _clientSnapshotDone)
+                {
+                    Transport.SendReliable(_serverEp, type, payload);
+                }
             }
         }
 
@@ -527,6 +541,7 @@ namespace SlimeCoop
 
         private static void SendLocalTransform(SceneContext ctx)
         {
+            if (IsClient && (!_clientHandshakeDone || WaitingWorldLoad)) return;
             Transform pt = ctx.Player.transform;
             Camera cam = Camera.main;
             float yaw = pt.eulerAngles.y;
@@ -1049,6 +1064,7 @@ namespace SlimeCoop
                     break;
 
                 case PacketType.WorldSnapshotEnd:
+                    _clientSnapshotDone = true;
                     CoopLog.Info("Client received WorldSnapshotEnd (ranch synced).");
                     AddChat("Система", "Общее ранчо синхронизировано!", true);
                     break;
