@@ -56,6 +56,8 @@ namespace SlimeCoop
         public static string StatusMessage = "Не подключено";
         public static int ClientPingMs;
         public static bool WaitingWorldLoad;
+        public static long PacketsSent => Transport.PacketsSent;
+        public static long PacketsReceived => Transport.PacketsReceived;
 
         public static readonly List<CoopPeerInfo> ConnectedPeers = new List<CoopPeerInfo>();
         public static readonly List<LanServerEntry> DiscoveredServers = new List<LanServerEntry>();

@@ -202,7 +202,12 @@ namespace SlimeCoop.Net
                                         nameLower.Contains("vmware") || nameLower.Contains("virtualbox") ||
                                         nameLower.Contains("vbox") || nameLower.Contains("loopback") ||
                                         nameLower.Contains("bluetooth") || nameLower.Contains("npcap") ||
-                                        nameLower.Contains("km-test");
+                                        nameLower.Contains("km-test") || nameLower.Contains("throne") ||
+                                        nameLower.Contains("nekoray") || nameLower.Contains("nekobox") ||
+                                        nameLower.Contains("sing-box") || nameLower.Contains("singbox") ||
+                                        nameLower.Contains("clash") || nameLower.Contains("mihomo") ||
+                                        nameLower.Contains("v2ray") || nameLower.Contains("xray") ||
+                                        nameLower.Contains("tun2socks");
 
                     bool isVpn = !isHypervisor && (
                                  nameLower.Contains("radmin") || nameLower.Contains("hamachi") ||
