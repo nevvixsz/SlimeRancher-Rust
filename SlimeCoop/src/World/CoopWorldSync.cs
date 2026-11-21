@@ -66,6 +66,8 @@ namespace SlimeCoop.World
         private static readonly Dictionary<string, GadgetSite> GadgetSiteCache =
             new Dictionary<string, GadgetSite>(128);
 
+        public static Vector3? PendingActorSpawnVelocity;
+
         private struct ActiveSyncItem
         {
             public long Id;
@@ -888,20 +890,32 @@ namespace SlimeCoop.World
                 }
             }
 
-            // 8. Nearby Actors (up to 250 closest dynamic actors so client sees ranch slimes & food right away!)
+            // 8. Nearby Actors (sorted by distance to host, up to 350 closest so players see all nearby slimes/food)
             Vector3 hostPos = ctx.Player != null ? ctx.Player.transform.position : Vector3.zero;
-            int sentActors = 0;
+            List<KeyValuePair<float, KeyValuePair<long, ActorModel>>> nearby = new List<KeyValuePair<float, KeyValuePair<long, ActorModel>>>(512);
             foreach (KeyValuePair<long, ActorModel> kv in ctx.GameModel.AllActors())
             {
                 ActorModel am = kv.Value;
                 if (am == null || am.ident == Identifiable.Id.NONE || am.ident == Identifiable.Id.PLAYER) continue;
                 Transform tr = ActorTransformRef(am);
                 if (tr == null) continue;
-                if ((tr.position - hostPos).sqrMagnitude > 140f * 140f) continue;
+                float sqr = (tr.position - hostPos).sqrMagnitude;
+                if (sqr > 150f * 150f) continue;
+                nearby.Add(new KeyValuePair<float, KeyValuePair<long, ActorModel>>(sqr, kv));
+            }
+
+            nearby.Sort((a, b) => a.Key.CompareTo(b.Key));
+            int limit = Math.Min(350, nearby.Count);
+            for (int i = 0; i < limit; i++)
+            {
+                long aid = nearby[i].Value.Key;
+                ActorModel am = nearby[i].Value.Value;
+                Transform tr = ActorTransformRef(am);
+                if (tr == null) continue;
 
                 w.Reset();
                 w.WriteByte(8); // ActorSpawn
-                w.WriteLong(kv.Key);
+                w.WriteLong(aid);
                 w.WriteInt((int)am.ident);
                 w.WriteVector3(tr.position);
                 w.WriteQuaternion(tr.rotation);
@@ -909,9 +923,6 @@ namespace SlimeCoop.World
                 w.WriteVector3(rb != null ? rb.velocity : Vector3.zero);
                 w.WriteByte((byte)am.currRegionSetId);
                 sendReliable(w);
-
-                sentActors++;
-                if (sentActors >= 250) break;
             }
         }
 

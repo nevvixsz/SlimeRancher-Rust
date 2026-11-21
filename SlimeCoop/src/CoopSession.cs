@@ -990,7 +990,14 @@ namespace SlimeCoop
             try { prefab = gctx.LookupDirector.GetPrefab(id); } catch { }
             if (prefab == null) return;
 
+            if (setId == RegionRegistry.RegionSetId.UNSET)
+            {
+                RegionMember pm = ctx.Player != null ? ctx.Player.GetComponent<RegionMember>() : null;
+                setId = pm != null && pm.setId != RegionRegistry.RegionSetId.UNSET ? pm.setId : RegionRegistry.RegionSetId.HOME;
+            }
+
             NetSyncGuard.SuppressPersonalProgressDepth++;
+            CoopWorldSync.PendingActorSpawnVelocity = vel;
             try
             {
                 GameObject go = SRBehaviour.InstantiateActor(prefab, setId, pos, Quaternion.identity, false);
@@ -1002,6 +1009,7 @@ namespace SlimeCoop
             }
             finally
             {
+                CoopWorldSync.PendingActorSpawnVelocity = null;
                 NetSyncGuard.SuppressPersonalProgressDepth--;
             }
         }
