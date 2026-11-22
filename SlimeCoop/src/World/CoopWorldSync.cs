@@ -52,6 +52,9 @@ namespace SlimeCoop.World
         private static readonly AccessTools.FieldRef<LandPlotModel, GameObject> PlotModelGoRef =
             AccessTools.FieldRefAccess<LandPlotModel, GameObject>("gameObj");
 
+        private static readonly AccessTools.FieldRef<LandPlot, LandPlotModel> PlotModelRef =
+            AccessTools.FieldRefAccess<LandPlot, LandPlotModel>("model");
+
         private static readonly AccessTools.FieldRef<ActorModel, Transform> ActorTransformRef =
             AccessTools.FieldRefAccess<ActorModel, Transform>("transform");
 
@@ -64,6 +67,9 @@ namespace SlimeCoop.World
         private static readonly AccessTools.FieldRef<TimeDirector, WorldModel> TimeWorldModelRef =
             AccessTools.FieldRefAccess<TimeDirector, WorldModel>("worldModel");
 
+        private static readonly AccessTools.FieldRef<PlayerState, PlayerModel> PlayerModelRef =
+            AccessTools.FieldRefAccess<PlayerState, PlayerModel>("model");
+
         private static readonly System.Reflection.MethodInfo GordoReachedTargetMethod =
             AccessTools.Method(typeof(GordoEat), "ReachedTarget");
 
@@ -75,6 +81,9 @@ namespace SlimeCoop.World
 
         private static readonly System.Reflection.MethodInfo ExchangeBreakSpawnSpecMethod =
             AccessTools.Method(typeof(ExchangeBreakOnImpact), "SpawnSpecReward");
+
+        private static readonly System.Reflection.MethodInfo WeaponVacCaptureEffectMethod =
+            AccessTools.Method(typeof(WeaponVacuum), "CaptureEffect");
 
         private static readonly AccessTools.FieldRef<DirectRewardEjector, bool> DirectEjectorRewardIsActorRef =
             AccessTools.FieldRefAccess<DirectRewardEjector, bool>("rewardIsActor");
@@ -165,7 +174,10 @@ namespace SlimeCoop.World
         private static bool _hostSiloEntriesDirty = true;
 
         private static readonly PacketWriter SnapshotWriter = new PacketWriter(1200);
+        private static readonly PacketWriter ClientTakeGrantWriter = new PacketWriter(64);
         private static readonly List<SiloStorage> SnapshotSiloScratch = new List<SiloStorage>(8);
+        private static readonly List<LandPlot.Upgrade> SnapshotUpgradesScratch = new List<LandPlot.Upgrade>(8);
+        private static readonly List<SiloSlotKey> SiloKeyScratch = new List<SiloSlotKey>(32);
         private static readonly List<KeyValuePair<float, KeyValuePair<long, ActorModel>>> SnapshotActorsScratch =
             new List<KeyValuePair<float, KeyValuePair<long, ActorModel>>>(512);
 
@@ -174,12 +186,6 @@ namespace SlimeCoop.World
 
         private static readonly Dictionary<SiloSlotKey, uint> ClientLastSlotRevision =
             new Dictionary<SiloSlotKey, uint>(64);
-
-        private static readonly Dictionary<SiloSlotKey, uint> ClientTakesSent =
-            new Dictionary<SiloSlotKey, uint>(32);
-
-        private static readonly Dictionary<SiloSlotKey, float> ClientLastTakeTime =
-            new Dictionary<SiloSlotKey, float>(32);
 
         private static uint _nextHostSiloRevision = 1;
 
@@ -203,16 +209,12 @@ namespace SlimeCoop.World
             _actorBatchCursor = 0;
             HostSiloStates.Clear();
             ClientLastSlotRevision.Clear();
-            ClientTakesSent.Clear();
-            ClientLastTakeTime.Clear();
             _nextHostSiloRevision = 1;
         }
 
         public static void ClearLocalActorsBeforeSnapshot()
         {
             ClientLastSlotRevision.Clear();
-            ClientTakesSent.Clear();
-            ClientLastTakeTime.Clear();
 
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             if (ctx == null || ctx.GameModel == null) return;
@@ -453,7 +455,7 @@ namespace SlimeCoop.World
             return loc;
         }
 
-        public static void ApplyTimeWeather(double worldTime, AmbianceDirector.Weather weather)
+        public static void ApplyTimeWeather(double worldTime, AmbianceDirector.Weather weather, bool forceSnap = false)
         {
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             if (ctx == null || ctx.TimeDirector == null) return;
@@ -462,10 +464,52 @@ namespace SlimeCoop.World
             if (wm != null)
             {
                 bool isLocked = SRSingleton<LockOnDeath>.Instance != null && SRSingleton<LockOnDeath>.Instance.Locked();
-                if (!ctx.TimeDirector.IsFastForwarding() && !isLocked && Math.Abs(wm.worldTime - worldTime) > 1.5)
+                double threshold = forceSnap ? 1.5 : 120.0;
+                if (!ctx.TimeDirector.IsFastForwarding() && !isLocked && Math.Abs(wm.worldTime - worldTime) > threshold)
                 {
+                    double oldTime = wm.worldTime;
+                    double delta = worldTime - oldTime;
                     wm.worldTime = worldTime;
+
+                    PlayerModel pm = ctx.PlayerState != null ? PlayerModelRef(ctx.PlayerState) : null;
+                    if (pm != null)
+                    {
+                        if (!double.IsInfinity(pm.energyRecoverAfter) && !double.IsNaN(pm.energyRecoverAfter))
+                        {
+                            pm.energyRecoverAfter = Math.Min(pm.energyRecoverAfter + delta, worldTime + 300.0);
+                        }
+                        if (!double.IsInfinity(pm.healthBurstAfter) && !double.IsNaN(pm.healthBurstAfter))
+                        {
+                            pm.healthBurstAfter = Math.Min(pm.healthBurstAfter + delta, worldTime + 300.0);
+                        }
+                        if (!double.IsInfinity(pm.radRecoverAfter) && !double.IsNaN(pm.radRecoverAfter))
+                        {
+                            pm.radRecoverAfter = Math.Min(pm.radRecoverAfter + delta, worldTime + 600.0);
+                        }
+                    }
                 }
+
+                // Safety net: ensure personal recovery timers can never get stranded far in the future.
+                PlayerModel pModel = ctx.PlayerState != null ? PlayerModelRef(ctx.PlayerState) : null;
+                if (pModel != null)
+                {
+                    if (pModel.currEnergy < (float)pModel.maxEnergy &&
+                        (double.IsInfinity(pModel.energyRecoverAfter) || double.IsNaN(pModel.energyRecoverAfter) || pModel.energyRecoverAfter > wm.worldTime + 300.0))
+                    {
+                        pModel.energyRecoverAfter = wm.worldTime + 300.0;
+                    }
+                    if (pModel.currHealth < (float)pModel.maxHealth &&
+                        (double.IsInfinity(pModel.healthBurstAfter) || double.IsNaN(pModel.healthBurstAfter) || pModel.healthBurstAfter > wm.worldTime + 300.0))
+                    {
+                        pModel.healthBurstAfter = wm.worldTime + 300.0;
+                    }
+                    if (pModel.currRads > 0f &&
+                        (double.IsInfinity(pModel.radRecoverAfter) || double.IsNaN(pModel.radRecoverAfter) || pModel.radRecoverAfter > wm.worldTime + 600.0))
+                    {
+                        pModel.radRecoverAfter = wm.worldTime + 600.0;
+                    }
+                }
+
                 wm.currWeather = weather;
             }
         }
@@ -493,6 +537,7 @@ namespace SlimeCoop.World
                 {
                     loc.Replace(cur, prefab);
                     InvalidatePlotSilos(plotId);
+                    ResetPlotSiloTracking(plotId);
                 }
             }
             finally
@@ -500,6 +545,98 @@ namespace SlimeCoop.World
                 NetSyncGuard.SuppressPersonalProgressDepth--;
                 NetSyncGuard.ApplyingRemoteDepth--;
             }
+        }
+
+        private static bool HasExtraPlotUpgrades(LandPlot cur, List<LandPlot.Upgrade> hostUpgrades)
+        {
+            if (cur == null) return false;
+            LandPlotModel model = PlotModelRef(cur);
+            if (model == null || model.upgrades == null || model.upgrades.Count == 0) return false;
+
+            foreach (LandPlot.Upgrade u in model.upgrades)
+            {
+                if (!hostUpgrades.Contains(u))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public static void ClearPlotSilos(string plotId)
+        {
+            LandPlotLocation loc = FindPlot(plotId);
+            if (loc == null) return;
+
+            SiloStorage[] silos = GetPlotSilos(plotId, loc);
+            if (silos == null || silos.Length == 0) return;
+
+            NetSyncGuard.ApplyingRemoteDepth++;
+            NetSyncGuard.SuppressPersonalProgressDepth++;
+            try
+            {
+                for (int i = 0; i < silos.Length; i++)
+                {
+                    SiloStorage ss = silos[i];
+                    if (ss == null) continue;
+                    Ammo ammo = ss.GetRelevantAmmo();
+                    if (ammo == null) continue;
+                    int sc = ammo.GetUsableSlotCount();
+                    for (int s = 0; s < sc; s++)
+                    {
+                        if (ammo.GetSlotCount(s) > 0 || ammo.GetSlotName(s) != Identifiable.Id.NONE)
+                        {
+                            ammo.Clear(s);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                NetSyncGuard.SuppressPersonalProgressDepth--;
+                NetSyncGuard.ApplyingRemoteDepth--;
+            }
+        }
+
+        public static void ApplySnapshotLandPlot(string plotId, LandPlot.Id typeId, List<LandPlot.Upgrade> hostUpgrades, Identifiable.Id cropId)
+        {
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            GameContext gctx = SRSingleton<GameContext>.Instance;
+            if (ctx == null || gctx == null || gctx.LookupDirector == null) return;
+
+            LandPlotLocation loc = FindPlot(plotId);
+            if (loc == null) return;
+
+            LandPlot cur = loc.GetComponentInChildren<LandPlot>();
+            bool needReplace = cur == null || cur.typeId != typeId || HasExtraPlotUpgrades(cur, hostUpgrades);
+            if (needReplace)
+            {
+                GameObject prefab = gctx.LookupDirector.GetPlotPrefab(typeId);
+                if (prefab != null && cur != null)
+                {
+                    NetSyncGuard.ApplyingRemoteDepth++;
+                    NetSyncGuard.SuppressPersonalProgressDepth++;
+                    try
+                    {
+                        loc.Replace(cur, prefab);
+                        InvalidatePlotSilos(plotId);
+                    }
+                    finally
+                    {
+                        NetSyncGuard.SuppressPersonalProgressDepth--;
+                        NetSyncGuard.ApplyingRemoteDepth--;
+                    }
+                }
+            }
+
+            for (int i = 0; i < hostUpgrades.Count; i++)
+            {
+                ApplyPlotUpgrade(plotId, hostUpgrades[i]);
+            }
+
+            ApplyPlotPlant(plotId, cropId);
+            ResetPlotSiloTracking(plotId);
+            ClearPlotSilos(plotId);
         }
 
         public static void ApplyPlotUpgrade(string plotId, LandPlot.Upgrade upgrade)
@@ -556,6 +693,32 @@ namespace SlimeCoop.World
                 NetSyncGuard.SuppressPersonalProgressDepth--;
                 NetSyncGuard.ApplyingRemoteDepth--;
             }
+        }
+
+        private static void RemovePlotKeysFromDict<T>(Dictionary<SiloSlotKey, T> dict, string plotId)
+        {
+            if (dict == null || dict.Count == 0 || string.IsNullOrEmpty(plotId)) return;
+            SiloKeyScratch.Clear();
+            foreach (KeyValuePair<SiloSlotKey, T> kv in dict)
+            {
+                if (string.Equals(kv.Key.PlotId, plotId, StringComparison.Ordinal))
+                {
+                    SiloKeyScratch.Add(kv.Key);
+                }
+            }
+            for (int i = 0; i < SiloKeyScratch.Count; i++)
+            {
+                dict.Remove(SiloKeyScratch[i]);
+            }
+            SiloKeyScratch.Clear();
+        }
+
+        public static void ResetPlotSiloTracking(string plotId)
+        {
+            if (string.IsNullOrEmpty(plotId)) return;
+            RemovePlotKeysFromDict(HostSiloStates, plotId);
+            RemovePlotKeysFromDict(ClientLastSlotRevision, plotId);
+            CoopSession.ClearPeerSiloTakesForPlot(plotId);
         }
 
         public static void InvalidatePlotSilos(string plotId)
@@ -690,13 +853,6 @@ namespace SlimeCoop.World
         public static void HandleHostSiloSlotTake(CoopPeerInfo peer, string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id expectedItem)
         {
             if (!CoopSession.IsHost || peer == null) return;
-            SiloSlotKey slotKey = new SiloSlotKey
-            {
-                PlotId = plotId ?? string.Empty,
-                StorageType = storageType,
-                SlotIdx = slotIdx
-            };
-            peer.IncrementSiloTakesProcessed(slotKey);
 
             LandPlotLocation loc = FindPlot(plotId);
             if (loc == null) return;
@@ -718,11 +874,19 @@ namespace SlimeCoop.World
             Ammo ammo = target.GetRelevantAmmo();
             if (ammo == null || slotIdx < 0 || slotIdx >= ammo.GetUsableSlotCount()) return;
 
-            Identifiable.Id curId = ammo.GetSlotName(slotIdx);
             int curCount = ammo.GetSlotCount(slotIdx);
+            Identifiable.Id curId = curCount > 0 ? ammo.GetSlotName(slotIdx) : Identifiable.Id.NONE;
             if (curCount > 0 && curId != Identifiable.Id.NONE &&
                 (expectedItem == Identifiable.Id.NONE || expectedItem == curId))
             {
+                SiloSlotKey slotKey = new SiloSlotKey
+                {
+                    PlotId = plotId ?? string.Empty,
+                    StorageType = storageType,
+                    SlotIdx = slotIdx
+                };
+                peer.IncrementSiloTakesProcessed(slotKey);
+
                 NetSyncGuard.ApplyingRemoteDepth++;
                 NetSyncGuard.SuppressPersonalProgressDepth++;
                 try
@@ -734,9 +898,22 @@ namespace SlimeCoop.World
                     NetSyncGuard.SuppressPersonalProgressDepth--;
                     NetSyncGuard.ApplyingRemoteDepth--;
                 }
+
+                PushHostSiloSlotInternal(plotId, target, slotIdx, true);
+                CoopSession.SendSiloTakeGrant(peer, curId);
+                return;
             }
 
-            PushHostSiloSlotInternal(plotId, target, slotIdx, true);
+            // Host state differs from client expectation (empty or different plort): force exact slot sync to this peer.
+            uint rev = RecordAndGetHostSlotRevision(plotId, target.type, slotIdx, curId, curCount, out bool changed);
+            if (changed && CoopSession.ConnectedPeers.Count > 0)
+            {
+                CoopSession.BroadcastHostSiloSlot(plotId, target.type, slotIdx, curId, curCount, rev);
+            }
+            else
+            {
+                CoopSession.SendHostSiloSlotToPeer(peer, plotId, target.type, slotIdx, curId, curCount, rev);
+            }
         }
 
         public static void SyncDirtyHostSilos()
@@ -771,18 +948,25 @@ namespace SlimeCoop.World
             LandPlotLocation loc = silo.GetComponentInParent<LandPlotLocation>();
             if (loc == null || string.IsNullOrEmpty(loc.id)) return;
 
+            CoopSession.SendSiloSlotTake(loc.id, silo.type, slotIdx, itemId);
+        }
+
+        public static void ApplySnapshotSiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int hostCount, uint hostRevision)
+        {
+            if (hostCount <= 0 || itemId == Identifiable.Id.NONE)
+            {
+                itemId = Identifiable.Id.NONE;
+                hostCount = 0;
+            }
+
             SiloSlotKey key = new SiloSlotKey
             {
-                PlotId = loc.id,
-                StorageType = silo.type,
+                PlotId = plotId ?? string.Empty,
+                StorageType = storageType,
                 SlotIdx = slotIdx
             };
-
-            ClientTakesSent.TryGetValue(key, out uint sent);
-            ClientTakesSent[key] = sent + 1;
-            ClientLastTakeTime[key] = Time.unscaledTime;
-
-            CoopSession.SendSiloSlotTake(loc.id, silo.type, slotIdx, itemId);
+            ClientLastSlotRevision[key] = hostRevision;
+            ApplySiloSlot(plotId, storageType, slotIdx, itemId, hostCount);
         }
 
         public static void ApplyHostSiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int hostCount, uint hostRevision, uint ackedTakesCount)
@@ -800,45 +984,55 @@ namespace SlimeCoop.World
                 SlotIdx = slotIdx
             };
 
-            bool isSameRev = false;
-            if (ClientLastSlotRevision.TryGetValue(key, out uint lastRev))
-            {
-                if (hostRevision < lastRev)
-                {
-                    return;
-                }
-                if (hostRevision == lastRev)
-                {
-                    isSameRev = true;
-                }
-            }
-            ClientLastSlotRevision[key] = hostRevision;
-
-            ClientTakesSent.TryGetValue(key, out uint sentTakes);
-            if (ackedTakesCount > sentTakes)
-            {
-                sentTakes = ackedTakesCount;
-                ClientTakesSent[key] = sentTakes;
-            }
-            else if (sentTakes > ackedTakesCount &&
-                     ClientLastTakeTime.TryGetValue(key, out float lastTakeTime) &&
-                     Time.unscaledTime - lastTakeTime > 3.0f)
-            {
-                sentTakes = ackedTakesCount;
-                ClientTakesSent[key] = sentTakes;
-            }
-
-            int inFlight = (int)(sentTakes - ackedTakesCount);
-            if (isSameRev && inFlight > 0 && hostCount > 0)
+            if (ClientLastSlotRevision.TryGetValue(key, out uint lastRev) && hostRevision < lastRev)
             {
                 return;
             }
+            ClientLastSlotRevision[key] = hostRevision;
+            ApplySiloSlot(plotId, storageType, slotIdx, itemId, hostCount);
+        }
 
-            int finalCount = (itemId == Identifiable.Id.NONE || hostCount <= 0)
-                ? 0
-                : Math.Max(0, hostCount - inFlight);
-            Identifiable.Id finalItem = finalCount > 0 ? itemId : Identifiable.Id.NONE;
-            ApplySiloSlot(plotId, storageType, slotIdx, finalItem, finalCount);
+        public static void ApplySiloTakeGrant(Identifiable.Id itemId)
+        {
+            if (!CoopSession.IsClient || itemId == Identifiable.Id.NONE) return;
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.PlayerState == null || ctx.PlayerState.Ammo == null) return;
+
+            WeaponVacuum vac = ctx.Player != null ? ctx.Player.GetComponentInChildren<WeaponVacuum>() : null;
+            if (ctx.PlayerState.Ammo.MaybeAddToSlot(itemId, null))
+            {
+                if (vac != null && WeaponVacCaptureEffectMethod != null)
+                {
+                    try
+                    {
+                        WeaponVacCaptureEffectMethod.Invoke(vac, null);
+                    }
+                    catch
+                    {
+                    }
+                }
+                return;
+            }
+
+            // Vacpack filled up while request was in flight: drop the item in front of the player via host.
+            Vector3 pos = ctx.Player != null ? ctx.Player.transform.position + ctx.Player.transform.forward * 1.1f + Vector3.up * 0.9f : Vector3.zero;
+            Vector3 vel = ctx.Player != null ? ctx.Player.transform.forward * 3.5f : Vector3.zero;
+            if (vac != null && vac.vacOrigin != null)
+            {
+                pos = vac.vacOrigin.transform.position + vac.vacOrigin.transform.up * 0.8f;
+                vel = vac.vacOrigin.transform.up * 3.5f;
+            }
+            RegionMember rm = ctx.Player != null ? ctx.Player.GetComponent<RegionMember>() : null;
+            RegionRegistry.RegionSetId setId = rm != null && rm.setId != RegionRegistry.RegionSetId.UNSET
+                ? rm.setId
+                : RegionRegistry.RegionSetId.HOME;
+
+            ClientTakeGrantWriter.Reset();
+            ClientTakeGrantWriter.WriteInt((int)itemId);
+            ClientTakeGrantWriter.WriteVector3(pos);
+            ClientTakeGrantWriter.WriteVector3(vel);
+            ClientTakeGrantWriter.WriteByte((byte)setId);
+            CoopSession.SendToHostReliable(PacketType.ClientExpelRequest, ClientTakeGrantWriter);
         }
 
         public static void ApplySiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int count)
@@ -1641,22 +1835,20 @@ namespace SlimeCoop.World
                 case 1: // TimeWeather
                     double wt = r.ReadDouble();
                     AmbianceDirector.Weather weather = (AmbianceDirector.Weather)r.ReadByte();
-                    ApplyTimeWeather(wt, weather);
+                    ApplyTimeWeather(wt, weather, true);
                     break;
                 case 2: // LandPlot
                     string plotId = r.ReadString();
                     LandPlot.Id typeId = (LandPlot.Id)r.ReadInt();
                     Identifiable.Id cropId = (Identifiable.Id)r.ReadInt();
                     byte upgCount = r.ReadByte();
-                    ApplyPlotBuild(plotId, typeId);
+                    SnapshotUpgradesScratch.Clear();
                     for (int i = 0; i < upgCount; i++)
                     {
-                        ApplyPlotUpgrade(plotId, (LandPlot.Upgrade)r.ReadInt());
+                        SnapshotUpgradesScratch.Add((LandPlot.Upgrade)r.ReadInt());
                     }
-                    if (cropId != Identifiable.Id.NONE)
-                    {
-                        ApplyPlotPlant(plotId, cropId);
-                    }
+                    ApplySnapshotLandPlot(plotId, typeId, SnapshotUpgradesScratch, cropId);
+                    SnapshotUpgradesScratch.Clear();
                     byte siloCount = r.ReadByte();
                     for (int si = 0; si < siloCount; si++)
                     {
@@ -1667,7 +1859,7 @@ namespace SlimeCoop.World
                             Identifiable.Id itemId = (Identifiable.Id)r.ReadInt();
                             int cnt = r.ReadInt();
                             uint rev = r.ReadUInt();
-                            ApplyHostSiloSlot(plotId, storageType, s, itemId, cnt, rev, 0);
+                            ApplySnapshotSiloSlot(plotId, storageType, s, itemId, cnt, rev);
                         }
                     }
                     break;
