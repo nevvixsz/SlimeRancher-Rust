@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net;
 using HarmonyLib;
 using MonomiPark.SlimeRancher.DataModel;
 using MonomiPark.SlimeRancher.Regions;
+using SlimeCoop.Net;
 using SlimeCoop.Protocol;
 using UnityEngine;
 
@@ -63,6 +66,21 @@ namespace SlimeCoop.World
 
         private static readonly AccessTools.FieldRef<GordoEat, GordoRewardsBase> GordoRewardsRef =
             AccessTools.FieldRefAccess<GordoEat, GordoRewardsBase>("rewards");
+
+        private static readonly AccessTools.FieldRef<GordoSnare, SnareModel> GordoSnareModelRef =
+            AccessTools.FieldRefAccess<GordoSnare, SnareModel>("model");
+
+        private static readonly AccessTools.FieldRef<GordoSnare, bool> GordoSnareIsSnaredRef =
+            AccessTools.FieldRefAccess<GordoSnare, bool>("isSnared");
+
+        private static readonly System.Reflection.MethodInfo GordoSnareAttachBaitMethod =
+            AccessTools.Method(typeof(GordoSnare), "AttachBait", new[] { typeof(Identifiable.Id) });
+
+        private static readonly System.Reflection.MethodInfo GordoSnareSnareGordoMethod =
+            AccessTools.Method(typeof(GordoSnare), "SnareGordo", new[] { typeof(Identifiable.Id) });
+
+        private static readonly System.Reflection.MethodInfo GordoSnareClearBaitMethod =
+            AccessTools.Method(typeof(GordoSnare), "ClearBait");
 
         private static readonly AccessTools.FieldRef<TimeDirector, WorldModel> TimeWorldModelRef =
             AccessTools.FieldRefAccess<TimeDirector, WorldModel>("worldModel");
@@ -144,6 +162,28 @@ namespace SlimeCoop.World
         private static readonly Dictionary<string, GadgetSite> GadgetSiteCache =
             new Dictionary<string, GadgetSite>(128);
 
+        private struct PendingGadgetPlace
+        {
+            public Gadget.Id GadgetId;
+            public float Yaw;
+        }
+
+        private struct PendingSnareState
+        {
+            public Identifiable.Id BaitTypeId;
+            public Identifiable.Id GordoTypeId;
+            public int GordoEatenCount;
+        }
+
+        private static readonly Dictionary<string, int> PendingGordoStates =
+            new Dictionary<string, int>(32);
+
+        private static readonly Dictionary<string, PendingGadgetPlace> PendingGadgetStates =
+            new Dictionary<string, PendingGadgetPlace>(32);
+
+        private static readonly Dictionary<string, PendingSnareState> PendingSnareStates =
+            new Dictionary<string, PendingSnareState>(16);
+
         public static Vector3? PendingActorSpawnVelocity;
 
         private struct ActiveSyncItem
@@ -189,6 +229,27 @@ namespace SlimeCoop.World
 
         private static uint _nextHostSiloRevision = 1;
 
+        private struct QueuedSnapshotPacket
+        {
+            public PacketType Type;
+            public byte[] Data;
+        }
+
+        private sealed class PeerSnapshotJob
+        {
+            public IPEndPoint EndPoint;
+            public readonly Queue<QueuedSnapshotPacket> Packets = new Queue<QueuedSnapshotPacket>(128);
+            public int TotalPackets;
+        }
+
+        private static readonly List<PeerSnapshotJob> ActiveSnapshotJobs = new List<PeerSnapshotJob>(4);
+        private static readonly Queue<byte[]> ClientSnapshotApplyQueue = new Queue<byte[]>(128);
+        private static readonly Stopwatch SnapshotBudgetTimer = new Stopwatch();
+        private static bool _pendingSnapshotEnd;
+        private static bool _pendingHostSpawn;
+        private static Vector3 _pendingHostSpawnPos;
+        private static RegionRegistry.RegionSetId _pendingHostSpawnSet;
+
         private static readonly List<ActiveSyncItem> PendingHostSyncActors = new List<ActiveSyncItem>(128);
         private static int _actorBatchCursor;
 
@@ -205,7 +266,14 @@ namespace SlimeCoop.World
             OasisCache.Clear();
             PodCache.Clear();
             GadgetSiteCache.Clear();
+            PendingGordoStates.Clear();
+            PendingGadgetStates.Clear();
+            PendingSnareStates.Clear();
             PendingHostSyncActors.Clear();
+            ActiveSnapshotJobs.Clear();
+            ClientSnapshotApplyQueue.Clear();
+            _pendingSnapshotEnd = false;
+            _pendingHostSpawn = false;
             _actorBatchCursor = 0;
             HostSiloStates.Clear();
             ClientLastSlotRevision.Clear();
@@ -215,6 +283,12 @@ namespace SlimeCoop.World
         public static void ClearLocalActorsBeforeSnapshot()
         {
             ClientLastSlotRevision.Clear();
+            PendingGordoStates.Clear();
+            PendingGadgetStates.Clear();
+            PendingSnareStates.Clear();
+            ClientSnapshotApplyQueue.Clear();
+            _pendingSnapshotEnd = false;
+            _pendingHostSpawn = false;
 
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             if (ctx == null || ctx.GameModel == null) return;
@@ -346,6 +420,12 @@ namespace SlimeCoop.World
             }
             cached = default(CachedNetActor);
             return false;
+        }
+
+        public static void EnsureSceneObjectCaches()
+        {
+            if (PlotCache.Count > 0 || DoorCache.Count > 0 || GordoCache.Count > 0) return;
+            RebuildSceneObjectCaches();
         }
 
         public static void RebuildSceneObjectCaches()
@@ -1363,8 +1443,24 @@ namespace SlimeCoop.World
             }
         }
 
+        public static void OnClientGordoModelSet(GordoEat gordo)
+        {
+            if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || gordo == null || string.IsNullOrEmpty(gordo.id))
+            {
+                return;
+            }
+            GordoCache[gordo.id] = gordo;
+            if (PendingGordoStates.TryGetValue(gordo.id, out int eatenCount))
+            {
+                ApplyGordoEat(gordo.id, eatenCount);
+            }
+        }
+
         public static void ApplyGordoEat(string gordoId, int eatenCount)
         {
+            if (string.IsNullOrEmpty(gordoId)) return;
+            PendingGordoStates[gordoId] = eatenCount;
+
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             if (ctx != null && ctx.GameModel != null && ctx.GameModel.AllGordos().TryGetValue(gordoId, out GordoModel gm) && gm != null)
             {
@@ -1373,8 +1469,18 @@ namespace SlimeCoop.World
 
             if (!GordoCache.TryGetValue(gordoId, out GordoEat gordo) || gordo == null)
             {
-                RebuildSceneObjectCaches();
-                GordoCache.TryGetValue(gordoId, out gordo);
+                if (ctx != null && ctx.GameModel != null && ctx.GameModel.AllGordos().ContainsKey(gordoId))
+                {
+                    GordoEat[] all = UnityEngine.Object.FindObjectsOfType<GordoEat>();
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        if (all[i] != null && !string.IsNullOrEmpty(all[i].id))
+                        {
+                            GordoCache[all[i].id] = all[i];
+                        }
+                    }
+                    GordoCache.TryGetValue(gordoId, out gordo);
+                }
             }
 
             if (gordo != null)
@@ -1395,10 +1501,17 @@ namespace SlimeCoop.World
                         if (rew != null) rew.SetupActiveRewards();
                         gordo.gameObject.SetActive(false);
                     }
-                    else if (eatenCount >= gordo.GetTargetCount() && gordo.GetTargetCount() > 0 && GordoReachedTargetMethod != null)
+                    else
                     {
-                        var routine = GordoReachedTargetMethod.Invoke(gordo, null) as System.Collections.IEnumerator;
-                        if (routine != null) gordo.StartCoroutine(routine);
+                        if (!gordo.gameObject.activeSelf && !(gordo is EventGordoEat))
+                        {
+                            gordo.gameObject.SetActive(true);
+                        }
+                        if (eatenCount >= gordo.GetTargetCount() && gordo.GetTargetCount() > 0 && GordoReachedTargetMethod != null)
+                        {
+                            var routine = GordoReachedTargetMethod.Invoke(gordo, null) as System.Collections.IEnumerator;
+                            if (routine != null) gordo.StartCoroutine(routine);
+                        }
                     }
                 }
                 finally
@@ -1469,8 +1582,28 @@ namespace SlimeCoop.World
             }
         }
 
+        public static void OnClientGadgetSiteModelSet(GadgetSite site)
+        {
+            if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || site == null || string.IsNullOrEmpty(site.id))
+            {
+                return;
+            }
+            GadgetSiteCache[site.id] = site;
+            if (PendingGadgetStates.TryGetValue(site.id, out PendingGadgetPlace place))
+            {
+                ApplyGadgetPlace(site.id, place.GadgetId, place.Yaw);
+            }
+            if (PendingSnareStates.TryGetValue(site.id, out PendingSnareState snareState))
+            {
+                ApplySnareState(site.id, snareState.BaitTypeId, snareState.GordoTypeId, snareState.GordoEatenCount);
+            }
+        }
+
         public static void ApplyGadgetPlace(string siteId, Gadget.Id gadgetId, float yaw)
         {
+            if (string.IsNullOrEmpty(siteId)) return;
+            PendingGadgetStates[siteId] = new PendingGadgetPlace { GadgetId = gadgetId, Yaw = yaw };
+
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             GameContext gctx = SRSingleton<GameContext>.Instance;
             if (ctx == null || gctx == null || ctx.GameModel == null || gctx.LookupDirector == null) return;
@@ -1512,6 +1645,10 @@ namespace SlimeCoop.World
 
         public static void ApplyGadgetDestroy(string siteId)
         {
+            if (string.IsNullOrEmpty(siteId)) return;
+            PendingGadgetStates.Remove(siteId);
+            PendingSnareStates.Remove(siteId);
+
             if (!GadgetSiteCache.TryGetValue(siteId, out GadgetSite site) || site == null)
             {
                 RebuildSceneObjectCaches();
@@ -1531,6 +1668,120 @@ namespace SlimeCoop.World
                     NetSyncGuard.SuppressPersonalProgressDepth--;
                     NetSyncGuard.ApplyingRemoteDepth--;
                 }
+            }
+        }
+
+        public static bool TryGetSnareState(GordoSnare snare, out string siteId, out Identifiable.Id baitTypeId, out Identifiable.Id gordoTypeId, out int gordoEatenCount)
+        {
+            siteId = null;
+            baitTypeId = Identifiable.Id.NONE;
+            gordoTypeId = Identifiable.Id.NONE;
+            gordoEatenCount = 0;
+            if (snare == null) return false;
+
+            GadgetSite site = snare.GetComponentInParent<GadgetSite>();
+            if (site == null || string.IsNullOrEmpty(site.id)) return false;
+
+            SnareModel model = GordoSnareModelRef(snare);
+            if (model == null) return false;
+
+            siteId = site.id;
+            baitTypeId = model.baitTypeId;
+            gordoTypeId = model.gordoTypeId;
+            gordoEatenCount = model.gordoEatenCount;
+            return true;
+        }
+
+        public static void ApplySnareState(string siteId, Identifiable.Id baitTypeId, Identifiable.Id gordoTypeId, int gordoEatenCount)
+        {
+            if (string.IsNullOrEmpty(siteId)) return;
+            PendingSnareStates[siteId] = new PendingSnareState
+            {
+                BaitTypeId = baitTypeId,
+                GordoTypeId = gordoTypeId,
+                GordoEatenCount = gordoEatenCount
+            };
+
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.GameModel == null) return;
+
+            if (!ctx.GameModel.AllGadgetSites().TryGetValue(siteId, out GadgetSiteModel siteModel) || siteModel == null)
+            {
+                return;
+            }
+
+            SnareModel snareModel = siteModel.attached as SnareModel;
+            if (snareModel == null) return;
+
+            GordoSnare snare = null;
+            if (GadgetSiteCache.TryGetValue(siteId, out GadgetSite cachedSite) && cachedSite != null)
+            {
+                snare = cachedSite.GetComponentInChildren<GordoSnare>(true);
+            }
+            else if (siteModel.transform != null)
+            {
+                snare = siteModel.transform.GetComponentInChildren<GordoSnare>(true);
+            }
+
+            if (snare == null)
+            {
+                snareModel.baitTypeId = baitTypeId;
+                snareModel.gordoTypeId = gordoTypeId;
+                snareModel.gordoEatenCount = gordoEatenCount;
+                return;
+            }
+
+            NetSyncGuard.ApplyingRemoteDepth++;
+            NetSyncGuard.SuppressPersonalProgressDepth++;
+            try
+            {
+                if (gordoTypeId != Identifiable.Id.NONE)
+                {
+                    if ((snareModel.gordoTypeId != gordoTypeId || !GordoSnareIsSnaredRef(snare)) && GordoSnareSnareGordoMethod != null)
+                    {
+                        GordoSnareSnareGordoMethod.Invoke(snare, new object[] { gordoTypeId });
+                    }
+                    snareModel.gordoEatenCount = gordoEatenCount;
+                    GordoEat ge = snare.GetComponentInChildren<GordoEat>(true);
+                    if (ge != null)
+                    {
+                        if (gordoEatenCount == -1)
+                        {
+                            GordoRewardsBase rew = GordoRewardsRef(ge);
+                            if (rew != null) rew.SetupActiveRewards();
+                            ge.gameObject.SetActive(false);
+                        }
+                        else
+                        {
+                            if (!ge.gameObject.activeSelf) ge.gameObject.SetActive(true);
+                            if (gordoEatenCount >= ge.GetTargetCount() && ge.GetTargetCount() > 0 && GordoReachedTargetMethod != null)
+                            {
+                                var routine = GordoReachedTargetMethod.Invoke(ge, null) as System.Collections.IEnumerator;
+                                if (routine != null) ge.StartCoroutine(routine);
+                            }
+                        }
+                    }
+                }
+                else if (baitTypeId != Identifiable.Id.NONE)
+                {
+                    if (snareModel.baitTypeId != baitTypeId && GordoSnareAttachBaitMethod != null)
+                    {
+                        GordoSnareAttachBaitMethod.Invoke(snare, new object[] { baitTypeId });
+                    }
+                }
+                else
+                {
+                    if (GordoSnareClearBaitMethod != null)
+                    {
+                        GordoSnareClearBaitMethod.Invoke(snare, null);
+                    }
+                    snareModel.baitTypeId = Identifiable.Id.NONE;
+                }
+            }
+            finally
+            {
+                NetSyncGuard.SuppressPersonalProgressDepth--;
+                NetSyncGuard.ApplyingRemoteDepth--;
             }
         }
 
@@ -1635,12 +1886,158 @@ namespace SlimeCoop.World
             }
         }
 
+        public static void CancelSnapshotForPeer(IPEndPoint ep)
+        {
+            if (ep == null) return;
+            for (int i = ActiveSnapshotJobs.Count - 1; i >= 0; i--)
+            {
+                if (ActiveSnapshotJobs[i].EndPoint != null && ActiveSnapshotJobs[i].EndPoint.Equals(ep))
+                {
+                    ActiveSnapshotJobs.RemoveAt(i);
+                }
+            }
+        }
+
+        public static int QueueFullSnapshotForPeer(IPEndPoint ep)
+        {
+            if (ep == null) return 0;
+            CancelSnapshotForPeer(ep);
+
+            PeerSnapshotJob job = new PeerSnapshotJob { EndPoint = ep };
+            SendFullSnapshotToClient(chunk =>
+            {
+                byte[] copy = new byte[chunk.Length];
+                Buffer.BlockCopy(chunk.Buffer, 0, copy, 0, chunk.Length);
+                job.Packets.Enqueue(new QueuedSnapshotPacket
+                {
+                    Type = PacketType.WorldSnapshotChunk,
+                    Data = copy
+                });
+            });
+
+            SceneContext hctx = SRSingleton<SceneContext>.Instance;
+            bool hasHostPos = hctx != null && hctx.Player != null;
+            Vector3 hostSpawnPos = hasHostPos ? hctx.Player.transform.position : Vector3.zero;
+            RegionMember hrm = hasHostPos ? hctx.Player.GetComponent<RegionMember>() : null;
+            RegionRegistry.RegionSetId hSet = hrm != null ? hrm.setId : RegionRegistry.RegionSetId.HOME;
+
+            PacketWriter endW = SnapshotWriter;
+            endW.Reset();
+            endW.WriteBool(hasHostPos);
+            endW.WriteVector3(hostSpawnPos);
+            endW.WriteByte((byte)hSet);
+            byte[] endCopy = new byte[endW.Length];
+            Buffer.BlockCopy(endW.Buffer, 0, endCopy, 0, endW.Length);
+            job.Packets.Enqueue(new QueuedSnapshotPacket
+            {
+                Type = PacketType.WorldSnapshotEnd,
+                Data = endCopy
+            });
+
+            job.TotalPackets = job.Packets.Count;
+            ActiveSnapshotJobs.Add(job);
+            return job.TotalPackets;
+        }
+
+        public static void PumpSnapshotSends(NetTransport transport, int maxPacketsPerFrame = 6)
+        {
+            if (transport == null || !transport.IsActive || ActiveSnapshotJobs.Count == 0) return;
+
+            int sent = 0;
+            int idx = 0;
+            while (ActiveSnapshotJobs.Count > 0 && sent < maxPacketsPerFrame)
+            {
+                if (idx >= ActiveSnapshotJobs.Count) idx = 0;
+                PeerSnapshotJob job = ActiveSnapshotJobs[idx];
+                if (job.Packets.Count == 0)
+                {
+                    ActiveSnapshotJobs.RemoveAt(idx);
+                    continue;
+                }
+
+                QueuedSnapshotPacket pkt = job.Packets.Dequeue();
+                transport.SendReliable(job.EndPoint, pkt.Type, pkt.Data, pkt.Data != null ? pkt.Data.Length : 0);
+                sent++;
+
+                if (job.Packets.Count == 0)
+                {
+                    CoopLog.Info("Host finished streaming WorldSnapshot (" + job.TotalPackets + " packets) to " + job.EndPoint);
+                    ActiveSnapshotJobs.RemoveAt(idx);
+                }
+                else
+                {
+                    idx++;
+                }
+            }
+        }
+
+        public static void QueueClientSnapshotChunk(ref PacketReader r)
+        {
+            int rem = r.Remaining;
+            if (rem <= 0) return;
+            byte[] copy = new byte[rem];
+            Buffer.BlockCopy(r.Buffer, r.Offset, copy, 0, rem);
+            ClientSnapshotApplyQueue.Enqueue(copy);
+        }
+
+        public static void QueueClientSnapshotEnd(bool hasHostSpawn, Vector3 hostSpawn, RegionRegistry.RegionSetId hostSet)
+        {
+            _pendingSnapshotEnd = true;
+            _pendingHostSpawn = hasHostSpawn;
+            _pendingHostSpawnPos = hostSpawn;
+            _pendingHostSpawnSet = hostSet;
+        }
+
+        public static bool PumpClientSnapshotApply(out bool finishedThisFrame, out bool hasHostSpawn, out Vector3 hostSpawn, out RegionRegistry.RegionSetId hostSet)
+        {
+            finishedThisFrame = false;
+            hasHostSpawn = false;
+            hostSpawn = Vector3.zero;
+            hostSet = RegionRegistry.RegionSetId.HOME;
+
+            if (ClientSnapshotApplyQueue.Count > 0)
+            {
+                SnapshotBudgetTimer.Reset();
+                SnapshotBudgetTimer.Start();
+                int applied = 0;
+                while (ClientSnapshotApplyQueue.Count > 0)
+                {
+                    byte[] raw = ClientSnapshotApplyQueue.Dequeue();
+                    try
+                    {
+                        PacketReader pr = new PacketReader(raw, 0, raw.Length);
+                        ApplySnapshotChunk(ref pr);
+                    }
+                    catch (Exception ex)
+                    {
+                        CoopLog.Warn("ApplySnapshotChunk error: " + ex.Message);
+                    }
+                    applied++;
+                    if (applied >= 1 && SnapshotBudgetTimer.ElapsedMilliseconds >= 6)
+                    {
+                        break;
+                    }
+                }
+                SnapshotBudgetTimer.Stop();
+            }
+
+            if (_pendingSnapshotEnd && ClientSnapshotApplyQueue.Count == 0)
+            {
+                _pendingSnapshotEnd = false;
+                finishedThisFrame = true;
+                hasHostSpawn = _pendingHostSpawn;
+                hostSpawn = _pendingHostSpawnPos;
+                hostSet = _pendingHostSpawnSet;
+            }
+            return finishedThisFrame;
+        }
+
         public static void SendFullSnapshotToClient(Action<PacketWriter> sendReliable)
         {
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             if (ctx == null || ctx.GameModel == null || sendReliable == null) return;
 
-            RebuildSceneObjectCaches();
+            EnsureSceneObjectCaches();
             PacketWriter w = SnapshotWriter;
 
             // 1. Time & Weather
@@ -1786,11 +2183,19 @@ namespace SlimeCoop.World
                     w.WriteString(kv.Key);
                     w.WriteInt((int)kv.Value.attached.ident);
                     w.WriteFloat(kv.Value.attached.transform != null ? kv.Value.attached.transform.eulerAngles.y : 0f);
+                    SnareModel snare = kv.Value.attached as SnareModel;
+                    w.WriteBool(snare != null);
+                    if (snare != null)
+                    {
+                        w.WriteInt((int)snare.baitTypeId);
+                        w.WriteInt((int)snare.gordoTypeId);
+                        w.WriteInt(snare.gordoEatenCount);
+                    }
                     sendReliable(w);
                 }
             }
 
-            // 8. Nearby Actors (sorted by distance to host, up to 350 closest so players see all nearby slimes/food)
+            // 8. Nearby Actors (sorted by distance to host, packed in batches of 8 to avoid network stalls)
             Vector3 hostPos = ctx.Player != null ? ctx.Player.transform.position : Vector3.zero;
             SnapshotActorsScratch.Clear();
             foreach (KeyValuePair<long, ActorModel> kv in ctx.GameModel.AllActors())
@@ -1806,22 +2211,35 @@ namespace SlimeCoop.World
 
             SnapshotActorsScratch.Sort((a, b) => a.Key.CompareTo(b.Key));
             int limit = Math.Min(350, SnapshotActorsScratch.Count);
-            for (int i = 0; i < limit; i++)
+            const int batchSize = 8;
+            for (int start = 0; start < limit; start += batchSize)
             {
-                long aid = SnapshotActorsScratch[i].Value.Key;
-                ActorModel am = SnapshotActorsScratch[i].Value.Value;
-                Transform tr = ActorTransformRef(am);
-                if (tr == null) continue;
+                int batchCount = Math.Min(batchSize, limit - start);
+                int validCount = 0;
+                for (int k = 0; k < batchCount; k++)
+                {
+                    Transform tr = ActorTransformRef(SnapshotActorsScratch[start + k].Value.Value);
+                    if (tr != null) validCount++;
+                }
+                if (validCount == 0) continue;
 
                 w.Reset();
-                w.WriteByte(8); // ActorSpawn
-                w.WriteLong(aid);
-                w.WriteInt((int)am.ident);
-                w.WriteVector3(tr.position);
-                w.WriteQuaternion(tr.rotation);
-                Rigidbody rb = tr.GetComponent<Rigidbody>();
-                w.WriteVector3(rb != null ? rb.velocity : Vector3.zero);
-                w.WriteByte((byte)am.currRegionSetId);
+                w.WriteByte(10); // chunk kind: ActorSpawnBatch
+                w.WriteByte((byte)validCount);
+                for (int k = 0; k < batchCount; k++)
+                {
+                    long aid = SnapshotActorsScratch[start + k].Value.Key;
+                    ActorModel am = SnapshotActorsScratch[start + k].Value.Value;
+                    Transform tr = ActorTransformRef(am);
+                    if (tr == null) continue;
+                    w.WriteLong(aid);
+                    w.WriteInt((int)am.ident);
+                    w.WriteVector3(tr.position);
+                    w.WriteQuaternion(tr.rotation);
+                    Rigidbody rb = tr.GetComponent<Rigidbody>();
+                    w.WriteVector3(rb != null ? rb.velocity : Vector3.zero);
+                    w.WriteByte((byte)am.currRegionSetId);
+                }
                 sendReliable(w);
             }
             SnapshotActorsScratch.Clear();
@@ -1876,7 +2294,18 @@ namespace SlimeCoop.World
                     ApplyPodState(r.ReadString(), (TreasurePod.State)r.ReadByte());
                     break;
                 case 7: // Gadget
-                    ApplyGadgetPlace(r.ReadString(), (Gadget.Id)r.ReadInt(), r.ReadFloat());
+                    string gadgetSiteId = r.ReadString();
+                    Gadget.Id gadgetId = (Gadget.Id)r.ReadInt();
+                    float gadgetYaw = r.ReadFloat();
+                    ApplyGadgetPlace(gadgetSiteId, gadgetId, gadgetYaw);
+                    bool hasSnare = r.ReadBool();
+                    if (hasSnare)
+                    {
+                        Identifiable.Id baitId = (Identifiable.Id)r.ReadInt();
+                        Identifiable.Id gordoTypeId = (Identifiable.Id)r.ReadInt();
+                        int snareEaten = r.ReadInt();
+                        ApplySnareState(gadgetSiteId, baitId, gordoTypeId, snareEaten);
+                    }
                     break;
                 case 8: // ActorSpawn
                     long aid = r.ReadLong();
@@ -1889,6 +2318,25 @@ namespace SlimeCoop.World
                     break;
                 case 9: // ExchangeState
                     ApplyExchangeState(ref r);
+                    break;
+                case 10: // ActorSpawnBatch
+                    byte actorCount = r.ReadByte();
+                    for (int i = 0; i < actorCount; i++)
+                    {
+                        long bAid = r.ReadLong();
+                        Identifiable.Id bId = (Identifiable.Id)r.ReadInt();
+                        Vector3 bPos = r.ReadVector3();
+                        Quaternion bRot = r.ReadQuaternion();
+                        Vector3 bVel = r.ReadVector3();
+                        RegionRegistry.RegionSetId bSetId = (RegionRegistry.RegionSetId)r.ReadByte();
+                        try
+                        {
+                            ApplyActorSpawn(bAid, bId, bPos, bRot, bVel, bSetId);
+                        }
+                        catch
+                        {
+                        }
+                    }
                     break;
             }
         }

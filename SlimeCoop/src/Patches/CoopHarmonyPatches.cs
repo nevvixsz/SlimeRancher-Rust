@@ -636,13 +636,66 @@ namespace SlimeCoop.Patches
             }
         }
 
-        // --- Shared World: Gordos ---
+        // --- Shared World: Gordos & Gordo Snares ---
+        private static void BroadcastHostSnareState(GordoSnare snare)
+        {
+            if (!CoopSession.IsHost || snare == null) return;
+            if (CoopWorldSync.TryGetSnareState(snare, out string siteId, out Identifiable.Id baitId, out Identifiable.Id gordoId, out int eatenCount))
+            {
+                SyncWriter.Reset();
+                SyncWriter.WriteString(siteId);
+                SyncWriter.WriteInt((int)baitId);
+                SyncWriter.WriteInt((int)gordoId);
+                SyncWriter.WriteInt(eatenCount);
+                CoopSession.BroadcastReliable(PacketType.SnareStateSync, SyncWriter);
+            }
+        }
+
+        [HarmonyPatch(typeof(GordoEat), nameof(GordoEat.MaybeEat))]
+        internal static class GordoEatClientBlockPatch
+        {
+            private static bool Prefix(ref bool __result)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    __result = false;
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(GordoEat), nameof(GordoEat.SetModel), new[] { typeof(GordoModel) })]
+        internal static class GordoEatSetModelClientPatch
+        {
+            private static void Postfix(GordoEat __instance)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    CoopWorldSync.OnClientGordoModelSet(__instance);
+                }
+            }
+        }
+
         [HarmonyPatch(typeof(GordoEat), "SetEatenCount")]
         internal static class GordoEatSyncPatch
         {
             private static void Postfix(GordoEat __instance, int eatenCount)
             {
-                if (!CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || __instance == null || string.IsNullOrEmpty(__instance.id)) return;
+                if (!CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || __instance == null) return;
+
+                if (string.IsNullOrEmpty(__instance.id))
+                {
+                    if (CoopSession.IsHost)
+                    {
+                        GordoSnare snare = __instance.GetComponentInParent<GordoSnare>();
+                        if (snare != null)
+                        {
+                            BroadcastHostSnareState(snare);
+                        }
+                    }
+                    return;
+                }
 
                 SyncWriter.Reset();
                 SyncWriter.WriteString(__instance.id);
@@ -650,6 +703,67 @@ namespace SlimeCoop.Patches
 
                 if (CoopSession.IsHost) CoopSession.BroadcastReliable(PacketType.GordoEatSync, SyncWriter);
                 else CoopSession.SendToHostReliable(PacketType.GordoEatSync, SyncWriter);
+            }
+        }
+
+        [HarmonyPatch(typeof(GordoSnare), nameof(GordoSnare.OnTriggerEnter))]
+        internal static class GordoSnareTriggerClientBlockPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(GordoSnare), "AttachBait", new[] { typeof(Identifiable.Id) })]
+        internal static class GordoSnareAttachBaitSyncPatch
+        {
+            private static void Postfix(GordoSnare __instance)
+            {
+                if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote)
+                {
+                    BroadcastHostSnareState(__instance);
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(GordoSnare), "SnareGordo", new[] { typeof(Identifiable.Id) })]
+        internal static class GordoSnareSnareGordoSyncPatch
+        {
+            private static void Postfix(GordoSnare __instance)
+            {
+                if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote)
+                {
+                    BroadcastHostSnareState(__instance);
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(GordoSnare), "ClearBait")]
+        internal static class GordoSnareClearBaitSyncPatch
+        {
+            private static void Postfix(GordoSnare __instance)
+            {
+                if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote)
+                {
+                    BroadcastHostSnareState(__instance);
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(GadgetSite), nameof(GadgetSite.SetModel))]
+        internal static class GadgetSiteSetModelClientPatch
+        {
+            private static void Postfix(GadgetSite __instance)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    CoopWorldSync.OnClientGadgetSiteModelSet(__instance);
+                }
             }
         }
 
