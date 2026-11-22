@@ -73,7 +73,8 @@ namespace SlimeCoop.Protocol
         ActorBatchUpdate = 62,
         ClientVacCapture = 63,
         ClientExpelRequest = 64,
-        MarketDepositNotice = 65
+        MarketDepositNotice = 65,
+        SiloSlotTake = 66
     }
 
     internal sealed class PacketWriter
@@ -133,6 +134,11 @@ namespace SlimeCoop.Protocol
             _buf[_pos++] = (byte)((v >> 8) & 0xFF);
             _buf[_pos++] = (byte)((v >> 16) & 0xFF);
             _buf[_pos++] = (byte)((v >> 24) & 0xFF);
+        }
+
+        public void WriteUInt(uint v)
+        {
+            WriteInt((int)v);
         }
 
         public void WriteLong(long v)
@@ -250,6 +256,11 @@ namespace SlimeCoop.Protocol
             int v = _buf[_pos] | (_buf[_pos + 1] << 8) | (_buf[_pos + 2] << 16) | (_buf[_pos + 3] << 24);
             _pos += 4;
             return v;
+        }
+
+        public uint ReadUInt()
+        {
+            return (uint)ReadInt();
         }
 
         public long ReadLong()

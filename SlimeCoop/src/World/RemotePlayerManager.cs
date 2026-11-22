@@ -15,6 +15,7 @@ namespace SlimeCoop.World
         public string Name;
         public int ColorIndex;
         public GameObject Root;
+        public Transform RootTransform;
         public Transform HeadTransform;
         public Transform VacTransform;
         public GameObject JetpackGlow;
@@ -53,6 +54,7 @@ namespace SlimeCoop.World
         private static Material _cachedFontMat;
         private static Shader _standardShader;
         private static Camera _cachedCam;
+        private static Transform _cachedCamTransform;
         private static GameObject _cachedBeatrixPrefab;
         private static bool _beatrixSearchLogged;
         private static bool _beatrixDumpLogged;
@@ -67,6 +69,8 @@ namespace SlimeCoop.World
                 }
             }
             Visuals.Clear();
+            _cachedCam = null;
+            _cachedCamTransform = null;
             _cachedBeatrixPrefab = null;
             _beatrixSearchLogged = false;
             _beatrixDumpLogged = false;
@@ -110,9 +114,9 @@ namespace SlimeCoop.World
 
         public static bool TryGetPlayerPosition(int playerId, out Vector3 pos)
         {
-            if (Visuals.TryGetValue(playerId, out RemotePlayerVisual v) && v.Root != null)
+            if (Visuals.TryGetValue(playerId, out RemotePlayerVisual v) && v.RootTransform != null)
             {
-                pos = v.Root.transform.position;
+                pos = v.RootTransform.position;
                 return true;
             }
             pos = Vector3.zero;
@@ -126,17 +130,19 @@ namespace SlimeCoop.World
             if (_cachedCam == null || !_cachedCam.isActiveAndEnabled)
             {
                 _cachedCam = Camera.main;
+                _cachedCamTransform = _cachedCam != null ? _cachedCam.transform : null;
             }
-            Camera cam = _cachedCam;
+            Transform camTr = _cachedCamTransform;
             float lerpT = Mathf.Clamp01(Time.unscaledDeltaTime * 16f);
 
             foreach (RemotePlayerVisual v in Visuals.Values)
             {
-                if (v.Root == null) continue;
+                Transform rootTr = v.RootTransform;
+                if (rootTr == null) continue;
 
-                v.Root.transform.position = Vector3.Lerp(v.Root.transform.position, v.TargetPos, lerpT);
+                rootTr.position = Vector3.Lerp(rootTr.position, v.TargetPos, lerpT);
                 Quaternion bodyRot = Quaternion.Euler(0f, v.TargetYaw, 0f);
-                v.Root.transform.rotation = Quaternion.Slerp(v.Root.transform.rotation, bodyRot, lerpT);
+                rootTr.rotation = Quaternion.Slerp(rootTr.rotation, bodyRot, lerpT);
 
                 if (!v.IsRealBeatrixModel)
                 {
@@ -159,9 +165,9 @@ namespace SlimeCoop.World
                 {
                     v.VacGlow.SetActive(v.IsVacActive);
                 }
-                if (v.LabelCanvasTransform != null && cam != null)
+                if (v.LabelCanvasTransform != null && camTr != null)
                 {
-                    v.LabelCanvasTransform.rotation = cam.transform.rotation;
+                    v.LabelCanvasTransform.rotation = camTr.rotation;
                 }
             }
         }
@@ -326,6 +332,7 @@ namespace SlimeCoop.World
                 Name = name,
                 ColorIndex = colorIdx,
                 Root = root,
+                RootTransform = root.transform,
                 HeadTransform = headTransform,
                 VacTransform = vacTransform,
                 JetpackGlow = jetGlow,
