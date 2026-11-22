@@ -26,18 +26,16 @@ namespace SlimeCoop
         public ZoneDirector.Zone CurrentZone = ZoneDirector.Zone.RANCH;
         public long LastHeardTicks;
         public bool Authenticated;
-        private readonly Dictionary<string, uint> _siloTakesProcessed = new Dictionary<string, uint>(16);
+        private readonly Dictionary<SiloSlotKey, uint> _siloTakesProcessed = new Dictionary<SiloSlotKey, uint>(16);
 
-        public void IncrementSiloTakesProcessed(string slotKey)
+        public void IncrementSiloTakesProcessed(SiloSlotKey slotKey)
         {
-            if (string.IsNullOrEmpty(slotKey)) return;
             _siloTakesProcessed.TryGetValue(slotKey, out uint cur);
             _siloTakesProcessed[slotKey] = cur + 1;
         }
 
-        public uint GetSiloTakesProcessed(string slotKey)
+        public uint GetSiloTakesProcessed(SiloSlotKey slotKey)
         {
-            if (string.IsNullOrEmpty(slotKey)) return 0;
             return _siloTakesProcessed.TryGetValue(slotKey, out uint cur) ? cur : 0;
         }
     }
@@ -94,6 +92,7 @@ namespace SlimeCoop
         private static float _nextActorBatchTime;
         private static float _nextTimeSyncTime;
         private static float _nextSiloSyncTime;
+        private static float _nextTimeoutCheckTime;
         private static float _nextKeepAliveTime;
         private static float _nextProfileAutoSaveTime;
         private static bool _clientProfileLoaded;
@@ -103,18 +102,40 @@ namespace SlimeCoop
         private static float _connectStartTime;
         private static float _nextHelloRetryTime;
         private static float _lastDiscoveryTime;
+        private static bool _sceneIsMainMenu = true;
+        private static bool _sceneCheckedOnce;
         private static PlayerZoneTracker _cachedZoneTracker;
         private static GameObject _cachedPlayerObj;
+        private static Transform _cachedPlayerTransform;
         private static vp_FPController _cachedFpCtrl;
         private static WeaponVacuum _cachedWeaponVac;
         private static Camera _cachedMainCam;
+        private static Transform _cachedMainCamTransform;
+
+        public static void NotifySceneChanged(string sceneName)
+        {
+            _sceneCheckedOnce = true;
+            _sceneIsMainMenu = string.Equals(sceneName, "MainMenu", StringComparison.OrdinalIgnoreCase);
+            _cachedZoneTracker = null;
+            _cachedPlayerObj = null;
+            _cachedPlayerTransform = null;
+            _cachedFpCtrl = null;
+            _cachedWeaponVac = null;
+            _cachedMainCam = null;
+            _cachedMainCamTransform = null;
+        }
 
         public static bool IsInGameSession()
         {
+            if (!_sceneCheckedOnce)
+            {
+                _sceneCheckedOnce = true;
+                string sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+                _sceneIsMainMenu = string.Equals(sceneName, "MainMenu", StringComparison.OrdinalIgnoreCase);
+            }
+            if (_sceneIsMainMenu) return false;
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
-            if (ctx == null || ctx.Player == null) return false;
-            string sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
-            return !string.Equals(sceneName, "MainMenu", StringComparison.OrdinalIgnoreCase);
+            return ctx != null && ctx.Player != null;
         }
 
         public static bool CanClientSendGameplaySync =>
@@ -468,7 +489,12 @@ namespace SlimeCoop
         public static void BroadcastHostSiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int count, uint revision)
         {
             if (!IsHost || ConnectedPeers.Count == 0) return;
-            string slotKey = CoopWorldSync.MakeSiloSlotKeyString(plotId, storageType, slotIdx);
+            SiloSlotKey slotKey = new SiloSlotKey
+            {
+                PlotId = plotId ?? string.Empty,
+                StorageType = storageType,
+                SlotIdx = slotIdx
+            };
             for (int i = 0; i < ConnectedPeers.Count; i++)
             {
                 CoopPeerInfo p = ConnectedPeers[i];
@@ -519,7 +545,14 @@ namespace SlimeCoop
                 int processed = 0;
                 while (processed < 48 && Transport.TryDequeue(out IncomingPacket pkt))
                 {
-                    HandleIncomingPacket(ref pkt);
+                    try
+                    {
+                        HandleIncomingPacket(ref pkt);
+                    }
+                    finally
+                    {
+                        Transport.ReturnIncomingPacket(ref pkt);
+                    }
                     processed++;
                 }
             }
@@ -544,7 +577,8 @@ namespace SlimeCoop
                 if (ctx != null && ctx.Player != null && ConnectedPeers.Count > 0 && now >= _nextActorBatchTime)
                 {
                     _nextActorBatchTime = now + 0.05f;
-                    CoopWorldSync.WriteActiveActorBatch(SharedWriter, ctx.Player.transform.position, 24);
+                    Transform hostTr = _cachedPlayerTransform != null ? _cachedPlayerTransform : ctx.Player.transform;
+                    CoopWorldSync.WriteActiveActorBatch(SharedWriter, hostTr.position, 24);
                     if (SharedWriter.Length > 2)
                     {
                         BroadcastUnreliable(PacketType.ActorBatchUpdate, SharedWriter, null);
@@ -573,15 +607,19 @@ namespace SlimeCoop
                     CoopWorldSync.SyncDirtyHostSilos();
                 }
 
-                // Timeout dead peers (12s)
-                long timeoutTicks = TimeSpan.FromSeconds(12).Ticks;
-                long utcNow = DateTime.UtcNow.Ticks;
-                for (int i = ConnectedPeers.Count - 1; i >= 0; i--)
+                // Timeout dead peers (12s, checked once per second)
+                if (ConnectedPeers.Count > 0 && now >= _nextTimeoutCheckTime)
                 {
-                    CoopPeerInfo peer = ConnectedPeers[i];
-                    if (utcNow - peer.LastHeardTicks > timeoutTicks)
+                    _nextTimeoutCheckTime = now + 1.0f;
+                    long timeoutTicks = TimeSpan.FromSeconds(12).Ticks;
+                    long utcNow = DateTime.UtcNow.Ticks;
+                    for (int i = ConnectedPeers.Count - 1; i >= 0; i--)
                     {
-                        RemovePeer(peer, "таймаут соединения");
+                        CoopPeerInfo peer = ConnectedPeers[i];
+                        if (utcNow - peer.LastHeardTicks > timeoutTicks)
+                        {
+                            RemovePeer(peer, "таймаут соединения");
+                        }
                     }
                 }
             }
@@ -645,23 +683,27 @@ namespace SlimeCoop
 
         private static void SendLocalTransform(SceneContext ctx)
         {
+            if (IsHost && ConnectedPeers.Count == 0) return;
             if (IsClient && (!_clientHandshakeDone || WaitingWorldLoad)) return;
             GameObject playerGo = ctx.Player;
-            Transform pt = playerGo.transform;
             if (_cachedPlayerObj != playerGo)
             {
                 _cachedPlayerObj = playerGo;
+                _cachedPlayerTransform = playerGo.transform;
                 _cachedFpCtrl = playerGo.GetComponentInChildren<vp_FPController>();
                 _cachedWeaponVac = playerGo.GetComponentInChildren<WeaponVacuum>();
                 _cachedMainCam = Camera.main;
+                _cachedMainCamTransform = _cachedMainCam != null ? _cachedMainCam.transform : null;
             }
             if (_cachedMainCam == null || !_cachedMainCam.isActiveAndEnabled)
             {
                 _cachedMainCam = Camera.main;
+                _cachedMainCamTransform = _cachedMainCam != null ? _cachedMainCam.transform : null;
             }
 
+            Transform pt = _cachedPlayerTransform;
             float yaw = pt.eulerAngles.y;
-            float pitch = _cachedMainCam != null ? _cachedMainCam.transform.localEulerAngles.x : 0f;
+            float pitch = _cachedMainCamTransform != null ? _cachedMainCamTransform.localEulerAngles.x : 0f;
             if (pitch > 180f) pitch -= 360f;
 
             bool jet = _cachedFpCtrl != null && _cachedFpCtrl.MotorFreeFly;
@@ -688,10 +730,7 @@ namespace SlimeCoop
 
             if (IsHost)
             {
-                if (ConnectedPeers.Count > 0)
-                {
-                    BroadcastUnreliable(PacketType.PlayerTransform, SharedWriter, null);
-                }
+                BroadcastUnreliable(PacketType.PlayerTransform, SharedWriter, null);
             }
             else if (_serverEp != null)
             {

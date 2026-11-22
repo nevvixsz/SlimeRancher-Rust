@@ -14,6 +14,7 @@ namespace SlimeCoop.Patches
     internal static class CoopHarmonyPatches
     {
         private static readonly PacketWriter SyncWriter = new PacketWriter(512);
+        private static readonly List<ExchangeDirector.NonIdentReward> CrateSpecScratch = new List<ExchangeDirector.NonIdentReward>(16);
         private static bool _clientExpelling;
         private static GameObject _lastExpelledObj;
         private static float _nextExchangeActionTime;
@@ -133,7 +134,9 @@ namespace SlimeCoop.Patches
         {
             private static void Postfix(LandPlotLocation __instance, GameObject __result)
             {
-                if (!CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || __instance == null || __result == null) return;
+                if (!CoopSession.IsActive || __instance == null) return;
+                CoopWorldSync.InvalidatePlotSilos(__instance.id);
+                if (NetSyncGuard.IsApplyingRemote || __result == null) return;
                 LandPlot lp = __result.GetComponentInChildren<LandPlot>();
                 if (lp == null) return;
 
@@ -152,9 +155,11 @@ namespace SlimeCoop.Patches
         {
             private static void Postfix(LandPlot __instance, LandPlot.Upgrade upgrade)
             {
-                if (!CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || __instance == null) return;
+                if (!CoopSession.IsActive || __instance == null) return;
                 LandPlotLocation loc = __instance.GetComponentInParent<LandPlotLocation>();
                 if (loc == null) return;
+                CoopWorldSync.InvalidatePlotSilos(loc.id);
+                if (NetSyncGuard.IsApplyingRemote) return;
 
                 SyncWriter.Reset();
                 SyncWriter.WriteString(loc.id);
@@ -467,26 +472,27 @@ namespace SlimeCoop.Patches
                         List<ExchangeDirector.ItemEntry> rewards = ctx != null && ctx.ExchangeDirector != null
                             ? ctx.ExchangeDirector.GetOfferRewards(ExchangeDirector.OfferType.GENERAL)
                             : null;
-                        List<ExchangeDirector.NonIdentReward> specs = new List<ExchangeDirector.NonIdentReward>();
+                        CrateSpecScratch.Clear();
                         if (rewards != null)
                         {
                             for (int i = 0; i < rewards.Count; i++)
                             {
                                 if (rewards[i] != null && rewards[i].specReward != ExchangeDirector.NonIdentReward.NONE)
                                 {
-                                    specs.Add(rewards[i].specReward);
+                                    CrateSpecScratch.Add(rewards[i].specReward);
                                 }
                             }
                         }
 
                         SyncWriter.Reset();
                         SyncWriter.WriteLong(crateId);
-                        int count = Math.Min(16, specs.Count);
+                        int count = Math.Min(16, CrateSpecScratch.Count);
                         SyncWriter.WriteByte((byte)count);
                         for (int i = 0; i < count; i++)
                         {
-                            SyncWriter.WriteInt((int)specs[i]);
+                            SyncWriter.WriteInt((int)CrateSpecScratch[i]);
                         }
+                        CrateSpecScratch.Clear();
                         CoopSession.BroadcastReliable(PacketType.ExchangeCrateBreak, SyncWriter);
                     }
                 }
@@ -668,7 +674,7 @@ namespace SlimeCoop.Patches
                 Quaternion rot,
                 GameObject __result)
             {
-                if (__result == null) return;
+                if (!CoopSession.IsActive || __result == null) return;
 
                 if (_clientExpelling)
                 {
@@ -712,7 +718,7 @@ namespace SlimeCoop.Patches
         {
             private static void Prefix(GameObject gameObj)
             {
-                if (gameObj == null) return;
+                if (!CoopSession.IsActive || gameObj == null) return;
                 long actorId = 0;
                 if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote && CoopSession.ConnectedPeers.Count > 0)
                 {

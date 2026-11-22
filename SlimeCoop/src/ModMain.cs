@@ -36,12 +36,14 @@ namespace SlimeCoop
             LogConsole = ConsoleInstance;
             ClientProfileStore.LoadLocalPrefs();
             EnsureDriver();
+            CoopSession.NotifySceneChanged(SceneManager.GetActiveScene().name);
             SceneManager.sceneLoaded += OnSceneLoaded;
             LogConsole?.Log("SlimeCoop v1.0.0 загружен! Нажмите F9 для меню мультиплеера или введите 'coop'.");
         }
 
         private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            CoopSession.NotifySceneChanged(scene.name);
             bool hasCtx = SRSingleton<SceneContext>.Instance != null;
             CoopLog.Info("SceneLoaded: '" + scene.name + "', hasSceneContext=" + hasCtx + ", role=" + CoopSession.Role);
             if (hasCtx && !string.Equals(scene.name, "MainMenu", System.StringComparison.OrdinalIgnoreCase))

@@ -17,6 +17,7 @@ namespace SlimeCoop.Net
         public byte[] Data;
         public int Offset;
         public int Length;
+        public bool Pooled;
     }
 
     internal sealed class LanServerEntry
@@ -58,8 +59,12 @@ namespace SlimeCoop.Net
             public IPEndPoint RemoteEndPoint;
             public Socket Socket;
             public readonly object WriteLock = new object();
+            public byte[] WriteScratch = new byte[2048];
             public volatile bool Closed;
         }
+
+        private const int PoolMaxPerBucket = 64;
+        private static readonly byte[] EmptyBytes = new byte[0];
 
         private Socket _socket;
         private TcpListener _tcpListener;
@@ -67,15 +72,110 @@ namespace SlimeCoop.Net
         private Thread _tcpAcceptThread;
         private volatile bool _running;
         private readonly object _sendLock = new object();
+        private readonly object _udpSendLock = new object();
+        private readonly object _poolLock = new object();
         private readonly Dictionary<IPEndPoint, PeerReliability> _peers = new Dictionary<IPEndPoint, PeerReliability>();
         private readonly ConcurrentDictionary<IPEndPoint, TcpPeerConn> _tcpPeers = new ConcurrentDictionary<IPEndPoint, TcpPeerConn>();
         private readonly ConcurrentDictionary<IPEndPoint, byte> _tcpJustConnected = new ConcurrentDictionary<IPEndPoint, byte>();
         private readonly ConcurrentQueue<IncomingPacket> _inbox = new ConcurrentQueue<IncomingPacket>();
+        private readonly ConcurrentQueue<PendingReliable> _ackRecycleQueue = new ConcurrentQueue<PendingReliable>();
+        private readonly Stack<PendingReliable> _pendingPool = new Stack<PendingReliable>(64);
+        private readonly List<KeyValuePair<IPEndPoint, PendingReliable>> _retryScratch = new List<KeyValuePair<IPEndPoint, PendingReliable>>(16);
+        private readonly List<ushort> _expiredScratch = new List<ushort>(8);
+        private readonly Stack<byte[]> _pool128 = new Stack<byte[]>(PoolMaxPerBucket);
+        private readonly Stack<byte[]> _pool1536 = new Stack<byte[]>(PoolMaxPerBucket);
+        private readonly Stack<byte[]> _pool8192 = new Stack<byte[]>(PoolMaxPerBucket);
+        private readonly Stack<byte[]> _pool65536 = new Stack<byte[]>(PoolMaxPerBucket);
         private readonly byte[] _recvScratch = new byte[65536];
+        private readonly byte[] _ackScratch = new byte[HeaderSize];
+        private byte[] _udpSendScratch = new byte[2048];
+        private int _pendingReliableCount;
         private long _packetsSent;
         private long _packetsRecv;
         private volatile string _lastTcpError = string.Empty;
         private volatile bool _tcpCancelled;
+
+        private byte[] RentBuffer(int minSize)
+        {
+            if (minSize <= 0) return EmptyBytes;
+            lock (_poolLock)
+            {
+                if (minSize <= 128)
+                {
+                    return _pool128.Count > 0 ? _pool128.Pop() : new byte[128];
+                }
+                if (minSize <= 1536)
+                {
+                    return _pool1536.Count > 0 ? _pool1536.Pop() : new byte[1536];
+                }
+                if (minSize <= 8192)
+                {
+                    return _pool8192.Count > 0 ? _pool8192.Pop() : new byte[8192];
+                }
+                if (minSize <= 65536)
+                {
+                    return _pool65536.Count > 0 ? _pool65536.Pop() : new byte[65536];
+                }
+            }
+            return new byte[minSize];
+        }
+
+        private void ReturnBuffer(byte[] buf)
+        {
+            if (buf == null) return;
+            int len = buf.Length;
+            if (len != 128 && len != 1536 && len != 8192 && len != 65536) return;
+            lock (_poolLock)
+            {
+                if (len == 128)
+                {
+                    if (_pool128.Count < PoolMaxPerBucket) _pool128.Push(buf);
+                }
+                else if (len == 1536)
+                {
+                    if (_pool1536.Count < PoolMaxPerBucket) _pool1536.Push(buf);
+                }
+                else if (len == 8192)
+                {
+                    if (_pool8192.Count < PoolMaxPerBucket) _pool8192.Push(buf);
+                }
+                else
+                {
+                    if (_pool65536.Count < PoolMaxPerBucket) _pool65536.Push(buf);
+                }
+            }
+        }
+
+        public void ReturnIncomingPacket(ref IncomingPacket pkt)
+        {
+            if (pkt.Pooled && pkt.Data != null)
+            {
+                ReturnBuffer(pkt.Data);
+            }
+            pkt.Data = null;
+            pkt.Pooled = false;
+        }
+
+        private PendingReliable RentPending()
+        {
+            return _pendingPool.Count > 0 ? _pendingPool.Pop() : new PendingReliable();
+        }
+
+        private void ReturnPending(PendingReliable pr)
+        {
+            if (pr == null) return;
+            if (pr.Frame != null)
+            {
+                ReturnBuffer(pr.Frame);
+                pr.Frame = null;
+            }
+            pr.Length = 0;
+            pr.Retries = 0;
+            if (_pendingPool.Count < 128)
+            {
+                _pendingPool.Push(pr);
+            }
+        }
 
         public int LocalPort { get; private set; }
         public bool IsActive => _running && _socket != null;
@@ -280,9 +380,28 @@ namespace SlimeCoop.Net
 
             lock (_sendLock)
             {
+                foreach (PeerReliability peer in _peers.Values)
+                {
+                    foreach (PendingReliable pr in peer.Outgoing.Values)
+                    {
+                        ReturnPending(pr);
+                    }
+                    peer.Outgoing.Clear();
+                }
                 _peers.Clear();
             }
-            while (_inbox.TryDequeue(out _)) { }
+            Interlocked.Exchange(ref _pendingReliableCount, 0);
+            while (_ackRecycleQueue.TryDequeue(out PendingReliable recycled))
+            {
+                lock (_sendLock)
+                {
+                    ReturnPending(recycled);
+                }
+            }
+            while (_inbox.TryDequeue(out IncomingPacket leftover))
+            {
+                ReturnIncomingPacket(ref leftover);
+            }
         }
 
         public void Dispose()
@@ -295,7 +414,20 @@ namespace SlimeCoop.Net
             if (ep == null) return;
             lock (_sendLock)
             {
-                _peers.Remove(ep);
+                if (_peers.TryGetValue(ep, out PeerReliability peer))
+                {
+                    int removed = peer.Outgoing.Count;
+                    foreach (PendingReliable pr in peer.Outgoing.Values)
+                    {
+                        ReturnPending(pr);
+                    }
+                    peer.Outgoing.Clear();
+                    if (removed > 0)
+                    {
+                        Interlocked.Add(ref _pendingReliableCount, -removed);
+                    }
+                    _peers.Remove(ep);
+                }
             }
             if (_tcpPeers.TryRemove(ep, out TcpPeerConn conn))
             {
@@ -308,51 +440,49 @@ namespace SlimeCoop.Net
         {
             if (!_running || target == null) return;
             int payloadLen = payload != null ? payload.Length : 0;
-            byte[] frame = new byte[HeaderSize + payloadLen];
-            frame[0] = Magic0;
-            frame[1] = Magic1;
-            frame[2] = (byte)type;
-            frame[3] = 0;
-            frame[4] = 0;
-            frame[5] = 0;
-            if (payloadLen > 0)
-            {
-                Buffer.BlockCopy(payload.Buffer, 0, frame, HeaderSize, payloadLen);
-            }
 
             if (_tcpPeers.TryGetValue(target, out TcpPeerConn tcp) && tcp != null && !tcp.Closed)
             {
-                SendTcpFrame(tcp, frame, frame.Length);
+                SendTcpFrame(tcp, type, 0, 0, payload != null ? payload.Buffer : null, payloadLen);
                 return;
             }
 
             if (_socket == null) return;
-            SendRaw(target, frame, frame.Length);
+            int frameLen = HeaderSize + payloadLen;
+            lock (_udpSendLock)
+            {
+                if (frameLen > _udpSendScratch.Length)
+                {
+                    _udpSendScratch = new byte[Math.Max(frameLen, _udpSendScratch.Length * 2)];
+                }
+                _udpSendScratch[0] = Magic0;
+                _udpSendScratch[1] = Magic1;
+                _udpSendScratch[2] = (byte)type;
+                _udpSendScratch[3] = 0;
+                _udpSendScratch[4] = 0;
+                _udpSendScratch[5] = 0;
+                if (payloadLen > 0)
+                {
+                    Buffer.BlockCopy(payload.Buffer, 0, _udpSendScratch, HeaderSize, payloadLen);
+                }
+                SendRaw(target, _udpSendScratch, frameLen);
+            }
         }
 
         public void SendReliable(IPEndPoint target, PacketType type, PacketWriter payload)
         {
             if (!_running || target == null) return;
             int payloadLen = payload != null ? payload.Length : 0;
-            byte[] frame = new byte[HeaderSize + payloadLen];
 
             if (_tcpPeers.TryGetValue(target, out TcpPeerConn tcp) && tcp != null && !tcp.Closed)
             {
-                frame[0] = Magic0;
-                frame[1] = Magic1;
-                frame[2] = (byte)type;
-                frame[3] = 0; // TCP already guarantees delivery & ordering
-                frame[4] = 0;
-                frame[5] = 0;
-                if (payloadLen > 0)
-                {
-                    Buffer.BlockCopy(payload.Buffer, 0, frame, HeaderSize, payloadLen);
-                }
-                SendTcpFrame(tcp, frame, frame.Length);
+                SendTcpFrame(tcp, type, 0, 0, payload != null ? payload.Buffer : null, payloadLen);
                 return;
             }
 
             if (_socket == null) return;
+            int frameLen = HeaderSize + payloadLen;
+            byte[] frame = RentBuffer(frameLen);
             ushort seq;
             lock (_sendLock)
             {
@@ -371,17 +501,17 @@ namespace SlimeCoop.Net
                     Buffer.BlockCopy(payload.Buffer, 0, frame, HeaderSize, payloadLen);
                 }
 
-                peer.Outgoing[seq] = new PendingReliable
-                {
-                    Seq = seq,
-                    Frame = frame,
-                    Length = frame.Length,
-                    LastSendTicks = DateTime.UtcNow.Ticks,
-                    Retries = 0
-                };
+                PendingReliable pr = RentPending();
+                pr.Seq = seq;
+                pr.Frame = frame;
+                pr.Length = frameLen;
+                pr.LastSendTicks = DateTime.UtcNow.Ticks;
+                pr.Retries = 0;
+                peer.Outgoing[seq] = pr;
+                Interlocked.Increment(ref _pendingReliableCount);
             }
 
-            SendRaw(target, frame, frame.Length);
+            SendRaw(target, frame, frameLen);
         }
 
         public void BroadcastDiscovery(int targetPort)
@@ -423,62 +553,94 @@ namespace SlimeCoop.Net
         public void PumpReliableRetries()
         {
             if (!_running || _socket == null) return;
+
+            if (!_ackRecycleQueue.IsEmpty)
+            {
+                lock (_sendLock)
+                {
+                    while (_ackRecycleQueue.TryDequeue(out PendingReliable recycled))
+                    {
+                        ReturnPending(recycled);
+                    }
+                }
+            }
+
+            if (Volatile.Read(ref _pendingReliableCount) <= 0) return;
+
             long now = DateTime.UtcNow.Ticks;
             long retryThreshold = TimeSpan.FromMilliseconds(130).Ticks;
 
-            List<KeyValuePair<IPEndPoint, PendingReliable>> toResend = null;
+            _retryScratch.Clear();
             lock (_sendLock)
             {
                 foreach (KeyValuePair<IPEndPoint, PeerReliability> kv in _peers)
                 {
-                    if (_tcpPeers.TryGetValue(kv.Key, out TcpPeerConn tcp) && tcp != null && !tcp.Closed)
-                    {
-                        if (kv.Value.Outgoing.Count > 0) kv.Value.Outgoing.Clear();
-                        continue;
-                    }
-
                     PeerReliability peer = kv.Value;
                     if (peer.Outgoing.Count == 0) continue;
 
-                    List<ushort> expired = null;
+                    if (_tcpPeers.TryGetValue(kv.Key, out TcpPeerConn tcp) && tcp != null && !tcp.Closed)
+                    {
+                        int cleared = peer.Outgoing.Count;
+                        foreach (PendingReliable pr in peer.Outgoing.Values)
+                        {
+                            ReturnPending(pr);
+                        }
+                        peer.Outgoing.Clear();
+                        if (cleared > 0)
+                        {
+                            Interlocked.Add(ref _pendingReliableCount, -cleared);
+                        }
+                        continue;
+                    }
+
+                    _expiredScratch.Clear();
                     foreach (PendingReliable pr in peer.Outgoing.Values)
                     {
                         if (now - pr.LastSendTicks >= retryThreshold)
                         {
                             if (pr.Retries >= 45)
                             {
-                                if (expired == null) expired = new List<ushort>();
-                                expired.Add(pr.Seq);
+                                _expiredScratch.Add(pr.Seq);
                                 continue;
                             }
-                            if (toResend == null) toResend = new List<KeyValuePair<IPEndPoint, PendingReliable>>();
                             pr.LastSendTicks = now;
                             pr.Retries++;
-                            toResend.Add(new KeyValuePair<IPEndPoint, PendingReliable>(kv.Key, pr));
+                            _retryScratch.Add(new KeyValuePair<IPEndPoint, PendingReliable>(kv.Key, pr));
                         }
                     }
 
-                    if (expired != null)
+                    if (_expiredScratch.Count > 0)
                     {
-                        for (int i = 0; i < expired.Count; i++)
+                        for (int i = 0; i < _expiredScratch.Count; i++)
                         {
-                            ushort expSeq = expired[i];
-                            if (peer.Outgoing.TryGetValue(expSeq, out PendingReliable prExp) && prExp.Length > 2)
+                            ushort expSeq = _expiredScratch[i];
+                            if (peer.Outgoing.TryGetValue(expSeq, out PendingReliable prExp))
                             {
-                                CoopLog.Warn("Reliable packet timeout (no ACK after 45 retries): to=" + kv.Key + ", type=" + (PacketType)prExp.Frame[2] + ", seq=" + expSeq);
+                                if (prExp.Length > 2)
+                                {
+                                    CoopLog.Warn("Reliable packet timeout (no ACK after 45 retries): to=" + kv.Key + ", type=" + (PacketType)prExp.Frame[2] + ", seq=" + expSeq);
+                                }
+                                peer.Outgoing.Remove(expSeq);
+                                Interlocked.Decrement(ref _pendingReliableCount);
+                                ReturnPending(prExp);
                             }
-                            peer.Outgoing.Remove(expSeq);
                         }
+                        _expiredScratch.Clear();
                     }
                 }
             }
 
-            if (toResend != null)
+            if (_retryScratch.Count > 0)
             {
-                for (int i = 0; i < toResend.Count; i++)
+                for (int i = 0; i < _retryScratch.Count; i++)
                 {
-                    SendRaw(toResend[i].Key, toResend[i].Value.Frame, toResend[i].Value.Length);
+                    PendingReliable pr = _retryScratch[i].Value;
+                    if (pr.Frame != null && pr.Length > 0)
+                    {
+                        SendRaw(_retryScratch[i].Key, pr.Frame, pr.Length);
+                    }
                 }
+                _retryScratch.Clear();
             }
         }
 
@@ -499,14 +661,13 @@ namespace SlimeCoop.Net
 
         private void SendAck(IPEndPoint target, ushort seq)
         {
-            byte[] ack = new byte[HeaderSize];
-            ack[0] = Magic0;
-            ack[1] = Magic1;
-            ack[2] = (byte)PacketType.ReliableAck;
-            ack[3] = 0;
-            ack[4] = (byte)(seq & 0xFF);
-            ack[5] = (byte)((seq >> 8) & 0xFF);
-            SendRaw(target, ack, ack.Length);
+            _ackScratch[0] = Magic0;
+            _ackScratch[1] = Magic1;
+            _ackScratch[2] = (byte)PacketType.ReliableAck;
+            _ackScratch[3] = 0;
+            _ackScratch[4] = (byte)(seq & 0xFF);
+            _ackScratch[5] = (byte)((seq >> 8) & 0xFF);
+            SendRaw(target, _ackScratch, HeaderSize);
         }
 
         private void SendRaw(IPEndPoint target, byte[] data, int len)
@@ -528,25 +689,42 @@ namespace SlimeCoop.Net
             }
         }
 
-        private void SendTcpFrame(TcpPeerConn conn, byte[] frame, int len)
+        private void SendTcpFrame(TcpPeerConn conn, PacketType type, byte flags, ushort seq, byte[] payload, int payloadLen)
         {
             if (conn == null || conn.Closed || !_running) return;
-            byte[] packet = new byte[4 + len];
-            packet[0] = (byte)(len & 0xFF);
-            packet[1] = (byte)((len >> 8) & 0xFF);
-            packet[2] = (byte)((len >> 16) & 0xFF);
-            packet[3] = (byte)((len >> 24) & 0xFF);
-            Buffer.BlockCopy(frame, 0, packet, 4, len);
+            int frameLen = HeaderSize + payloadLen;
+            int totalLen = 4 + frameLen;
 
             lock (conn.WriteLock)
             {
                 if (conn.Closed || conn.Socket == null) return;
+                if (totalLen > conn.WriteScratch.Length)
+                {
+                    conn.WriteScratch = new byte[Math.Max(totalLen, conn.WriteScratch.Length * 2)];
+                }
+
+                byte[] packet = conn.WriteScratch;
+                packet[0] = (byte)(frameLen & 0xFF);
+                packet[1] = (byte)((frameLen >> 8) & 0xFF);
+                packet[2] = (byte)((frameLen >> 16) & 0xFF);
+                packet[3] = (byte)((frameLen >> 24) & 0xFF);
+                packet[4] = Magic0;
+                packet[5] = Magic1;
+                packet[6] = (byte)type;
+                packet[7] = flags;
+                packet[8] = (byte)(seq & 0xFF);
+                packet[9] = (byte)((seq >> 8) & 0xFF);
+                if (payloadLen > 0 && payload != null)
+                {
+                    Buffer.BlockCopy(payload, 0, packet, 4 + HeaderSize, payloadLen);
+                }
+
                 try
                 {
                     int sent = 0;
-                    while (sent < packet.Length)
+                    while (sent < totalLen)
                     {
-                        int n = conn.Socket.Send(packet, sent, packet.Length - sent, SocketFlags.None);
+                        int n = conn.Socket.Send(packet, sent, totalLen - sent, SocketFlags.None);
                         if (n <= 0)
                         {
                             throw new SocketException((int)SocketError.ConnectionReset);
@@ -634,6 +812,7 @@ namespace SlimeCoop.Net
         private void TcpRecvLoop(TcpPeerConn conn)
         {
             byte[] lenBuf = new byte[4];
+            byte[] frame = new byte[4096];
             try
             {
                 while (_running && !conn.Closed)
@@ -646,7 +825,10 @@ namespace SlimeCoop.Net
                         break;
                     }
 
-                    byte[] frame = new byte[frameLen];
+                    if (frameLen > frame.Length)
+                    {
+                        frame = new byte[Math.Max(frameLen, frame.Length * 2)];
+                    }
                     if (!ReadExact(conn.Socket, frame, frameLen)) break;
 
                     if (frame[0] != Magic0 || frame[1] != Magic1) continue;
@@ -656,7 +838,7 @@ namespace SlimeCoop.Net
                     if (type == PacketType.ReliableAck) continue;
 
                     int payloadLen = frameLen - HeaderSize;
-                    byte[] copy = new byte[payloadLen];
+                    byte[] copy = payloadLen > 0 ? RentBuffer(payloadLen) : EmptyBytes;
                     if (payloadLen > 0)
                     {
                         Buffer.BlockCopy(frame, HeaderSize, copy, 0, payloadLen);
@@ -668,7 +850,8 @@ namespace SlimeCoop.Net
                         Type = type,
                         Data = copy,
                         Offset = 0,
-                        Length = payloadLen
+                        Length = payloadLen,
+                        Pooled = payloadLen > 0
                     });
                 }
             }
@@ -750,9 +933,12 @@ namespace SlimeCoop.Net
                     {
                         lock (_sendLock)
                         {
-                            if (_peers.TryGetValue(sender, out PeerReliability peer))
+                            if (_peers.TryGetValue(sender, out PeerReliability peer) &&
+                                peer.Outgoing.TryGetValue(seq, out PendingReliable pr))
                             {
                                 peer.Outgoing.Remove(seq);
+                                Interlocked.Decrement(ref _pendingReliableCount);
+                                _ackRecycleQueue.Enqueue(pr);
                             }
                         }
                         continue;
@@ -789,7 +975,7 @@ namespace SlimeCoop.Net
                     }
 
                     int payloadLen = received - HeaderSize;
-                    byte[] copy = new byte[payloadLen];
+                    byte[] copy = payloadLen > 0 ? RentBuffer(payloadLen) : EmptyBytes;
                     if (payloadLen > 0)
                     {
                         Buffer.BlockCopy(_recvScratch, HeaderSize, copy, 0, payloadLen);
@@ -801,7 +987,8 @@ namespace SlimeCoop.Net
                         Type = type,
                         Data = copy,
                         Offset = 0,
-                        Length = payloadLen
+                        Length = payloadLen,
+                        Pooled = payloadLen > 0
                     });
                 }
                 catch (SocketException sex)
