@@ -74,7 +74,8 @@ namespace SlimeCoop.Protocol
         ClientVacCapture = 63,
         ClientExpelRequest = 64,
         MarketDepositNotice = 65,
-        SiloSlotTake = 66
+        SiloSlotTake = 66,
+        SiloTakeGrant = 67
     }
 
     internal sealed class PacketWriter

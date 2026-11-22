@@ -38,6 +38,27 @@ namespace SlimeCoop
         {
             return _siloTakesProcessed.TryGetValue(slotKey, out uint cur) ? cur : 0;
         }
+
+        public void ClearSiloTakesForPlot(string plotId)
+        {
+            if (_siloTakesProcessed.Count == 0 || string.IsNullOrEmpty(plotId)) return;
+            List<SiloSlotKey> keys = null;
+            foreach (KeyValuePair<SiloSlotKey, uint> kv in _siloTakesProcessed)
+            {
+                if (string.Equals(kv.Key.PlotId, plotId, StringComparison.Ordinal))
+                {
+                    if (keys == null) keys = new List<SiloSlotKey>(8);
+                    keys.Add(kv.Key);
+                }
+            }
+            if (keys != null)
+            {
+                for (int i = 0; i < keys.Count; i++)
+                {
+                    _siloTakesProcessed.Remove(keys[i]);
+                }
+            }
+        }
     }
 
     internal sealed class CoopChatEntry
@@ -486,6 +507,18 @@ namespace SlimeCoop
             }
         }
 
+        public static void ClearPeerSiloTakesForPlot(string plotId)
+        {
+            if (string.IsNullOrEmpty(plotId)) return;
+            for (int i = 0; i < ConnectedPeers.Count; i++)
+            {
+                if (ConnectedPeers[i] != null)
+                {
+                    ConnectedPeers[i].ClearSiloTakesForPlot(plotId);
+                }
+            }
+        }
+
         public static void BroadcastHostSiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int count, uint revision)
         {
             if (!IsHost || ConnectedPeers.Count == 0) return;
@@ -509,6 +542,34 @@ namespace SlimeCoop
                 SharedWriter.WriteUInt(p.GetSiloTakesProcessed(slotKey));
                 Transport.SendReliable(p.EndPoint, PacketType.SiloSlotSync, SharedWriter);
             }
+        }
+
+        public static void SendHostSiloSlotToPeer(CoopPeerInfo peer, string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int count, uint revision)
+        {
+            if (!IsHost || peer == null || !peer.Authenticated || peer.EndPoint == null) return;
+            SiloSlotKey slotKey = new SiloSlotKey
+            {
+                PlotId = plotId ?? string.Empty,
+                StorageType = storageType,
+                SlotIdx = slotIdx
+            };
+            SharedWriter.Reset();
+            SharedWriter.WriteString(plotId);
+            SharedWriter.WriteByte((byte)storageType);
+            SharedWriter.WriteByte((byte)slotIdx);
+            SharedWriter.WriteInt((int)itemId);
+            SharedWriter.WriteInt(count);
+            SharedWriter.WriteUInt(revision);
+            SharedWriter.WriteUInt(peer.GetSiloTakesProcessed(slotKey));
+            Transport.SendReliable(peer.EndPoint, PacketType.SiloSlotSync, SharedWriter);
+        }
+
+        public static void SendSiloTakeGrant(CoopPeerInfo peer, Identifiable.Id itemId)
+        {
+            if (!IsHost || peer == null || !peer.Authenticated || peer.EndPoint == null) return;
+            SharedWriter.Reset();
+            SharedWriter.WriteInt((int)itemId);
+            Transport.SendReliable(peer.EndPoint, PacketType.SiloTakeGrant, SharedWriter);
         }
 
         public static void SendSiloSlotTake(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id expectedItem)
@@ -600,10 +661,10 @@ namespace SlimeCoop
                     BroadcastUnreliable(PacketType.TimeWeatherSync, SharedWriter, null);
                 }
 
-                // Reconcile any changed host silo/collector/feeder slots every 0.4s
+                // Reconcile any changed host silo/collector/feeder slots every 0.2s
                 if (ctx != null && ConnectedPeers.Count > 0 && now >= _nextSiloSyncTime)
                 {
-                    _nextSiloSyncTime = now + 0.4f;
+                    _nextSiloSyncTime = now + 0.2f;
                     CoopWorldSync.SyncDirtyHostSilos();
                 }
 
@@ -1282,8 +1343,17 @@ namespace SlimeCoop
                     StatusMessage = "Подключено к '" + RoomName + "' (" + protoUsed + ")";
                     AddChat("Система", "Вы подключились к '" + RoomName + "'! Ваш прогресс апгрейдов, Слаймопедии и достижений личный.", true);
 
-                    if (SRSingleton<SceneContext>.Instance == null)
+                    string currentSaveName = SRSingleton<GameContext>.Instance != null &&
+                                             SRSingleton<GameContext>.Instance.AutoSaveDirector != null &&
+                                             SRSingleton<GameContext>.Instance.AutoSaveDirector.SavedGame != null
+                        ? SRSingleton<GameContext>.Instance.AutoSaveDirector.SavedGame.GetName()
+                        : null;
+                    bool alreadyInClientSandbox = !string.IsNullOrEmpty(currentSaveName) &&
+                                                  currentSaveName.StartsWith("slimecoop_clientsandbox", StringComparison.OrdinalIgnoreCase);
+
+                    if (SRSingleton<SceneContext>.Instance == null || !alreadyInClientSandbox)
                     {
+                        BlockLocalSaveUntilMenu = true;
                         EnsureWorldLoadedForCoop(true);
                     }
                     else
@@ -1409,6 +1479,13 @@ namespace SlimeCoop
                     uint sRev = r.ReadUInt();
                     uint ackTakes = r.ReadUInt();
                     CoopWorldSync.ApplyHostSiloSlot(sPlotId, sType, sSlot, sItem, sCount, sRev, ackTakes);
+                    break;
+                }
+
+                case PacketType.SiloTakeGrant:
+                {
+                    Identifiable.Id grantedItem = (Identifiable.Id)r.ReadInt();
+                    CoopWorldSync.ApplySiloTakeGrant(grantedItem);
                     break;
                 }
 
