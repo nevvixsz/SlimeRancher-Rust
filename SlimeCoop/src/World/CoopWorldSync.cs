@@ -1443,6 +1443,23 @@ namespace SlimeCoop.World
             }
         }
 
+        public static void OnClientGordoRegistered(string gordoId, GameObject gordoObj)
+        {
+            if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || string.IsNullOrEmpty(gordoId) || gordoObj == null)
+            {
+                return;
+            }
+            GordoEat gordo = gordoObj.GetComponent<GordoEat>();
+            if (gordo != null)
+            {
+                GordoCache[gordoId] = gordo;
+            }
+            if (PendingGordoStates.TryGetValue(gordoId, out int eatenCount))
+            {
+                ApplyGordoEat(gordoId, eatenCount);
+            }
+        }
+
         public static void OnClientGordoModelSet(GordoEat gordo)
         {
             if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || gordo == null || string.IsNullOrEmpty(gordo.id))
@@ -1450,7 +1467,9 @@ namespace SlimeCoop.World
                 return;
             }
             GordoCache[gordo.id] = gordo;
-            if (PendingGordoStates.TryGetValue(gordo.id, out int eatenCount))
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx != null && ctx.GameModel != null && ctx.GameModel.AllGordos().ContainsKey(gordo.id) &&
+                PendingGordoStates.TryGetValue(gordo.id, out int eatenCount))
             {
                 ApplyGordoEat(gordo.id, eatenCount);
             }
@@ -1503,9 +1522,20 @@ namespace SlimeCoop.World
                     }
                     else
                     {
-                        if (!gordo.gameObject.activeSelf && !(gordo is EventGordoEat))
+                        if (!gordo.gameObject.activeSelf)
                         {
-                            gordo.gameObject.SetActive(true);
+                            if (gordo is EventGordoEat)
+                            {
+                                HolidayModel hm = ctx != null && ctx.GameModel != null ? ctx.GameModel.GetHolidayModel() : null;
+                                if (hm != null && IsEventGordoActive(hm, gordoId))
+                                {
+                                    gordo.gameObject.SetActive(true);
+                                }
+                            }
+                            else
+                            {
+                                gordo.gameObject.SetActive(true);
+                            }
                         }
                         if (eatenCount >= gordo.GetTargetCount() && gordo.GetTargetCount() > 0 && GordoReachedTargetMethod != null)
                         {
@@ -1520,6 +1550,88 @@ namespace SlimeCoop.World
                     NetSyncGuard.ApplyingRemoteDepth--;
                 }
             }
+            else if (eatenCount != 0)
+            {
+                CoopLog.Info("Deferred GordoEat state id=" + gordoId + " eaten=" + eatenCount + " (sector not loaded yet)");
+            }
+        }
+
+        private static bool IsEventGordoActive(HolidayModel hm, string objectId)
+        {
+            if (hm == null || string.IsNullOrEmpty(objectId)) return false;
+            foreach (HolidayModel.EventGordo eg in hm.eventGordos)
+            {
+                if (eg != null && eg.objectId == objectId) return true;
+            }
+            return false;
+        }
+
+        public static void ApplyHolidayState(List<string> eventGordoIds, List<string> echoNoteIds)
+        {
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.GameModel == null) return;
+            HolidayModel hm = ctx.GameModel.GetHolidayModel();
+            if (hm == null) return;
+
+            hm.eventGordos.Clear();
+            if (eventGordoIds != null)
+            {
+                for (int i = 0; i < eventGordoIds.Count; i++)
+                {
+                    string id = eventGordoIds[i];
+                    for (int j = 0; j < HolidayModel.EventGordo.INSTANCES.Length; j++)
+                    {
+                        HolidayModel.EventGordo inst = HolidayModel.EventGordo.INSTANCES[j];
+                        if (inst != null && inst.id == id)
+                        {
+                            hm.eventGordos.Add(inst);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            hm.eventEchoNoteGordos.Clear();
+            if (echoNoteIds != null)
+            {
+                for (int i = 0; i < echoNoteIds.Count; i++)
+                {
+                    string id = echoNoteIds[i];
+                    for (int j = 0; j < HolidayModel.EventEchoNoteGordo.INSTANCES.Length; j++)
+                    {
+                        HolidayModel.EventEchoNoteGordo inst = HolidayModel.EventEchoNoteGordo.INSTANCES[j];
+                        if (inst != null && inst.id == id)
+                        {
+                            hm.eventEchoNoteGordos.Add(inst);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            foreach (HolidayModel.EventGordo eg in hm.eventGordos)
+            {
+                if (eg == null) continue;
+                GordoModel gm = ctx.GameModel.GetGordoModel(eg.objectId);
+                if (gm != null && !gm.HasPopped())
+                {
+                    gm.SetGameObjectActive(true);
+                }
+            }
+
+            EventGordoEat[] sceneEventGordos = UnityEngine.Object.FindObjectsOfType<EventGordoEat>();
+            for (int i = 0; i < sceneEventGordos.Length; i++)
+            {
+                EventGordoEat ev = sceneEventGordos[i];
+                if (ev == null || string.IsNullOrEmpty(ev.id)) continue;
+                bool active = IsEventGordoActive(hm, ev.id) && !ev.HasPopped();
+                if (ev.gameObject.activeSelf != active)
+                {
+                    ev.gameObject.SetActive(active);
+                }
+            }
+
+            CoopLog.Info("Applied HolidayState: eventGordos=" + hm.eventGordos.Count + ", echoNoteGordos=" + hm.eventEchoNoteGordos.Count);
         }
 
         public static void ApplyOasisLive(string oasisId)
@@ -1582,6 +1694,29 @@ namespace SlimeCoop.World
             }
         }
 
+        public static void OnClientGadgetSiteRegistered(string siteId, GameObject siteObj)
+        {
+            if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || string.IsNullOrEmpty(siteId) || siteObj == null)
+            {
+                return;
+            }
+            GadgetSite site = siteObj.GetComponent<GadgetSite>();
+            if (site != null)
+            {
+                GadgetSiteCache[siteId] = site;
+            }
+            if (PendingGadgetStates.TryGetValue(siteId, out PendingGadgetPlace place))
+            {
+                CoopLog.Info("Applying deferred gadget site=" + siteId + " gadget=" + place.GadgetId);
+                ApplyGadgetPlace(siteId, place.GadgetId, place.Yaw);
+            }
+            if (PendingSnareStates.TryGetValue(siteId, out PendingSnareState snareState))
+            {
+                CoopLog.Info("Applying deferred snare site=" + siteId + " gordo=" + snareState.GordoTypeId + " bait=" + snareState.BaitTypeId);
+                ApplySnareState(siteId, snareState.BaitTypeId, snareState.GordoTypeId, snareState.GordoEatenCount);
+            }
+        }
+
         public static void OnClientGadgetSiteModelSet(GadgetSite site)
         {
             if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || site == null || string.IsNullOrEmpty(site.id))
@@ -1589,6 +1724,11 @@ namespace SlimeCoop.World
                 return;
             }
             GadgetSiteCache[site.id] = site;
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.GameModel == null || !ctx.GameModel.AllGadgetSites().ContainsKey(site.id))
+            {
+                return;
+            }
             if (PendingGadgetStates.TryGetValue(site.id, out PendingGadgetPlace place))
             {
                 ApplyGadgetPlace(site.id, place.GadgetId, place.Yaw);
@@ -1619,15 +1759,27 @@ namespace SlimeCoop.World
             }
 
             GadgetDefinition def = gctx.LookupDirector.GetGadgetDefinition(gadgetId);
-            if (def == null || def.prefab == null) return;
+            if (def == null || def.prefab == null)
+            {
+                CoopLog.Warn("ApplyGadgetPlace: missing GadgetDefinition/prefab for " + gadgetId + " at site " + siteId);
+                return;
+            }
 
             NetSyncGuard.ApplyingRemoteDepth++;
             NetSyncGuard.SuppressPersonalProgressDepth++;
             try
             {
-                if (siteModel.HasAttached() && GadgetSiteCache.TryGetValue(siteId, out GadgetSite site) && site != null)
+                if (siteModel.HasAttached())
                 {
-                    site.DestroyAttached();
+                    GadgetSite site = null;
+                    if (!GadgetSiteCache.TryGetValue(siteId, out site) || site == null)
+                    {
+                        site = siteModel.transform != null ? siteModel.transform.GetComponent<GadgetSite>() : null;
+                    }
+                    if (site != null)
+                    {
+                        site.DestroyAttached();
+                    }
                 }
 
                 GameObject go = ctx.GameModel.InstantiateGadget(def.prefab, siteModel);
@@ -1711,20 +1863,29 @@ namespace SlimeCoop.World
             }
 
             SnareModel snareModel = siteModel.attached as SnareModel;
-            if (snareModel == null) return;
+            if (snareModel == null)
+            {
+                CoopLog.Warn("ApplySnareState: attached model is not SnareModel at site " + siteId);
+                return;
+            }
 
             GordoSnare snare = null;
-            if (GadgetSiteCache.TryGetValue(siteId, out GadgetSite cachedSite) && cachedSite != null)
+            if (snareModel.transform != null)
+            {
+                snare = snareModel.transform.GetComponentInChildren<GordoSnare>(true);
+            }
+            if (snare == null && GadgetSiteCache.TryGetValue(siteId, out GadgetSite cachedSite) && cachedSite != null)
             {
                 snare = cachedSite.GetComponentInChildren<GordoSnare>(true);
             }
-            else if (siteModel.transform != null)
+            if (snare == null && siteModel.transform != null)
             {
                 snare = siteModel.transform.GetComponentInChildren<GordoSnare>(true);
             }
 
             if (snare == null)
             {
+                CoopLog.Warn("ApplySnareState: GordoSnare component missing at site " + siteId + " (gordo=" + gordoTypeId + ")");
                 snareModel.baitTypeId = baitTypeId;
                 snareModel.gordoTypeId = gordoTypeId;
                 snareModel.gordoEatenCount = gordoEatenCount;
@@ -1742,6 +1903,7 @@ namespace SlimeCoop.World
                         GordoSnareSnareGordoMethod.Invoke(snare, new object[] { gordoTypeId });
                     }
                     snareModel.gordoEatenCount = gordoEatenCount;
+                    CoopLog.Info("ApplySnareState: snared gordo=" + gordoTypeId + " eaten=" + gordoEatenCount + " at site=" + siteId);
                     GordoEat ge = snare.GetComponentInChildren<GordoEat>(true);
                     if (ge != null)
                     {
@@ -2135,11 +2297,40 @@ namespace SlimeCoop.World
                 }
             }
 
-            // 4. Gordos
+            // 3b. Holiday Event Gordos (Party Gordo & Twinkle Slime)
+            HolidayModel hm = ctx.GameModel.GetHolidayModel();
+            if (hm != null)
+            {
+                w.Reset();
+                w.WriteByte(11); // chunk kind: HolidayState
+                w.WriteByte((byte)Math.Min(255, hm.eventGordos.Count));
+                int evWritten = 0;
+                foreach (HolidayModel.EventGordo eg in hm.eventGordos)
+                {
+                    if (evWritten >= 255) break;
+                    w.WriteString(eg != null ? eg.id : string.Empty);
+                    evWritten++;
+                }
+                w.WriteByte((byte)Math.Min(255, hm.eventEchoNoteGordos.Count));
+                int echoWritten = 0;
+                foreach (HolidayModel.EventEchoNoteGordo en in hm.eventEchoNoteGordos)
+                {
+                    if (echoWritten >= 255) break;
+                    w.WriteString(en != null ? en.id : string.Empty);
+                    echoWritten++;
+                }
+                sendReliable(w);
+            }
+
+            // 4. Gordos (send all registered gordos so client matches host state even for 0-eaten / active event gordos)
+            int totalGordos = 0;
+            int nonZeroGordos = 0;
             foreach (KeyValuePair<string, GordoModel> kv in ctx.GameModel.AllGordos())
             {
-                if (kv.Value != null && kv.Value.gordoEatenCount != 0)
+                if (kv.Value != null)
                 {
+                    totalGordos++;
+                    if (kv.Value.gordoEatenCount != 0) nonZeroGordos++;
                     w.Reset();
                     w.WriteByte(4); // Gordo
                     w.WriteString(kv.Key);
@@ -2174,10 +2365,13 @@ namespace SlimeCoop.World
             }
 
             // 7. Gadgets
+            int totalGadgets = 0;
+            int totalSnares = 0;
             foreach (KeyValuePair<string, GadgetSiteModel> kv in ctx.GameModel.AllGadgetSites())
             {
                 if (kv.Value != null && kv.Value.attached != null)
                 {
+                    totalGadgets++;
                     w.Reset();
                     w.WriteByte(7); // Gadget
                     w.WriteString(kv.Key);
@@ -2187,13 +2381,17 @@ namespace SlimeCoop.World
                     w.WriteBool(snare != null);
                     if (snare != null)
                     {
+                        totalSnares++;
                         w.WriteInt((int)snare.baitTypeId);
                         w.WriteInt((int)snare.gordoTypeId);
                         w.WriteInt(snare.gordoEatenCount);
+                        CoopLog.Info("Snapshot snare site=" + kv.Key + " gadget=" + kv.Value.attached.ident +
+                                     " bait=" + snare.baitTypeId + " gordo=" + snare.gordoTypeId + " eaten=" + snare.gordoEatenCount);
                     }
                     sendReliable(w);
                 }
             }
+            CoopLog.Info("Snapshot built: gordos=" + totalGordos + " (nonZero=" + nonZeroGordos + "), gadgets=" + totalGadgets + " (snares=" + totalSnares + ")");
 
             // 8. Nearby Actors (sorted by distance to host, packed in batches of 8 to avoid network stalls)
             Vector3 hostPos = ctx.Player != null ? ctx.Player.transform.position : Vector3.zero;
@@ -2337,6 +2535,21 @@ namespace SlimeCoop.World
                         {
                         }
                     }
+                    break;
+                case 11: // HolidayState
+                    byte evCnt = r.ReadByte();
+                    List<string> evIds = new List<string>(evCnt);
+                    for (int i = 0; i < evCnt; i++)
+                    {
+                        evIds.Add(r.ReadString());
+                    }
+                    byte echoCnt = r.ReadByte();
+                    List<string> echoIds = new List<string>(echoCnt);
+                    for (int i = 0; i < echoCnt; i++)
+                    {
+                        echoIds.Add(r.ReadString());
+                    }
+                    ApplyHolidayState(evIds, echoIds);
                     break;
             }
         }

@@ -767,6 +767,30 @@ namespace SlimeCoop.Patches
             }
         }
 
+        [HarmonyPatch(typeof(GameModel), nameof(GameModel.RegisterGordo))]
+        internal static class GameModelRegisterGordoClientPatch
+        {
+            private static void Postfix(string gordoId, GameObject gordoObj)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    CoopWorldSync.OnClientGordoRegistered(gordoId, gordoObj);
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(GameModel), nameof(GameModel.RegisterGadgetSite))]
+        internal static class GameModelRegisterGadgetSiteClientPatch
+        {
+            private static void Postfix(string siteId, GameObject gameObject)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    CoopWorldSync.OnClientGadgetSiteRegistered(siteId, gameObject);
+                }
+            }
+        }
+
         // --- Shared World: Oases ---
         [HarmonyPatch(typeof(Oasis), nameof(Oasis.SetLive))]
         internal static class OasisSyncPatch
