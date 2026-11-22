@@ -48,7 +48,10 @@ namespace SlimeCoop
             CoopLog.Info("SceneLoaded: '" + scene.name + "', hasSceneContext=" + hasCtx + ", role=" + CoopSession.Role);
             if (hasCtx && !string.Equals(scene.name, "MainMenu", System.StringComparison.OrdinalIgnoreCase))
             {
-                CoopSession.OnGameSceneLoaded();
+                if (!CoopSession.WaitingWorldLoad)
+                {
+                    CoopSession.OnGameSceneLoaded();
+                }
             }
         }
 
@@ -72,7 +75,14 @@ namespace SlimeCoop
                     CoopOverlayUI.SetOpen(false);
                 }
             }
-            CoopSession.TickPerFrame();
+            try
+            {
+                CoopSession.TickPerFrame();
+            }
+            catch (System.Exception ex)
+            {
+                CoopLog.Error("TickPerFrame exception: " + ex);
+            }
         }
 
         private void OnGUI()

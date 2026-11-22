@@ -219,6 +219,14 @@ namespace SlimeCoop.Net
                 _socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 try
                 {
+                    _socket.SendBufferSize = 262144;
+                    _socket.ReceiveBufferSize = 262144;
+                }
+                catch
+                {
+                }
+                try
+                {
                     _socket.EnableBroadcast = true;
                 }
                 catch
@@ -294,6 +302,14 @@ namespace SlimeCoop.Net
                 {
                     s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                     s.NoDelay = true;
+                    try
+                    {
+                        s.SendBufferSize = 262144;
+                        s.ReceiveBufferSize = 262144;
+                    }
+                    catch
+                    {
+                    }
                     IAsyncResult ar = s.BeginConnect(target, null, null);
                     bool signaled = ar.AsyncWaitHandle.WaitOne(3500, false);
                     if (!signaled)
@@ -471,12 +487,17 @@ namespace SlimeCoop.Net
 
         public void SendReliable(IPEndPoint target, PacketType type, PacketWriter payload)
         {
+            SendReliable(target, type, payload != null ? payload.Buffer : null, payload != null ? payload.Length : 0);
+        }
+
+        public void SendReliable(IPEndPoint target, PacketType type, byte[] payload, int payloadLen)
+        {
             if (!_running || target == null) return;
-            int payloadLen = payload != null ? payload.Length : 0;
+            if (payloadLen < 0) payloadLen = 0;
 
             if (_tcpPeers.TryGetValue(target, out TcpPeerConn tcp) && tcp != null && !tcp.Closed)
             {
-                SendTcpFrame(tcp, type, 0, 0, payload != null ? payload.Buffer : null, payloadLen);
+                SendTcpFrame(tcp, type, 0, 0, payload, payloadLen);
                 return;
             }
 
@@ -496,9 +517,9 @@ namespace SlimeCoop.Net
                 frame[3] = 1;
                 frame[4] = (byte)(seq & 0xFF);
                 frame[5] = (byte)((seq >> 8) & 0xFF);
-                if (payloadLen > 0)
+                if (payloadLen > 0 && payload != null)
                 {
-                    Buffer.BlockCopy(payload.Buffer, 0, frame, HeaderSize, payloadLen);
+                    Buffer.BlockCopy(payload, 0, frame, HeaderSize, payloadLen);
                 }
 
                 PendingReliable pr = RentPending();
@@ -598,7 +619,7 @@ namespace SlimeCoop.Net
                     {
                         if (now - pr.LastSendTicks >= retryThreshold)
                         {
-                            if (pr.Retries >= 45)
+                            if (pr.Retries >= 80)
                             {
                                 _expiredScratch.Add(pr.Seq);
                                 continue;
@@ -618,7 +639,7 @@ namespace SlimeCoop.Net
                             {
                                 if (prExp.Length > 2)
                                 {
-                                    CoopLog.Warn("Reliable packet timeout (no ACK after 45 retries): to=" + kv.Key + ", type=" + (PacketType)prExp.Frame[2] + ", seq=" + expSeq);
+                                    CoopLog.Warn("Reliable packet timeout (no ACK after 80 retries): to=" + kv.Key + ", type=" + (PacketType)prExp.Frame[2] + ", seq=" + expSeq);
                                 }
                                 peer.Outgoing.Remove(expSeq);
                                 Interlocked.Decrement(ref _pendingReliableCount);
@@ -775,6 +796,14 @@ namespace SlimeCoop.Net
                     }
 
                     clientSock.NoDelay = true;
+                    try
+                    {
+                        clientSock.SendBufferSize = 262144;
+                        clientSock.ReceiveBufferSize = 262144;
+                    }
+                    catch
+                    {
+                    }
                     IPEndPoint remote = clientSock.RemoteEndPoint as IPEndPoint;
                     if (remote == null)
                     {
