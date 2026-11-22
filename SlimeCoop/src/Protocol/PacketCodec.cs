@@ -227,6 +227,8 @@ namespace SlimeCoop.Protocol
         }
 
         public int Remaining => _len - _pos;
+        public byte[] Buffer => _buf;
+        public int Offset => _pos;
 
         public byte ReadByte()
         {
@@ -323,7 +325,7 @@ namespace SlimeCoop.Protocol
                 return new byte[0];
             }
             byte[] arr = new byte[len];
-            Buffer.BlockCopy(_buf, _pos, arr, 0, len);
+            System.Buffer.BlockCopy(_buf, _pos, arr, 0, len);
             _pos += len;
             return arr;
         }
