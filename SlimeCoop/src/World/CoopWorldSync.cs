@@ -67,6 +67,9 @@ namespace SlimeCoop.World
         private static readonly AccessTools.FieldRef<TimeDirector, WorldModel> TimeWorldModelRef =
             AccessTools.FieldRefAccess<TimeDirector, WorldModel>("worldModel");
 
+        private static readonly AccessTools.FieldRef<PlayerState, PlayerModel> PlayerModelRef =
+            AccessTools.FieldRefAccess<PlayerState, PlayerModel>("model");
+
         private static readonly System.Reflection.MethodInfo GordoReachedTargetMethod =
             AccessTools.Method(typeof(GordoEat), "ReachedTarget");
 
@@ -452,7 +455,7 @@ namespace SlimeCoop.World
             return loc;
         }
 
-        public static void ApplyTimeWeather(double worldTime, AmbianceDirector.Weather weather)
+        public static void ApplyTimeWeather(double worldTime, AmbianceDirector.Weather weather, bool forceSnap = false)
         {
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             if (ctx == null || ctx.TimeDirector == null) return;
@@ -461,10 +464,52 @@ namespace SlimeCoop.World
             if (wm != null)
             {
                 bool isLocked = SRSingleton<LockOnDeath>.Instance != null && SRSingleton<LockOnDeath>.Instance.Locked();
-                if (!ctx.TimeDirector.IsFastForwarding() && !isLocked && Math.Abs(wm.worldTime - worldTime) > 1.5)
+                double threshold = forceSnap ? 1.5 : 120.0;
+                if (!ctx.TimeDirector.IsFastForwarding() && !isLocked && Math.Abs(wm.worldTime - worldTime) > threshold)
                 {
+                    double oldTime = wm.worldTime;
+                    double delta = worldTime - oldTime;
                     wm.worldTime = worldTime;
+
+                    PlayerModel pm = ctx.PlayerState != null ? PlayerModelRef(ctx.PlayerState) : null;
+                    if (pm != null)
+                    {
+                        if (!double.IsInfinity(pm.energyRecoverAfter) && !double.IsNaN(pm.energyRecoverAfter))
+                        {
+                            pm.energyRecoverAfter = Math.Min(pm.energyRecoverAfter + delta, worldTime + 300.0);
+                        }
+                        if (!double.IsInfinity(pm.healthBurstAfter) && !double.IsNaN(pm.healthBurstAfter))
+                        {
+                            pm.healthBurstAfter = Math.Min(pm.healthBurstAfter + delta, worldTime + 300.0);
+                        }
+                        if (!double.IsInfinity(pm.radRecoverAfter) && !double.IsNaN(pm.radRecoverAfter))
+                        {
+                            pm.radRecoverAfter = Math.Min(pm.radRecoverAfter + delta, worldTime + 600.0);
+                        }
+                    }
                 }
+
+                // Safety net: ensure personal recovery timers can never get stranded far in the future.
+                PlayerModel pModel = ctx.PlayerState != null ? PlayerModelRef(ctx.PlayerState) : null;
+                if (pModel != null)
+                {
+                    if (pModel.currEnergy < (float)pModel.maxEnergy &&
+                        (double.IsInfinity(pModel.energyRecoverAfter) || double.IsNaN(pModel.energyRecoverAfter) || pModel.energyRecoverAfter > wm.worldTime + 300.0))
+                    {
+                        pModel.energyRecoverAfter = wm.worldTime + 300.0;
+                    }
+                    if (pModel.currHealth < (float)pModel.maxHealth &&
+                        (double.IsInfinity(pModel.healthBurstAfter) || double.IsNaN(pModel.healthBurstAfter) || pModel.healthBurstAfter > wm.worldTime + 300.0))
+                    {
+                        pModel.healthBurstAfter = wm.worldTime + 300.0;
+                    }
+                    if (pModel.currRads > 0f &&
+                        (double.IsInfinity(pModel.radRecoverAfter) || double.IsNaN(pModel.radRecoverAfter) || pModel.radRecoverAfter > wm.worldTime + 600.0))
+                    {
+                        pModel.radRecoverAfter = wm.worldTime + 600.0;
+                    }
+                }
+
                 wm.currWeather = weather;
             }
         }
@@ -1790,7 +1835,7 @@ namespace SlimeCoop.World
                 case 1: // TimeWeather
                     double wt = r.ReadDouble();
                     AmbianceDirector.Weather weather = (AmbianceDirector.Weather)r.ReadByte();
-                    ApplyTimeWeather(wt, weather);
+                    ApplyTimeWeather(wt, weather, true);
                     break;
                 case 2: // LandPlot
                     string plotId = r.ReadString();
