@@ -67,6 +67,21 @@ namespace SlimeCoop.World
         private static readonly AccessTools.FieldRef<GordoEat, GordoRewardsBase> GordoRewardsRef =
             AccessTools.FieldRefAccess<GordoEat, GordoRewardsBase>("rewards");
 
+        private static readonly AccessTools.FieldRef<GordoSnare, SnareModel> GordoSnareModelRef =
+            AccessTools.FieldRefAccess<GordoSnare, SnareModel>("model");
+
+        private static readonly AccessTools.FieldRef<GordoSnare, bool> GordoSnareIsSnaredRef =
+            AccessTools.FieldRefAccess<GordoSnare, bool>("isSnared");
+
+        private static readonly System.Reflection.MethodInfo GordoSnareAttachBaitMethod =
+            AccessTools.Method(typeof(GordoSnare), "AttachBait", new[] { typeof(Identifiable.Id) });
+
+        private static readonly System.Reflection.MethodInfo GordoSnareSnareGordoMethod =
+            AccessTools.Method(typeof(GordoSnare), "SnareGordo", new[] { typeof(Identifiable.Id) });
+
+        private static readonly System.Reflection.MethodInfo GordoSnareClearBaitMethod =
+            AccessTools.Method(typeof(GordoSnare), "ClearBait");
+
         private static readonly AccessTools.FieldRef<TimeDirector, WorldModel> TimeWorldModelRef =
             AccessTools.FieldRefAccess<TimeDirector, WorldModel>("worldModel");
 
@@ -146,6 +161,28 @@ namespace SlimeCoop.World
 
         private static readonly Dictionary<string, GadgetSite> GadgetSiteCache =
             new Dictionary<string, GadgetSite>(128);
+
+        private struct PendingGadgetPlace
+        {
+            public Gadget.Id GadgetId;
+            public float Yaw;
+        }
+
+        private struct PendingSnareState
+        {
+            public Identifiable.Id BaitTypeId;
+            public Identifiable.Id GordoTypeId;
+            public int GordoEatenCount;
+        }
+
+        private static readonly Dictionary<string, int> PendingGordoStates =
+            new Dictionary<string, int>(32);
+
+        private static readonly Dictionary<string, PendingGadgetPlace> PendingGadgetStates =
+            new Dictionary<string, PendingGadgetPlace>(32);
+
+        private static readonly Dictionary<string, PendingSnareState> PendingSnareStates =
+            new Dictionary<string, PendingSnareState>(16);
 
         public static Vector3? PendingActorSpawnVelocity;
 
@@ -229,6 +266,9 @@ namespace SlimeCoop.World
             OasisCache.Clear();
             PodCache.Clear();
             GadgetSiteCache.Clear();
+            PendingGordoStates.Clear();
+            PendingGadgetStates.Clear();
+            PendingSnareStates.Clear();
             PendingHostSyncActors.Clear();
             ActiveSnapshotJobs.Clear();
             ClientSnapshotApplyQueue.Clear();
@@ -243,6 +283,9 @@ namespace SlimeCoop.World
         public static void ClearLocalActorsBeforeSnapshot()
         {
             ClientLastSlotRevision.Clear();
+            PendingGordoStates.Clear();
+            PendingGadgetStates.Clear();
+            PendingSnareStates.Clear();
             ClientSnapshotApplyQueue.Clear();
             _pendingSnapshotEnd = false;
             _pendingHostSpawn = false;
@@ -1400,8 +1443,24 @@ namespace SlimeCoop.World
             }
         }
 
+        public static void OnClientGordoModelSet(GordoEat gordo)
+        {
+            if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || gordo == null || string.IsNullOrEmpty(gordo.id))
+            {
+                return;
+            }
+            GordoCache[gordo.id] = gordo;
+            if (PendingGordoStates.TryGetValue(gordo.id, out int eatenCount))
+            {
+                ApplyGordoEat(gordo.id, eatenCount);
+            }
+        }
+
         public static void ApplyGordoEat(string gordoId, int eatenCount)
         {
+            if (string.IsNullOrEmpty(gordoId)) return;
+            PendingGordoStates[gordoId] = eatenCount;
+
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             if (ctx != null && ctx.GameModel != null && ctx.GameModel.AllGordos().TryGetValue(gordoId, out GordoModel gm) && gm != null)
             {
@@ -1410,8 +1469,18 @@ namespace SlimeCoop.World
 
             if (!GordoCache.TryGetValue(gordoId, out GordoEat gordo) || gordo == null)
             {
-                RebuildSceneObjectCaches();
-                GordoCache.TryGetValue(gordoId, out gordo);
+                if (ctx != null && ctx.GameModel != null && ctx.GameModel.AllGordos().ContainsKey(gordoId))
+                {
+                    GordoEat[] all = UnityEngine.Object.FindObjectsOfType<GordoEat>();
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        if (all[i] != null && !string.IsNullOrEmpty(all[i].id))
+                        {
+                            GordoCache[all[i].id] = all[i];
+                        }
+                    }
+                    GordoCache.TryGetValue(gordoId, out gordo);
+                }
             }
 
             if (gordo != null)
@@ -1432,10 +1501,17 @@ namespace SlimeCoop.World
                         if (rew != null) rew.SetupActiveRewards();
                         gordo.gameObject.SetActive(false);
                     }
-                    else if (eatenCount >= gordo.GetTargetCount() && gordo.GetTargetCount() > 0 && GordoReachedTargetMethod != null)
+                    else
                     {
-                        var routine = GordoReachedTargetMethod.Invoke(gordo, null) as System.Collections.IEnumerator;
-                        if (routine != null) gordo.StartCoroutine(routine);
+                        if (!gordo.gameObject.activeSelf && !(gordo is EventGordoEat))
+                        {
+                            gordo.gameObject.SetActive(true);
+                        }
+                        if (eatenCount >= gordo.GetTargetCount() && gordo.GetTargetCount() > 0 && GordoReachedTargetMethod != null)
+                        {
+                            var routine = GordoReachedTargetMethod.Invoke(gordo, null) as System.Collections.IEnumerator;
+                            if (routine != null) gordo.StartCoroutine(routine);
+                        }
                     }
                 }
                 finally
@@ -1506,8 +1582,28 @@ namespace SlimeCoop.World
             }
         }
 
+        public static void OnClientGadgetSiteModelSet(GadgetSite site)
+        {
+            if (!CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || site == null || string.IsNullOrEmpty(site.id))
+            {
+                return;
+            }
+            GadgetSiteCache[site.id] = site;
+            if (PendingGadgetStates.TryGetValue(site.id, out PendingGadgetPlace place))
+            {
+                ApplyGadgetPlace(site.id, place.GadgetId, place.Yaw);
+            }
+            if (PendingSnareStates.TryGetValue(site.id, out PendingSnareState snareState))
+            {
+                ApplySnareState(site.id, snareState.BaitTypeId, snareState.GordoTypeId, snareState.GordoEatenCount);
+            }
+        }
+
         public static void ApplyGadgetPlace(string siteId, Gadget.Id gadgetId, float yaw)
         {
+            if (string.IsNullOrEmpty(siteId)) return;
+            PendingGadgetStates[siteId] = new PendingGadgetPlace { GadgetId = gadgetId, Yaw = yaw };
+
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             GameContext gctx = SRSingleton<GameContext>.Instance;
             if (ctx == null || gctx == null || ctx.GameModel == null || gctx.LookupDirector == null) return;
@@ -1549,6 +1645,10 @@ namespace SlimeCoop.World
 
         public static void ApplyGadgetDestroy(string siteId)
         {
+            if (string.IsNullOrEmpty(siteId)) return;
+            PendingGadgetStates.Remove(siteId);
+            PendingSnareStates.Remove(siteId);
+
             if (!GadgetSiteCache.TryGetValue(siteId, out GadgetSite site) || site == null)
             {
                 RebuildSceneObjectCaches();
@@ -1568,6 +1668,120 @@ namespace SlimeCoop.World
                     NetSyncGuard.SuppressPersonalProgressDepth--;
                     NetSyncGuard.ApplyingRemoteDepth--;
                 }
+            }
+        }
+
+        public static bool TryGetSnareState(GordoSnare snare, out string siteId, out Identifiable.Id baitTypeId, out Identifiable.Id gordoTypeId, out int gordoEatenCount)
+        {
+            siteId = null;
+            baitTypeId = Identifiable.Id.NONE;
+            gordoTypeId = Identifiable.Id.NONE;
+            gordoEatenCount = 0;
+            if (snare == null) return false;
+
+            GadgetSite site = snare.GetComponentInParent<GadgetSite>();
+            if (site == null || string.IsNullOrEmpty(site.id)) return false;
+
+            SnareModel model = GordoSnareModelRef(snare);
+            if (model == null) return false;
+
+            siteId = site.id;
+            baitTypeId = model.baitTypeId;
+            gordoTypeId = model.gordoTypeId;
+            gordoEatenCount = model.gordoEatenCount;
+            return true;
+        }
+
+        public static void ApplySnareState(string siteId, Identifiable.Id baitTypeId, Identifiable.Id gordoTypeId, int gordoEatenCount)
+        {
+            if (string.IsNullOrEmpty(siteId)) return;
+            PendingSnareStates[siteId] = new PendingSnareState
+            {
+                BaitTypeId = baitTypeId,
+                GordoTypeId = gordoTypeId,
+                GordoEatenCount = gordoEatenCount
+            };
+
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.GameModel == null) return;
+
+            if (!ctx.GameModel.AllGadgetSites().TryGetValue(siteId, out GadgetSiteModel siteModel) || siteModel == null)
+            {
+                return;
+            }
+
+            SnareModel snareModel = siteModel.attached as SnareModel;
+            if (snareModel == null) return;
+
+            GordoSnare snare = null;
+            if (GadgetSiteCache.TryGetValue(siteId, out GadgetSite cachedSite) && cachedSite != null)
+            {
+                snare = cachedSite.GetComponentInChildren<GordoSnare>(true);
+            }
+            else if (siteModel.transform != null)
+            {
+                snare = siteModel.transform.GetComponentInChildren<GordoSnare>(true);
+            }
+
+            if (snare == null)
+            {
+                snareModel.baitTypeId = baitTypeId;
+                snareModel.gordoTypeId = gordoTypeId;
+                snareModel.gordoEatenCount = gordoEatenCount;
+                return;
+            }
+
+            NetSyncGuard.ApplyingRemoteDepth++;
+            NetSyncGuard.SuppressPersonalProgressDepth++;
+            try
+            {
+                if (gordoTypeId != Identifiable.Id.NONE)
+                {
+                    if ((snareModel.gordoTypeId != gordoTypeId || !GordoSnareIsSnaredRef(snare)) && GordoSnareSnareGordoMethod != null)
+                    {
+                        GordoSnareSnareGordoMethod.Invoke(snare, new object[] { gordoTypeId });
+                    }
+                    snareModel.gordoEatenCount = gordoEatenCount;
+                    GordoEat ge = snare.GetComponentInChildren<GordoEat>(true);
+                    if (ge != null)
+                    {
+                        if (gordoEatenCount == -1)
+                        {
+                            GordoRewardsBase rew = GordoRewardsRef(ge);
+                            if (rew != null) rew.SetupActiveRewards();
+                            ge.gameObject.SetActive(false);
+                        }
+                        else
+                        {
+                            if (!ge.gameObject.activeSelf) ge.gameObject.SetActive(true);
+                            if (gordoEatenCount >= ge.GetTargetCount() && ge.GetTargetCount() > 0 && GordoReachedTargetMethod != null)
+                            {
+                                var routine = GordoReachedTargetMethod.Invoke(ge, null) as System.Collections.IEnumerator;
+                                if (routine != null) ge.StartCoroutine(routine);
+                            }
+                        }
+                    }
+                }
+                else if (baitTypeId != Identifiable.Id.NONE)
+                {
+                    if (snareModel.baitTypeId != baitTypeId && GordoSnareAttachBaitMethod != null)
+                    {
+                        GordoSnareAttachBaitMethod.Invoke(snare, new object[] { baitTypeId });
+                    }
+                }
+                else
+                {
+                    if (GordoSnareClearBaitMethod != null)
+                    {
+                        GordoSnareClearBaitMethod.Invoke(snare, null);
+                    }
+                    snareModel.baitTypeId = Identifiable.Id.NONE;
+                }
+            }
+            finally
+            {
+                NetSyncGuard.SuppressPersonalProgressDepth--;
+                NetSyncGuard.ApplyingRemoteDepth--;
             }
         }
 
@@ -1969,6 +2183,14 @@ namespace SlimeCoop.World
                     w.WriteString(kv.Key);
                     w.WriteInt((int)kv.Value.attached.ident);
                     w.WriteFloat(kv.Value.attached.transform != null ? kv.Value.attached.transform.eulerAngles.y : 0f);
+                    SnareModel snare = kv.Value.attached as SnareModel;
+                    w.WriteBool(snare != null);
+                    if (snare != null)
+                    {
+                        w.WriteInt((int)snare.baitTypeId);
+                        w.WriteInt((int)snare.gordoTypeId);
+                        w.WriteInt(snare.gordoEatenCount);
+                    }
                     sendReliable(w);
                 }
             }
@@ -2072,7 +2294,18 @@ namespace SlimeCoop.World
                     ApplyPodState(r.ReadString(), (TreasurePod.State)r.ReadByte());
                     break;
                 case 7: // Gadget
-                    ApplyGadgetPlace(r.ReadString(), (Gadget.Id)r.ReadInt(), r.ReadFloat());
+                    string gadgetSiteId = r.ReadString();
+                    Gadget.Id gadgetId = (Gadget.Id)r.ReadInt();
+                    float gadgetYaw = r.ReadFloat();
+                    ApplyGadgetPlace(gadgetSiteId, gadgetId, gadgetYaw);
+                    bool hasSnare = r.ReadBool();
+                    if (hasSnare)
+                    {
+                        Identifiable.Id baitId = (Identifiable.Id)r.ReadInt();
+                        Identifiable.Id gordoTypeId = (Identifiable.Id)r.ReadInt();
+                        int snareEaten = r.ReadInt();
+                        ApplySnareState(gadgetSiteId, baitId, gordoTypeId, snareEaten);
+                    }
                     break;
                 case 8: // ActorSpawn
                     long aid = r.ReadLong();

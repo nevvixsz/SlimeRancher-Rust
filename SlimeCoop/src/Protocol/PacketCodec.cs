@@ -66,6 +66,7 @@ namespace SlimeCoop.Protocol
         PodSync = 53,
         GadgetPlace = 54,
         GadgetDestroy = 55,
+        SnareStateSync = 56,
 
         // Actors & Vacuum
         ActorSpawn = 60,

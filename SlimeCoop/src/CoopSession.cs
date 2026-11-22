@@ -1258,6 +1258,14 @@ namespace SlimeCoop
                     BroadcastReliable(PacketType.GadgetDestroy, SharedWriter, sender);
                     break;
 
+                case PacketType.SnareStateSync:
+                    // Host-authoritative snare state: discard client attempts to mutate snare directly.
+                    r.ReadString();
+                    r.ReadInt();
+                    r.ReadInt();
+                    r.ReadInt();
+                    break;
+
                 case PacketType.ClientVacCapture:
                     if (peer == null) return;
                     long capActorId = r.ReadLong();
@@ -1532,6 +1540,14 @@ namespace SlimeCoop
 
                 case PacketType.GadgetDestroy:
                     CoopWorldSync.ApplyGadgetDestroy(r.ReadString());
+                    break;
+
+                case PacketType.SnareStateSync:
+                    CoopWorldSync.ApplySnareState(
+                        r.ReadString(),
+                        (Identifiable.Id)r.ReadInt(),
+                        (Identifiable.Id)r.ReadInt(),
+                        r.ReadInt());
                     break;
 
                 case PacketType.ActorSpawn:
