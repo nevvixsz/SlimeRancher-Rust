@@ -113,6 +113,57 @@ namespace SlimeCoop.World
             public CachedNetActor Actor;
         }
 
+        private struct SiloSlotKey : IEquatable<SiloSlotKey>
+        {
+            public string PlotId;
+            public SiloStorage.StorageType StorageType;
+            public int SlotIdx;
+
+            public bool Equals(SiloSlotKey other)
+            {
+                return SlotIdx == other.SlotIdx &&
+                       StorageType == other.StorageType &&
+                       string.Equals(PlotId, other.PlotId, StringComparison.Ordinal);
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is SiloSlotKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int h = PlotId != null ? PlotId.GetHashCode() : 0;
+                    h = (h * 397) ^ (int)StorageType;
+                    h = (h * 397) ^ SlotIdx;
+                    return h;
+                }
+            }
+        }
+
+        private struct HostSlotState
+        {
+            public Identifiable.Id ItemId;
+            public int Count;
+            public uint Revision;
+        }
+
+        private static readonly Dictionary<SiloSlotKey, HostSlotState> HostSiloStates =
+            new Dictionary<SiloSlotKey, HostSlotState>(64);
+
+        private static readonly Dictionary<SiloSlotKey, uint> ClientLastSlotRevision =
+            new Dictionary<SiloSlotKey, uint>(64);
+
+        private static readonly Dictionary<SiloSlotKey, uint> ClientTakesSent =
+            new Dictionary<SiloSlotKey, uint>(32);
+
+        private static readonly Dictionary<SiloSlotKey, float> ClientLastTakeTime =
+            new Dictionary<SiloSlotKey, float>(32);
+
+        private static uint _nextHostSiloRevision = 1;
+
         private static readonly List<ActiveSyncItem> PendingHostSyncActors = new List<ActiveSyncItem>(128);
         private static int _actorBatchCursor;
 
@@ -128,10 +179,19 @@ namespace SlimeCoop.World
             GadgetSiteCache.Clear();
             PendingHostSyncActors.Clear();
             _actorBatchCursor = 0;
+            HostSiloStates.Clear();
+            ClientLastSlotRevision.Clear();
+            ClientTakesSent.Clear();
+            ClientLastTakeTime.Clear();
+            _nextHostSiloRevision = 1;
         }
 
         public static void ClearLocalActorsBeforeSnapshot()
         {
+            ClientLastSlotRevision.Clear();
+            ClientTakesSent.Clear();
+            ClientLastTakeTime.Clear();
+
             SceneContext ctx = SRSingleton<SceneContext>.Instance;
             if (ctx == null || ctx.GameModel == null) return;
 
@@ -471,8 +531,227 @@ namespace SlimeCoop.World
             }
         }
 
+        public static string MakeSiloSlotKeyString(string plotId, SiloStorage.StorageType storageType, int slotIdx)
+        {
+            return (plotId ?? string.Empty) + "|" + ((byte)storageType).ToString() + "|" + slotIdx.ToString();
+        }
+
+        public static uint RecordAndGetHostSlotRevision(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int count, out bool changed)
+        {
+            if (count <= 0 || itemId == Identifiable.Id.NONE)
+            {
+                itemId = Identifiable.Id.NONE;
+                count = 0;
+            }
+
+            SiloSlotKey key = new SiloSlotKey
+            {
+                PlotId = plotId ?? string.Empty,
+                StorageType = storageType,
+                SlotIdx = slotIdx
+            };
+
+            if (HostSiloStates.TryGetValue(key, out HostSlotState state))
+            {
+                if (state.ItemId == itemId && state.Count == count)
+                {
+                    changed = false;
+                    return state.Revision;
+                }
+            }
+
+            uint nextRev = _nextHostSiloRevision++;
+            if (nextRev == 0) nextRev = _nextHostSiloRevision++;
+            HostSiloStates[key] = new HostSlotState
+            {
+                ItemId = itemId,
+                Count = count,
+                Revision = nextRev
+            };
+            changed = true;
+            return nextRev;
+        }
+
+        public static void PushHostSiloSlot(SiloStorage silo, int slotIdx, bool forceBroadcast)
+        {
+            if (!CoopSession.IsHost || silo == null) return;
+            LandPlotLocation loc = silo.GetComponentInParent<LandPlotLocation>();
+            if (loc == null || string.IsNullOrEmpty(loc.id)) return;
+
+            Ammo ammo = silo.GetRelevantAmmo();
+            if (ammo == null || slotIdx < 0 || slotIdx >= ammo.GetUsableSlotCount()) return;
+
+            int count = ammo.GetSlotCount(slotIdx);
+            Identifiable.Id itemId = count > 0 ? ammo.GetSlotName(slotIdx) : Identifiable.Id.NONE;
+            if (itemId == Identifiable.Id.NONE) count = 0;
+
+            uint rev = RecordAndGetHostSlotRevision(loc.id, silo.type, slotIdx, itemId, count, out bool changed);
+            if ((changed || forceBroadcast) && CoopSession.ConnectedPeers.Count > 0)
+            {
+                CoopSession.BroadcastHostSiloSlot(loc.id, silo.type, slotIdx, itemId, count, rev);
+            }
+        }
+
+        public static void HandleHostSiloSlotTake(CoopPeerInfo peer, string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id expectedItem)
+        {
+            if (!CoopSession.IsHost || peer == null) return;
+            string slotKeyStr = MakeSiloSlotKeyString(plotId, storageType, slotIdx);
+            peer.IncrementSiloTakesProcessed(slotKeyStr);
+
+            LandPlotLocation loc = FindPlot(plotId);
+            if (loc == null) return;
+
+            SiloStorage[] silos = loc.GetComponentsInChildren<SiloStorage>(true);
+            if (silos == null || silos.Length == 0) return;
+
+            SiloStorage target = null;
+            for (int i = 0; i < silos.Length; i++)
+            {
+                if (silos[i] != null && silos[i].type == storageType)
+                {
+                    target = silos[i];
+                    break;
+                }
+            }
+            if (target == null) return;
+
+            Ammo ammo = target.GetRelevantAmmo();
+            if (ammo == null || slotIdx < 0 || slotIdx >= ammo.GetUsableSlotCount()) return;
+
+            Identifiable.Id curId = ammo.GetSlotName(slotIdx);
+            int curCount = ammo.GetSlotCount(slotIdx);
+            if (curCount > 0 && curId != Identifiable.Id.NONE &&
+                (expectedItem == Identifiable.Id.NONE || expectedItem == curId))
+            {
+                NetSyncGuard.ApplyingRemoteDepth++;
+                NetSyncGuard.SuppressPersonalProgressDepth++;
+                try
+                {
+                    ammo.Decrement(slotIdx, 1);
+                }
+                finally
+                {
+                    NetSyncGuard.SuppressPersonalProgressDepth--;
+                    NetSyncGuard.ApplyingRemoteDepth--;
+                }
+            }
+
+            PushHostSiloSlot(target, slotIdx, true);
+        }
+
+        public static void SyncDirtyHostSilos()
+        {
+            if (!CoopSession.IsHost || CoopSession.ConnectedPeers.Count == 0) return;
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.GameModel == null) return;
+
+            foreach (KeyValuePair<string, LandPlotModel> kv in ctx.GameModel.AllLandPlots())
+            {
+                LandPlotLocation loc = FindPlot(kv.Key);
+                if (loc == null) continue;
+
+                SiloStorage[] silos = loc.GetComponentsInChildren<SiloStorage>(true);
+                if (silos == null || silos.Length == 0) continue;
+
+                for (int si = 0; si < silos.Length; si++)
+                {
+                    SiloStorage ss = silos[si];
+                    if (ss == null) continue;
+                    Ammo ammo = ss.GetRelevantAmmo();
+                    if (ammo == null) continue;
+                    int sc = ammo.GetUsableSlotCount();
+                    for (int s = 0; s < sc; s++)
+                    {
+                        PushHostSiloSlot(ss, s, false);
+                    }
+                }
+            }
+        }
+
+        public static void SendClientSiloTake(SiloStorage silo, int slotIdx, Identifiable.Id itemId)
+        {
+            if (!CoopSession.IsClient || silo == null) return;
+            LandPlotLocation loc = silo.GetComponentInParent<LandPlotLocation>();
+            if (loc == null || string.IsNullOrEmpty(loc.id)) return;
+
+            SiloSlotKey key = new SiloSlotKey
+            {
+                PlotId = loc.id,
+                StorageType = silo.type,
+                SlotIdx = slotIdx
+            };
+
+            ClientTakesSent.TryGetValue(key, out uint sent);
+            ClientTakesSent[key] = sent + 1;
+            ClientLastTakeTime[key] = Time.unscaledTime;
+
+            CoopSession.SendSiloSlotTake(loc.id, silo.type, slotIdx, itemId);
+        }
+
+        public static void ApplyHostSiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int hostCount, uint hostRevision, uint ackedTakesCount)
+        {
+            if (hostCount <= 0 || itemId == Identifiable.Id.NONE)
+            {
+                itemId = Identifiable.Id.NONE;
+                hostCount = 0;
+            }
+
+            SiloSlotKey key = new SiloSlotKey
+            {
+                PlotId = plotId ?? string.Empty,
+                StorageType = storageType,
+                SlotIdx = slotIdx
+            };
+
+            bool isSameRev = false;
+            if (ClientLastSlotRevision.TryGetValue(key, out uint lastRev))
+            {
+                if (hostRevision < lastRev)
+                {
+                    return;
+                }
+                if (hostRevision == lastRev)
+                {
+                    isSameRev = true;
+                }
+            }
+            ClientLastSlotRevision[key] = hostRevision;
+
+            ClientTakesSent.TryGetValue(key, out uint sentTakes);
+            if (ackedTakesCount > sentTakes)
+            {
+                sentTakes = ackedTakesCount;
+                ClientTakesSent[key] = sentTakes;
+            }
+            else if (sentTakes > ackedTakesCount &&
+                     ClientLastTakeTime.TryGetValue(key, out float lastTakeTime) &&
+                     Time.unscaledTime - lastTakeTime > 3.0f)
+            {
+                sentTakes = ackedTakesCount;
+                ClientTakesSent[key] = sentTakes;
+            }
+
+            int inFlight = (int)(sentTakes - ackedTakesCount);
+            if (isSameRev && inFlight > 0 && hostCount > 0)
+            {
+                return;
+            }
+
+            int finalCount = (itemId == Identifiable.Id.NONE || hostCount <= 0)
+                ? 0
+                : Math.Max(0, hostCount - inFlight);
+            Identifiable.Id finalItem = finalCount > 0 ? itemId : Identifiable.Id.NONE;
+            ApplySiloSlot(plotId, storageType, slotIdx, finalItem, finalCount);
+        }
+
         public static void ApplySiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int count)
         {
+            if (count <= 0 || itemId == Identifiable.Id.NONE)
+            {
+                itemId = Identifiable.Id.NONE;
+                count = 0;
+            }
+
             LandPlotLocation loc = FindPlot(plotId);
             if (loc == null) return;
 
@@ -496,6 +775,10 @@ namespace SlimeCoop.World
             {
                 Ammo ammo = target.GetRelevantAmmo();
                 if (ammo == null || slotIdx < 0 || slotIdx >= ammo.GetUsableSlotCount()) return;
+
+                Identifiable.Id curId = ammo.GetSlotName(slotIdx);
+                int curCount = ammo.GetSlotCount(slotIdx);
+                if (curId == itemId && curCount == count) return;
 
                 ammo.Clear(slotIdx);
                 if (itemId != Identifiable.Id.NONE && count > 0)
@@ -1133,8 +1416,13 @@ namespace SlimeCoop.World
                         w.WriteByte((byte)sc);
                         for (int s = 0; s < sc; s++)
                         {
-                            w.WriteInt((int)a.GetSlotName(s));
-                            w.WriteInt(a.GetSlotCount(s));
+                            int cnt = a.GetSlotCount(s);
+                            Identifiable.Id itemId = cnt > 0 ? a.GetSlotName(s) : Identifiable.Id.NONE;
+                            if (itemId == Identifiable.Id.NONE) cnt = 0;
+                            uint rev = RecordAndGetHostSlotRevision(kv.Key, ss.type, s, itemId, cnt, out _);
+                            w.WriteInt((int)itemId);
+                            w.WriteInt(cnt);
+                            w.WriteUInt(rev);
                         }
                     }
                 }
@@ -1279,7 +1567,8 @@ namespace SlimeCoop.World
                         {
                             Identifiable.Id itemId = (Identifiable.Id)r.ReadInt();
                             int cnt = r.ReadInt();
-                            ApplySiloSlot(plotId, storageType, s, itemId, cnt);
+                            uint rev = r.ReadUInt();
+                            ApplyHostSiloSlot(plotId, storageType, s, itemId, cnt, rev, 0);
                         }
                     }
                     break;

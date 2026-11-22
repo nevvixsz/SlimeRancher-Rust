@@ -184,31 +184,14 @@ namespace SlimeCoop.Patches
             }
         }
 
-        // --- Shared Ranch: Silo Storage ---
-        private static void SyncSiloSlot(SiloStorage silo, int slotIdx)
-        {
-            if (!CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || silo == null) return;
-            LandPlotLocation loc = silo.GetComponentInParent<LandPlotLocation>();
-            Ammo ammo = silo.GetRelevantAmmo();
-            if (loc == null || ammo == null || slotIdx < 0 || slotIdx >= ammo.GetUsableSlotCount()) return;
-
-            SyncWriter.Reset();
-            SyncWriter.WriteString(loc.id);
-            SyncWriter.WriteByte((byte)silo.type);
-            SyncWriter.WriteByte((byte)slotIdx);
-            SyncWriter.WriteInt((int)ammo.GetSlotName(slotIdx));
-            SyncWriter.WriteInt(ammo.GetSlotCount(slotIdx));
-
-            if (CoopSession.IsHost) CoopSession.BroadcastReliable(PacketType.SiloSlotSync, SyncWriter);
-            else CoopSession.SendToHostReliable(PacketType.SiloSlotSync, SyncWriter);
-        }
-
+        // --- Shared Ranch: Silo Storage (Host-Authoritative + Versioned) ---
         [HarmonyPatch(typeof(SiloStorage), nameof(SiloStorage.MaybeAddIdentifiable), new[] { typeof(Identifiable.Id), typeof(int), typeof(int), typeof(bool) })]
         internal static class SiloAddSyncPatch
         {
             private static void Postfix(SiloStorage __instance, int slotIdx, bool __result)
             {
-                if (__result) SyncSiloSlot(__instance, slotIdx);
+                if (!__result || !CoopSession.IsHost || NetSyncGuard.IsApplyingRemote || __instance == null) return;
+                CoopWorldSync.PushHostSiloSlot(__instance, slotIdx, false);
             }
         }
 
@@ -217,26 +200,47 @@ namespace SlimeCoop.Patches
         {
             private static void Postfix(SiloStorage __instance, bool __result)
             {
-                if (!__result || !CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || __instance == null) return;
+                if (!__result || !CoopSession.IsHost || NetSyncGuard.IsApplyingRemote || __instance == null) return;
                 Ammo ammo = __instance.GetRelevantAmmo();
                 if (ammo == null) return;
                 int count = ammo.GetUsableSlotCount();
                 for (int i = 0; i < count; i++)
                 {
-                    SyncSiloSlot(__instance, i);
+                    CoopWorldSync.PushHostSiloSlot(__instance, i, false);
                 }
+            }
+        }
+
+        [HarmonyPatch(typeof(SiloCatcher), "Insert")]
+        internal static class SiloCatcherInsertClientBlockPatch
+        {
+            private static bool Prefix(SiloCatcher __instance, ref bool __result)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote && __instance != null && __instance.type == SiloCatcher.Type.SILO_DEFAULT)
+                {
+                    __result = false;
+                    return false;
+                }
+                return true;
             }
         }
 
         [HarmonyPatch(typeof(SiloCatcher), "Remove")]
         internal static class SiloRemoveSyncPatch
         {
-            private static void Postfix(SiloCatcher __instance, SiloStorage ___storageSilo, bool __result)
+            private static void Postfix(SiloCatcher __instance, SiloStorage ___storageSilo, Identifiable.Id id, bool __result)
             {
                 if (!__result || !CoopSession.IsActive || NetSyncGuard.IsApplyingRemote || __instance == null || ___storageSilo == null) return;
                 if (__instance.type == SiloCatcher.Type.SILO_DEFAULT || __instance.type == SiloCatcher.Type.SILO_OUTPUT_ONLY)
                 {
-                    SyncSiloSlot(___storageSilo, __instance.slotIdx);
+                    if (CoopSession.IsHost)
+                    {
+                        CoopWorldSync.PushHostSiloSlot(___storageSilo, __instance.slotIdx, false);
+                    }
+                    else if (CoopSession.IsClient)
+                    {
+                        CoopWorldSync.SendClientSiloTake(___storageSilo, __instance.slotIdx, id);
+                    }
                 }
             }
         }
@@ -291,7 +295,7 @@ namespace SlimeCoop.Patches
             {
                 if (CoopSession.IsHost && !NetSyncGuard.IsApplyingRemote && ___storage != null)
                 {
-                    SyncSiloSlot(___storage, 0);
+                    CoopWorldSync.PushHostSiloSlot(___storage, 0, false);
                 }
             }
         }

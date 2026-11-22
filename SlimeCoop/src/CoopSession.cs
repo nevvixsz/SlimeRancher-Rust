@@ -26,6 +26,20 @@ namespace SlimeCoop
         public ZoneDirector.Zone CurrentZone = ZoneDirector.Zone.RANCH;
         public long LastHeardTicks;
         public bool Authenticated;
+        private readonly Dictionary<string, uint> _siloTakesProcessed = new Dictionary<string, uint>(16);
+
+        public void IncrementSiloTakesProcessed(string slotKey)
+        {
+            if (string.IsNullOrEmpty(slotKey)) return;
+            _siloTakesProcessed.TryGetValue(slotKey, out uint cur);
+            _siloTakesProcessed[slotKey] = cur + 1;
+        }
+
+        public uint GetSiloTakesProcessed(string slotKey)
+        {
+            if (string.IsNullOrEmpty(slotKey)) return 0;
+            return _siloTakesProcessed.TryGetValue(slotKey, out uint cur) ? cur : 0;
+        }
     }
 
     internal sealed class CoopChatEntry
@@ -79,6 +93,7 @@ namespace SlimeCoop
         private static float _nextTransformSendTime;
         private static float _nextActorBatchTime;
         private static float _nextTimeSyncTime;
+        private static float _nextSiloSyncTime;
         private static float _nextKeepAliveTime;
         private static float _nextProfileAutoSaveTime;
         private static bool _clientProfileLoaded;
@@ -450,6 +465,37 @@ namespace SlimeCoop
             }
         }
 
+        public static void BroadcastHostSiloSlot(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id itemId, int count, uint revision)
+        {
+            if (!IsHost || ConnectedPeers.Count == 0) return;
+            string slotKey = CoopWorldSync.MakeSiloSlotKeyString(plotId, storageType, slotIdx);
+            for (int i = 0; i < ConnectedPeers.Count; i++)
+            {
+                CoopPeerInfo p = ConnectedPeers[i];
+                if (p == null || !p.Authenticated || p.EndPoint == null) continue;
+                SharedWriter.Reset();
+                SharedWriter.WriteString(plotId);
+                SharedWriter.WriteByte((byte)storageType);
+                SharedWriter.WriteByte((byte)slotIdx);
+                SharedWriter.WriteInt((int)itemId);
+                SharedWriter.WriteInt(count);
+                SharedWriter.WriteUInt(revision);
+                SharedWriter.WriteUInt(p.GetSiloTakesProcessed(slotKey));
+                Transport.SendReliable(p.EndPoint, PacketType.SiloSlotSync, SharedWriter);
+            }
+        }
+
+        public static void SendSiloSlotTake(string plotId, SiloStorage.StorageType storageType, int slotIdx, Identifiable.Id expectedItem)
+        {
+            if (!IsClient) return;
+            SharedWriter.Reset();
+            SharedWriter.WriteString(plotId);
+            SharedWriter.WriteByte((byte)storageType);
+            SharedWriter.WriteByte((byte)slotIdx);
+            SharedWriter.WriteInt((int)expectedItem);
+            SendToHostReliable(PacketType.SiloSlotTake, SharedWriter);
+        }
+
         public static void TickPerFrame()
         {
             if (BlockLocalSaveUntilMenu && !IsActive && !IsInGameSession())
@@ -518,6 +564,13 @@ namespace SlimeCoop
                     }
                     SharedWriter.WriteByte(w);
                     BroadcastUnreliable(PacketType.TimeWeatherSync, SharedWriter, null);
+                }
+
+                // Reconcile any changed host silo/collector/feeder slots every 0.4s
+                if (ctx != null && ConnectedPeers.Count > 0 && now >= _nextSiloSyncTime)
+                {
+                    _nextSiloSyncTime = now + 0.4f;
+                    CoopWorldSync.SyncDirtyHostSilos();
                 }
 
                 // Timeout dead peers (12s)
@@ -909,20 +962,16 @@ namespace SlimeCoop
                     break;
 
                 case PacketType.SiloSlotSync:
+                    // Host is authoritative for silo/collector/feeder contents; ignore raw client overwrites.
+                    break;
+
+                case PacketType.SiloSlotTake:
                     if (peer == null) return;
-                    string sPlotId = r.ReadString();
-                    SiloStorage.StorageType sType = (SiloStorage.StorageType)r.ReadByte();
-                    byte sSlot = r.ReadByte();
-                    Identifiable.Id sItem = (Identifiable.Id)r.ReadInt();
-                    int sCount = r.ReadInt();
-                    CoopWorldSync.ApplySiloSlot(sPlotId, sType, sSlot, sItem, sCount);
-                    SharedWriter.Reset();
-                    SharedWriter.WriteString(sPlotId);
-                    SharedWriter.WriteByte((byte)sType);
-                    SharedWriter.WriteByte(sSlot);
-                    SharedWriter.WriteInt((int)sItem);
-                    SharedWriter.WriteInt(sCount);
-                    BroadcastReliable(PacketType.SiloSlotSync, SharedWriter, sender);
+                    string tPlotId = r.ReadString();
+                    SiloStorage.StorageType tType = (SiloStorage.StorageType)r.ReadByte();
+                    byte tSlot = r.ReadByte();
+                    Identifiable.Id tItem = (Identifiable.Id)r.ReadInt();
+                    CoopWorldSync.HandleHostSiloSlotTake(peer, tPlotId, tType, tSlot, tItem);
                     break;
 
                 case PacketType.PlotCollectorActivate:
@@ -1312,8 +1361,17 @@ namespace SlimeCoop
                     break;
 
                 case PacketType.SiloSlotSync:
-                    CoopWorldSync.ApplySiloSlot(r.ReadString(), (SiloStorage.StorageType)r.ReadByte(), r.ReadByte(), (Identifiable.Id)r.ReadInt(), r.ReadInt());
+                {
+                    string sPlotId = r.ReadString();
+                    SiloStorage.StorageType sType = (SiloStorage.StorageType)r.ReadByte();
+                    byte sSlot = r.ReadByte();
+                    Identifiable.Id sItem = (Identifiable.Id)r.ReadInt();
+                    int sCount = r.ReadInt();
+                    uint sRev = r.ReadUInt();
+                    uint ackTakes = r.ReadUInt();
+                    CoopWorldSync.ApplyHostSiloSlot(sPlotId, sType, sSlot, sItem, sCount, sRev, ackTakes);
                     break;
+                }
 
                 case PacketType.ExchangeStateSync:
                     CoopWorldSync.ApplyExchangeState(ref r);
