@@ -24,6 +24,8 @@ namespace SlimeCoop
         public string Name;
         public int ColorIndex;
         public ZoneDirector.Zone CurrentZone = ZoneDirector.Zone.RANCH;
+        public bool HasPosition;
+        public Vector3 LastPosition;
         public long LastHeardTicks;
         public bool Authenticated;
         private readonly Dictionary<SiloSlotKey, uint> _siloTakesProcessed = new Dictionary<SiloSlotKey, uint>(16);
@@ -645,12 +647,20 @@ namespace SlimeCoop
                 // Stream queued snapshots smoothly without freezing the host frame
                 CoopWorldSync.PumpSnapshotSends(Transport, 6);
 
-                // Broadcast active world actors at 20 Hz
+                // Broadcast active world actors at 20 Hz around host and all connected peers
                 if (ctx != null && ctx.Player != null && ConnectedPeers.Count > 0 && now >= _nextActorBatchTime)
                 {
                     _nextActorBatchTime = now + 0.05f;
+                    CoopWorldSync.SyncObserverPositions.Clear();
+                    for (int i = 0; i < ConnectedPeers.Count; i++)
+                    {
+                        if (ConnectedPeers[i].HasPosition)
+                        {
+                            CoopWorldSync.SyncObserverPositions.Add(ConnectedPeers[i].LastPosition);
+                        }
+                    }
                     Transform hostTr = _cachedPlayerTransform != null ? _cachedPlayerTransform : ctx.Player.transform;
-                    CoopWorldSync.WriteActiveActorBatch(SharedWriter, hostTr.position, 24);
+                    CoopWorldSync.WriteActiveActorBatch(SharedWriter, hostTr.position, 32);
                     if (SharedWriter.Length > 2)
                     {
                         BroadcastUnreliable(PacketType.ActorBatchUpdate, SharedWriter, null);
@@ -717,6 +727,11 @@ namespace SlimeCoop
                         }
                     }
                     AddChat("Система", "Вы в мире хоста! Общее ранчо синхронизировано.", true);
+                }
+
+                if (_clientSnapshotDone && !WaitingWorldLoad)
+                {
+                    CoopWorldSync.PumpMissingActorRequests(w => SendToHostReliable(PacketType.ActorSpawnRequest, w));
                 }
 
                 if (!_clientHandshakeDone && _serverEp != null)
@@ -1028,6 +1043,8 @@ namespace SlimeCoop
                     bool vac = r.ReadBool();
                     ZoneDirector.Zone z = (ZoneDirector.Zone)r.ReadByte();
                     peer.CurrentZone = z;
+                    peer.HasPosition = true;
+                    peer.LastPosition = pos;
 
                     RemotePlayerManager.UpdateTransform(peer.PlayerId, peer.Name, pColor, pos, yaw, pitch, jet, vac);
 
@@ -1283,6 +1300,44 @@ namespace SlimeCoop
                     RegionRegistry.RegionSetId expSet = (RegionRegistry.RegionSetId)r.ReadByte();
                     SpawnExpelledFromClient(expId, expPos, expVel, expSet);
                     break;
+
+                case PacketType.ActorSpawnRequest:
+                    if (peer == null) return;
+                    byte reqCount = r.ReadByte();
+                    for (int i = 0; i < reqCount; i++)
+                    {
+                        long reqId = r.ReadLong();
+                        if (CoopWorldSync.TryWriteActorSpawnById(SharedWriter, reqId))
+                        {
+                            Transport.SendReliable(sender, PacketType.ActorSpawn, SharedWriter);
+                        }
+                        else
+                        {
+                            SharedWriter.Reset();
+                            SharedWriter.WriteLong(reqId);
+                            Transport.SendReliable(sender, PacketType.ActorDestroy, SharedWriter);
+                        }
+                    }
+                    break;
+
+                case PacketType.ClientThrowHeld:
+                    if (peer == null) return;
+                    long heldActorId = r.ReadLong();
+                    Vector3 heldPos = r.ReadVector3();
+                    Vector3 heldVel = r.ReadVector3();
+                    if (CoopWorldSync.TryGetActorObject(heldActorId, out GameObject heldGo) && heldGo != null)
+                    {
+                        heldGo.transform.position = heldPos;
+                        Rigidbody heldRb = heldGo.GetComponent<Rigidbody>();
+                        if (heldRb != null)
+                        {
+                            heldRb.velocity = heldVel;
+                            heldRb.WakeUp();
+                        }
+                        Vacuumable heldVac = heldGo.GetComponent<Vacuumable>();
+                        if (heldVac != null) heldVac.Launch(Vacuumable.LaunchSource.PLAYER);
+                    }
+                    break;
             }
         }
 
@@ -1311,6 +1366,8 @@ namespace SlimeCoop
                 {
                     Rigidbody rb = go.GetComponent<Rigidbody>();
                     if (rb != null) rb.velocity = vel;
+                    Vacuumable vac = go.GetComponent<Vacuumable>();
+                    if (vac != null) vac.Launch(Vacuumable.LaunchSource.PLAYER);
                 }
             }
             finally

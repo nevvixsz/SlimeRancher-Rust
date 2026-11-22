@@ -128,6 +128,103 @@ namespace SlimeCoop.Patches
             }
         }
 
+        // --- Host-authoritative Slime Eating, Tarr Transformation & Actor Lifetime on Clients ---
+        [HarmonyPatch(typeof(SlimeEat), nameof(SlimeEat.MaybeChomp))]
+        internal static class ClientDisableSlimeChompPatch
+        {
+            private static bool Prefix(ref bool __result)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    __result = false;
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(SlimeEat), nameof(SlimeEat.MaybeSpinAndChomp))]
+        internal static class ClientDisableSlimeSpinChompPatch
+        {
+            private static bool Prefix(ref bool __result)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    __result = false;
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(DestroyAfterTime), nameof(DestroyAfterTime.RegistryUpdate))]
+        internal static class ClientDisableDestroyAfterTimePatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(DestroyPlortAfterTime), nameof(DestroyPlortAfterTime.RegistryUpdate))]
+        internal static class ClientDisableDestroyPlortAfterTimePatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(DestroyOutsideHoursOfDay), nameof(DestroyOutsideHoursOfDay.Update))]
+        internal static class ClientDisableDestroyOutsideHoursPatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(MaybeCullOnReenable), "DoCullCheck")]
+        internal static class ClientDisableCullOnReenablePatch
+        {
+            private static bool Prefix()
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote)
+                {
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(Destroyer), nameof(Destroyer.DestroyActor), new[] { typeof(GameObject), typeof(string), typeof(bool) })]
+        internal static class ClientProtectNetActorDestroyPatch
+        {
+            private static bool Prefix(GameObject actorObj, string source)
+            {
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote &&
+                    source != "Vacuumable.consume" &&
+                    actorObj != null &&
+                    CoopWorldSync.TryGetActorId(actorObj, out long aid) && aid > 0)
+                {
+                    return false;
+                }
+                return true;
+            }
+        }
+
         // --- Shared Ranch: Plot Build / Replace ---
         [HarmonyPatch(typeof(LandPlotLocation), nameof(LandPlotLocation.Replace))]
         internal static class PlotReplaceSyncPatch
@@ -1038,6 +1135,40 @@ namespace SlimeCoop.Patches
                     {
                         NetSyncGuard.ApplyingRemoteDepth--;
                     }
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(WeaponVacuum), "ExpelHeld")]
+        internal static class ClientVacExpelHeldPatch
+        {
+            private static readonly AccessTools.FieldRef<WeaponVacuum, GameObject> VacHeldRef =
+                AccessTools.FieldRefAccess<WeaponVacuum, GameObject>("held");
+
+            private static void Prefix(WeaponVacuum __instance, out GameObject __state)
+            {
+                __state = null;
+                if (CoopSession.IsClient && !NetSyncGuard.IsApplyingRemote && __instance != null)
+                {
+                    __state = VacHeldRef(__instance);
+                }
+            }
+
+            private static void Postfix(WeaponVacuum __instance, GameObject __state)
+            {
+                if (__state == null || !CoopSession.IsClient || NetSyncGuard.IsApplyingRemote || __instance == null)
+                {
+                    return;
+                }
+                if (VacHeldRef(__instance) == null && CoopWorldSync.TryGetActorId(__state, out long actorId) && actorId > 0)
+                {
+                    Rigidbody rb = __state.GetComponent<Rigidbody>();
+                    Vector3 vel = rb != null ? rb.velocity : Vector3.zero;
+                    SyncWriter.Reset();
+                    SyncWriter.WriteLong(actorId);
+                    SyncWriter.WriteVector3(__state.transform.position);
+                    SyncWriter.WriteVector3(vel);
+                    CoopSession.SendToHostReliable(PacketType.ClientThrowHeld, SyncWriter);
                 }
             }
         }

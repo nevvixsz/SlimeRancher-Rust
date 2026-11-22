@@ -253,6 +253,12 @@ namespace SlimeCoop.World
         private static readonly List<ActiveSyncItem> PendingHostSyncActors = new List<ActiveSyncItem>(128);
         private static int _actorBatchCursor;
 
+        private static readonly Queue<long> MissingActorQueue = new Queue<long>(64);
+        private static readonly HashSet<long> MissingActorQueuedSet = new HashSet<long>();
+        private static readonly Dictionary<long, float> MissingActorCooldowns = new Dictionary<long, float>(64);
+        private static float _nextMissingActorAskTime;
+        public static readonly List<Vector3> SyncObserverPositions = new List<Vector3>(8);
+
         public static void ClearCaches()
         {
             NetActors.Clear();
@@ -272,6 +278,11 @@ namespace SlimeCoop.World
             PendingHostSyncActors.Clear();
             ActiveSnapshotJobs.Clear();
             ClientSnapshotApplyQueue.Clear();
+            MissingActorQueue.Clear();
+            MissingActorQueuedSet.Clear();
+            MissingActorCooldowns.Clear();
+            _nextMissingActorAskTime = 0f;
+            SyncObserverPositions.Clear();
             _pendingSnapshotEnd = false;
             _pendingHostSpawn = false;
             _actorBatchCursor = 0;
@@ -287,6 +298,10 @@ namespace SlimeCoop.World
             PendingGadgetStates.Clear();
             PendingSnareStates.Clear();
             ClientSnapshotApplyQueue.Clear();
+            MissingActorQueue.Clear();
+            MissingActorQueuedSet.Clear();
+            MissingActorCooldowns.Clear();
+            _nextMissingActorAskTime = 0f;
             _pendingSnapshotEnd = false;
             _pendingHostSpawn = false;
 
@@ -1953,11 +1968,19 @@ namespace SlimeCoop.World
             GameContext gctx = SRSingleton<GameContext>.Instance;
             if (ctx == null || gctx == null || ctx.GameModel == null || gctx.LookupDirector == null) return;
 
+            MissingActorCooldowns.Remove(actorId);
+            MissingActorQueuedSet.Remove(actorId);
+
             if (TryGetActorObject(actorId, out GameObject existing) && existing != null)
             {
                 existing.transform.SetPositionAndRotation(pos, rot);
                 Rigidbody rbEx = existing.GetComponent<Rigidbody>();
                 if (rbEx != null) rbEx.velocity = vel;
+                if (vel.sqrMagnitude > 9f)
+                {
+                    Vacuumable vacEx = existing.GetComponent<Vacuumable>();
+                    if (vacEx != null && !vacEx.isLaunched()) vacEx.Launch(Vacuumable.LaunchSource.OTHER);
+                }
                 return;
             }
 
@@ -1981,6 +2004,11 @@ namespace SlimeCoop.World
                     if (rb != null)
                     {
                         rb.velocity = vel;
+                    }
+                    if (vel.sqrMagnitude > 9f)
+                    {
+                        Vacuumable vac = go.GetComponent<Vacuumable>();
+                        if (vac != null) vac.Launch(Vacuumable.LaunchSource.OTHER);
                     }
                 }
             }
@@ -2045,7 +2073,48 @@ namespace SlimeCoop.World
                         entry.Rb.velocity = vel;
                     }
                 }
+                else if (actorId > 0 && ClientSnapshotApplyQueue.Count == 0 && !_pendingSnapshotEnd)
+                {
+                    QueueMissingActor(actorId);
+                }
             }
+        }
+
+        private static void QueueMissingActor(long actorId)
+        {
+            if (actorId <= 0 || MissingActorQueuedSet.Contains(actorId)) return;
+            float now = Time.unscaledTime;
+            if (MissingActorCooldowns.TryGetValue(actorId, out float nextAsk) && now < nextAsk)
+            {
+                return;
+            }
+            if (MissingActorQueue.Count >= 64) return;
+            MissingActorQueuedSet.Add(actorId);
+            MissingActorQueue.Enqueue(actorId);
+        }
+
+        public static void PumpMissingActorRequests(Action<PacketWriter> sendReliableToHost)
+        {
+            if (!CoopSession.IsClient || sendReliableToHost == null) return;
+            if (ClientSnapshotApplyQueue.Count > 0 || _pendingSnapshotEnd) return;
+            if (MissingActorQueue.Count == 0) return;
+
+            float now = Time.unscaledTime;
+            if (now < _nextMissingActorAskTime) return;
+            _nextMissingActorAskTime = now + 0.25f;
+
+            PacketWriter w = ClientTakeGrantWriter;
+            w.Reset();
+            int max = Math.Min(16, MissingActorQueue.Count);
+            w.WriteByte((byte)max);
+            for (int i = 0; i < max; i++)
+            {
+                long id = MissingActorQueue.Dequeue();
+                MissingActorQueuedSet.Remove(id);
+                MissingActorCooldowns[id] = now + 2.0f;
+                w.WriteLong(id);
+            }
+            sendReliableToHost(w);
         }
 
         public static void CancelSnapshotForPeer(IPEndPoint ep)
@@ -2393,7 +2462,7 @@ namespace SlimeCoop.World
             }
             CoopLog.Info("Snapshot built: gordos=" + totalGordos + " (nonZero=" + nonZeroGordos + "), gadgets=" + totalGadgets + " (snares=" + totalSnares + ")");
 
-            // 8. Nearby Actors (sorted by distance to host, packed in batches of 8 to avoid network stalls)
+            // 8. Nearby Actors (sorted by distance to host with priority for slimes/tarrs, packed in batches of 8)
             Vector3 hostPos = ctx.Player != null ? ctx.Player.transform.position : Vector3.zero;
             SnapshotActorsScratch.Clear();
             foreach (KeyValuePair<long, ActorModel> kv in ctx.GameModel.AllActors())
@@ -2403,12 +2472,13 @@ namespace SlimeCoop.World
                 Transform tr = ActorTransformRef(am);
                 if (tr == null) continue;
                 float sqr = (tr.position - hostPos).sqrMagnitude;
-                if (sqr > 150f * 150f) continue;
-                SnapshotActorsScratch.Add(new KeyValuePair<float, KeyValuePair<long, ActorModel>>(sqr, kv));
+                if (sqr > 280f * 280f) continue;
+                float sortScore = (Identifiable.IsSlime(am.ident) || Identifiable.IsTarr(am.ident)) ? sqr : (sqr + 4000f);
+                SnapshotActorsScratch.Add(new KeyValuePair<float, KeyValuePair<long, ActorModel>>(sortScore, kv));
             }
 
             SnapshotActorsScratch.Sort((a, b) => a.Key.CompareTo(b.Key));
-            int limit = Math.Min(350, SnapshotActorsScratch.Count);
+            int limit = Math.Min(900, SnapshotActorsScratch.Count);
             const int batchSize = 8;
             for (int start = 0; start < limit; start += batchSize)
             {
@@ -2554,6 +2624,31 @@ namespace SlimeCoop.World
             }
         }
 
+        public static bool TryWriteActorSpawnById(PacketWriter w, long actorId)
+        {
+            SceneContext ctx = SRSingleton<SceneContext>.Instance;
+            if (ctx == null || ctx.GameModel == null || actorId <= 0) return false;
+
+            if (!ctx.GameModel.AllActors().TryGetValue(actorId, out ActorModel am) || am == null ||
+                am.ident == Identifiable.Id.NONE || am.ident == Identifiable.Id.PLAYER)
+            {
+                return false;
+            }
+
+            Transform tr = ActorTransformRef(am);
+            if (tr == null) return false;
+
+            Rigidbody rb = tr.GetComponent<Rigidbody>();
+            w.Reset();
+            w.WriteLong(actorId);
+            w.WriteInt((int)am.ident);
+            w.WriteVector3(tr.position);
+            w.WriteQuaternion(tr.rotation);
+            w.WriteVector3(rb != null ? rb.velocity : Vector3.zero);
+            w.WriteByte((byte)am.currRegionSetId);
+            return true;
+        }
+
         public static void WriteActiveActorBatch(PacketWriter w, Vector3 refPos, int maxActors)
         {
             w.Reset();
@@ -2566,11 +2661,27 @@ namespace SlimeCoop.World
                 return;
             }
 
+            const float rangeSqr = 85f * 85f;
+            int observerCount = SyncObserverPositions.Count;
             foreach (KeyValuePair<long, CachedNetActor> kv in NetActors)
             {
                 CachedNetActor actor = kv.Value;
                 if (actor.Go == null || !actor.Go.activeInHierarchy) continue;
-                if ((actor.Tr.position - refPos).sqrMagnitude > 85f * 85f) continue;
+
+                Vector3 actorPos = actor.Tr.position;
+                bool nearAnyObserver = (actorPos - refPos).sqrMagnitude <= rangeSqr;
+                if (!nearAnyObserver && observerCount > 0)
+                {
+                    for (int o = 0; o < observerCount; o++)
+                    {
+                        if ((actorPos - SyncObserverPositions[o]).sqrMagnitude <= rangeSqr)
+                        {
+                            nearAnyObserver = true;
+                            break;
+                        }
+                    }
+                }
+                if (!nearAnyObserver) continue;
 
                 if (actor.Rb != null && actor.Rb.IsSleeping() && actor.Rb.velocity.sqrMagnitude < 0.01f) continue;
 
